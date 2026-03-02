@@ -1,0 +1,76 @@
+package cli
+
+import (
+	"fmt"
+
+	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/session"
+	"github.com/spf13/cobra"
+)
+
+var openCmd = &cobra.Command{
+	Use:   "open <name>",
+	Short: "Focus or recreate a session",
+	Long:  "Focus a running session or recreate a stopped one.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runOpen,
+}
+
+func init() {
+	rootCmd.AddCommand(openCmd)
+}
+
+func runOpen(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	store, err := session.NewStore()
+	if err != nil {
+		return err
+	}
+
+	sess, err := store.Load(name)
+	if err != nil {
+		return fmt.Errorf("session %q not found", name)
+	}
+
+	// If the tab is still alive, just focus it
+	if kitty.TabExists(sess.KittyTabID) {
+		if err := kitty.FocusTab(sess.KittyTabID); err != nil {
+			return fmt.Errorf("cannot focus tab: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "session %q focused\n", name)
+		return nil
+	}
+
+	// Tab is gone — recreate the session
+	windowID, err := kitty.LaunchTab(sess.Dir, "--", "claude")
+	if err != nil {
+		return fmt.Errorf("cannot create tab: %w", err)
+	}
+
+	if err := kitty.SetTabTitle(name); err != nil {
+		return fmt.Errorf("cannot set tab title: %w", err)
+	}
+
+	tabID, err := kitty.FindTabForWindow(windowID)
+	if err != nil {
+		return fmt.Errorf("cannot find tab: %w", err)
+	}
+
+	if err := kitty.LaunchSplit(sess.Dir); err != nil {
+		return fmt.Errorf("cannot create split: %w", err)
+	}
+
+	if err := kitty.FocusWindow(windowID); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
+	}
+
+	// Update session with new tab ID
+	sess.KittyTabID = tabID
+	if err := store.Save(sess); err != nil {
+		return fmt.Errorf("cannot save session: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "session %q recreated in %s\n", name, sess.Dir)
+	return nil
+}
