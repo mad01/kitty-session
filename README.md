@@ -2,6 +2,34 @@
 
 Kitty Claude Session Manager — manage named kitty terminal sessions with Claude on top and a shell on bottom.
 
+## Screenshots
+
+### Session list
+
+The main view lists all sessions with their status and working directory.
+
+![Session list](images/default.jpg)
+
+### Create a new session
+
+Press `n` to open the repository picker. Browse all configured repos or type to fuzzy-filter.
+
+![Repository picker](images/repos.jpg)
+
+![Filtering repos](images/repos-filter.jpg)
+
+### Open a session
+
+Select a session and press `o` to open it. Each session is a kitty tab split with Claude Code on top and a shell on bottom.
+
+![Running session](images/session.jpg)
+
+### Help
+
+Press `?` to see all available keybindings.
+
+![Help overlay](images/help.jpg)
+
 ## Install
 
 ```bash
