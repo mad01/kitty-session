@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -41,29 +42,64 @@ func settingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// hookEntry represents a single hook command in the Claude settings.
-type hookEntry struct {
-	Matcher string `json:"matcher"`
+// hookHandler represents a single hook command in the new Claude settings format.
+type hookHandler struct {
+	Type    string `json:"type"`
 	Command string `json:"command"`
 }
 
-// ksHookEntries returns the hook entries that ks manages.
-func ksHookEntries(binary string) map[string][]hookEntry {
-	cmd := binary + " _hook"
-	return map[string][]hookEntry{
-		"PreToolUse": {
-			{Matcher: "*", Command: cmd},
-		},
-		"Stop": {
-			{Matcher: "", Command: cmd},
-		},
-		"Notification": {
-			{Matcher: "", Command: cmd},
-		},
-		"SessionStart": {
-			{Matcher: "", Command: cmd},
-		},
+// matcherGroup represents a matcher + hooks pair in the new format.
+type matcherGroup struct {
+	Matcher string        `json:"matcher"`
+	Hooks   []hookHandler `json:"hooks"`
+}
+
+// shortenHome replaces the $HOME prefix with ~ for portability across systems.
+func shortenHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
 	}
+	if strings.HasPrefix(path, home) {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
+// ksMatcherGroups returns the matcher groups that ks manages, keyed by event.
+func ksMatcherGroups(binary string) map[string]matcherGroup {
+	cmd := shortenHome(binary) + " _hook"
+	handler := []hookHandler{{Type: "command", Command: cmd}}
+	return map[string]matcherGroup{
+		"PreToolUse":   {Matcher: ".*", Hooks: handler},
+		"Stop":         {Matcher: "", Hooks: handler},
+		"Notification": {Matcher: "permission_prompt|elicitation_dialog", Hooks: handler},
+		"SessionStart": {Matcher: "", Hooks: handler},
+	}
+}
+
+
+// ksHookCommands returns both the portable (~/) and absolute forms of the hook command
+// so we can clean up entries written by either version.
+func ksHookCommands(binary string) []string {
+	short := shortenHome(binary) + " _hook"
+	abs := binary + " _hook"
+	if short == abs {
+		return []string{short}
+	}
+	return []string{short, abs}
+}
+
+// isKsGroupAny checks if a matcher group contains any of the given hook commands.
+func isKsGroupAny(mg matcherGroup, cmds []string) bool {
+	for _, h := range mg.Hooks {
+		for _, c := range cmds {
+			if h.Command == c {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runHooksInstall(cmd *cobra.Command, args []string) error {
@@ -83,8 +119,18 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	hooks := getOrCreateHooksMap(settings)
-	for event, entries := range ksHookEntries(binary) {
-		hooks[event] = mergeHookEntries(hooks[event], entries, binary)
+	cmds := ksHookCommands(binary)
+
+	for event, mg := range ksMatcherGroups(binary) {
+		existing := hooks[event]
+		// Remove any existing ks groups for this event (old or new path format)
+		var kept []matcherGroup
+		for _, g := range existing {
+			if !isKsGroupAny(g, cmds) {
+				kept = append(kept, g)
+			}
+		}
+		hooks[event] = append(kept, mg)
 	}
 	settings["hooks"] = hooks
 
@@ -113,13 +159,13 @@ func runHooksUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	hooks := getOrCreateHooksMap(settings)
-	hookCmd := binary + " _hook"
+	cmds := ksHookCommands(binary)
 
-	for event, existing := range hooks {
-		var kept []hookEntry
-		for _, e := range existing {
-			if e.Command != hookCmd {
-				kept = append(kept, e)
+	for event, groups := range hooks {
+		var kept []matcherGroup
+		for _, g := range groups {
+			if !isKsGroupAny(g, cmds) {
+				kept = append(kept, g)
 			}
 		}
 		if len(kept) > 0 {
@@ -173,15 +219,14 @@ func writeSettings(path string, settings map[string]any) error {
 }
 
 // getOrCreateHooksMap extracts or creates the "hooks" map from settings.
-func getOrCreateHooksMap(settings map[string]any) map[string][]hookEntry {
-	hooks := make(map[string][]hookEntry)
+func getOrCreateHooksMap(settings map[string]any) map[string][]matcherGroup {
+	hooks := make(map[string][]matcherGroup)
 
 	raw, ok := settings["hooks"]
 	if !ok {
 		return hooks
 	}
 
-	// settings["hooks"] is map[string]any from JSON unmarshal
 	rawMap, ok := raw.(map[string]any)
 	if !ok {
 		return hooks
@@ -197,31 +242,29 @@ func getOrCreateHooksMap(settings map[string]any) map[string][]hookEntry {
 			if !ok {
 				continue
 			}
-			e := hookEntry{}
+			mg := matcherGroup{}
 			if m, ok := obj["matcher"].(string); ok {
-				e.Matcher = m
+				mg.Matcher = m
 			}
-			if c, ok := obj["command"].(string); ok {
-				e.Command = c
+			if hooksArr, ok := obj["hooks"].([]any); ok {
+				for _, h := range hooksArr {
+					hObj, ok := h.(map[string]any)
+					if !ok {
+						continue
+					}
+					hh := hookHandler{}
+					if t, ok := hObj["type"].(string); ok {
+						hh.Type = t
+					}
+					if c, ok := hObj["command"].(string); ok {
+						hh.Command = c
+					}
+					mg.Hooks = append(mg.Hooks, hh)
+				}
 			}
-			hooks[event] = append(hooks[event], e)
+			hooks[event] = append(hooks[event], mg)
 		}
 	}
 
 	return hooks
-}
-
-// mergeHookEntries adds new entries to existing, replacing any with the same command prefix.
-func mergeHookEntries(existing, new []hookEntry, binary string) []hookEntry {
-	hookCmd := binary + " _hook"
-
-	// Remove existing ks entries
-	var kept []hookEntry
-	for _, e := range existing {
-		if e.Command != hookCmd {
-			kept = append(kept, e)
-		}
-	}
-
-	return append(kept, new...)
 }
