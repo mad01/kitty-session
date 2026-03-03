@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/spf13/cobra"
@@ -36,11 +37,29 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, sess := range sessions {
-		status := "stopped"
-		if kitty.TabExists(sess.KittyTabID) {
-			status = "running"
+		var state claude.State
+		if !kitty.TabExists(sess.KittyTabID) {
+			state = claude.StateStopped
+		} else {
+			winID := sess.KittyWindowID
+			if winID == 0 {
+				id, err := kitty.FirstWindowInTab(sess.KittyTabID)
+				if err == nil {
+					winID = id
+				}
+			}
+			if winID != 0 {
+				text, err := kitty.GetText(winID)
+				if err == nil {
+					state = claude.DetectState(text)
+				} else {
+					state = claude.StateWorking
+				}
+			} else {
+				state = claude.StateWorking
+			}
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, status, sess.Dir)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, state, sess.Dir)
 	}
 	return nil
 }

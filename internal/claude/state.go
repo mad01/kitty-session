@@ -1,0 +1,76 @@
+package claude
+
+import (
+	"strings"
+)
+
+// State represents the current state of a Claude Code session.
+type State int
+
+const (
+	StateUnknown    State = iota
+	StateStopped          // tab no longer exists
+	StateWorking          // Claude is actively processing
+	StateNeedsInput       // Claude needs user input (permission, question)
+	StateIdle             // at prompt, ready for new task
+)
+
+// String returns a human-readable label for the state.
+func (s State) String() string {
+	switch s {
+	case StateStopped:
+		return "stopped"
+	case StateWorking:
+		return "working"
+	case StateNeedsInput:
+		return "input"
+	case StateIdle:
+		return "idle"
+	default:
+		return "unknown"
+	}
+}
+
+// DetectState scans terminal text and determines what Claude Code is doing.
+// It looks at the last ~50 non-empty lines from the bottom up.
+func DetectState(text string) State {
+	lines := strings.Split(text, "\n")
+
+	// Collect last 50 non-empty lines (bottom-up)
+	var tail []string
+	for i := len(lines) - 1; i >= 0 && len(tail) < 50; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" {
+			tail = append(tail, trimmed)
+		}
+	}
+
+	if len(tail) == 0 {
+		return StateWorking
+	}
+
+	// Check bottom-up for signals
+	for _, line := range tail {
+		lower := strings.ToLower(line)
+
+		// NeedsInput: permission prompts, y/n questions
+		if strings.Contains(lower, "(y/n)") {
+			return StateNeedsInput
+		}
+		if (strings.Contains(lower, "allow") || strings.Contains(lower, "approve")) &&
+			(strings.Contains(lower, "yes") || strings.Contains(lower, "no")) {
+			return StateNeedsInput
+		}
+		if strings.Contains(lower, "do you want to") {
+			return StateNeedsInput
+		}
+	}
+
+	// Idle: last non-empty line is just ">" (Claude's input prompt)
+	if tail[0] == ">" {
+		return StateIdle
+	}
+
+	// Default for running sessions: working
+	return StateWorking
+}

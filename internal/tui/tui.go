@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 
+	"time"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -130,8 +132,26 @@ func (m model) innerSize() (int, int) {
 	return w, h
 }
 
+// tickMsg triggers a periodic refresh of session states.
+type tickMsg time.Time
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// animTickMsg drives the pulsing animation for the working badge.
+type animTickMsg time.Time
+
+func animTickCmd() tea.Cmd {
+	return tea.Tick(350*time.Millisecond, func(t time.Time) tea.Msg {
+		return animTickMsg(t)
+	})
+}
+
 func (m model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(tickCmd(), animTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -144,6 +164,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetHeight(h - 3) // reserve lines for frame overhead (title section + dividers + help)
 		m.repoList.SetWidth(w)
 		m.repoList.SetHeight(h - 3)
+	case animTickMsg:
+		animFrame = (animFrame + 1) % len(workingPulseColors)
+		return m, animTickCmd()
+	case tickMsg:
+		if m.mode == modeList {
+			m.refreshList()
+		}
+		return m, tickCmd()
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyCtrlD {
 			return m, m.list.NewStatusMessage(helpBarStyle.Render("press ") +
@@ -546,12 +574,7 @@ func (m model) renderConfirmDialog() string {
 		title = "Close session tab?"
 	}
 
-	var status string
-	if item.running {
-		status = selectedRunningBadge.String()
-	} else {
-		status = stoppedBadge.String()
-	}
+	status := stateBadge(item.state, true)
 
 	dialog := quitDialogStyle.Render(
 		confirmStyle.Render(title) + "\n\n" +

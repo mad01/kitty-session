@@ -33,10 +33,16 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session %q not found", name)
 	}
 
-	// If the tab is still alive, just focus it
+	// If the tab is still alive, focus the Claude pane directly
 	if kitty.TabExists(sess.KittyTabID) {
-		if err := kitty.FocusTab(sess.KittyTabID); err != nil {
-			return fmt.Errorf("cannot focus tab: %w", err)
+		if sess.KittyWindowID != 0 {
+			if err := kitty.FocusWindow(sess.KittyWindowID); err != nil {
+				return fmt.Errorf("cannot focus window: %w", err)
+			}
+		} else {
+			if err := kitty.FocusTab(sess.KittyTabID); err != nil {
+				return fmt.Errorf("cannot focus tab: %w", err)
+			}
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "session %q focused\n", name)
 		return nil
@@ -65,8 +71,9 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
 	}
 
-	// Update session with new tab ID
+	// Update session with new tab and window IDs
 	sess.KittyTabID = tabID
+	sess.KittyWindowID = windowID
 	if err := store.Save(sess); err != nil {
 		return fmt.Errorf("cannot save session: %w", err)
 	}

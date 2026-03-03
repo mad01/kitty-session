@@ -7,7 +7,29 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mad01/kitty-session/internal/claude"
 )
+
+// animFrame is the current animation frame for pulsing badges.
+// Updated by the model's animTickMsg handler; read by stateBadge.
+var animFrame int
+
+// Indigo pulse cycle: bright → dim → bright
+var workingPulseColors = []lipgloss.Color{
+	"#7571F9", // base indigo
+	"#615DBF", // medium
+	"#4D4A96", // dim
+	"#615DBF", // medium
+}
+
+// Amber pulse cycle: bright → dim → bright
+var inputPulseColors = []lipgloss.Color{
+	"#FFBF00", // base amber
+	"#CC9900", // medium
+	"#997300", // dim
+	"#CC9900", // medium
+}
 
 type delegateKeyMap struct {
 	open   key.Binding
@@ -62,6 +84,38 @@ func (d itemDelegate) Height() int                             { return 2 }
 func (d itemDelegate) Spacing() int                            { return 0 }
 func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
+// stateBadge returns the rendered badge string for a given state.
+func stateBadge(state claude.State, selected bool) string {
+	switch state {
+	case claude.StateWorking:
+		pulseColor := workingPulseColors[animFrame%len(workingPulseColors)]
+		icon := lipgloss.NewStyle().Foreground(pulseColor).Render("●")
+		text := lipgloss.NewStyle().Foreground(colorAccent)
+		if selected {
+			text = text.Bold(true)
+		}
+		return icon + text.Render(" working")
+	case claude.StateNeedsInput:
+		pulseColor := inputPulseColors[animFrame%len(inputPulseColors)]
+		icon := lipgloss.NewStyle().Foreground(pulseColor).Render("◆")
+		text := lipgloss.NewStyle().Foreground(colorAmber)
+		if selected {
+			text = text.Bold(true)
+		}
+		return icon + text.Render(" input")
+	case claude.StateIdle:
+		if selected {
+			return selectedIdleBadge.String()
+		}
+		return idleBadge.String()
+	default:
+		if selected {
+			return selectedStoppedBadge.String()
+		}
+		return stoppedBadge.String()
+	}
+}
+
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	item, ok := listItem.(sessionItem)
 	if !ok {
@@ -72,20 +126,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 
 	name := fmt.Sprintf("%-16s", item.Title())
 
-	var badge string
-	if isSelected {
-		if item.running {
-			badge = selectedRunningBadge.String()
-		} else {
-			badge = selectedStoppedBadge.String()
-		}
-	} else {
-		if item.running {
-			badge = runningBadge.String()
-		} else {
-			badge = stoppedBadge.String()
-		}
-	}
+	badge := stateBadge(item.state, isSelected)
 
 	dir := item.Description()
 

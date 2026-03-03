@@ -158,6 +158,32 @@ func FindTabForWindow(windowID int) (int, error) {
 	return 0, fmt.Errorf("no tab found containing window %d", windowID)
 }
 
+// GetText reads the terminal text from a specific window (pane) by ID.
+func GetText(windowID int) (string, error) {
+	out, err := exec.Command("kitty", "@", "get-text", "--match=id:"+strconv.Itoa(windowID)).Output()
+	if err != nil {
+		return "", fmt.Errorf("kitty @ get-text: %w", err)
+	}
+	return string(out), nil
+}
+
+// FirstWindowInTab returns the first window (pane) ID inside the given tab.
+func FirstWindowInTab(tabID int) (int, error) {
+	tabs, err := ListTabsDetailed()
+	if err != nil {
+		return 0, err
+	}
+	for _, t := range tabs {
+		if t.ID == tabID {
+			if len(t.Windows) == 0 {
+				return 0, fmt.Errorf("tab %d has no windows", tabID)
+			}
+			return t.Windows[0].ID, nil
+		}
+	}
+	return 0, fmt.Errorf("tab %d not found", tabID)
+}
+
 func trimOutput(b []byte) string {
 	s := string(b)
 	// Trim whitespace and newlines

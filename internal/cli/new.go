@@ -77,7 +77,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
 	}
 
-	sess := session.New(newName, dir, tabID)
+	sess := session.New(newName, dir, tabID, windowID)
 	if err := store.Save(sess); err != nil {
 		return fmt.Errorf("cannot save session: %w", err)
 	}

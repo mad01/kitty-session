@@ -17,7 +17,7 @@ var _ list.Item = sessionItem{}
 // sessionItem implements list.Item for the bubbles/list component.
 type sessionItem struct {
 	session *session.Session
-	running bool
+	state   claude.State
 	context string
 }
 
@@ -36,6 +36,30 @@ func shortenDir(dir string) string {
 	return dir
 }
 
+// detectSessionState determines the Claude state for a session.
+func detectSessionState(sess *session.Session) claude.State {
+	if !kitty.TabExists(sess.KittyTabID) {
+		return claude.StateStopped
+	}
+
+	// Resolve the window ID to read terminal text from
+	winID := sess.KittyWindowID
+	if winID == 0 {
+		// Fallback for old sessions without a stored window ID
+		id, err := kitty.FirstWindowInTab(sess.KittyTabID)
+		if err != nil {
+			return claude.StateWorking
+		}
+		winID = id
+	}
+
+	text, err := kitty.GetText(winID)
+	if err != nil {
+		return claude.StateWorking
+	}
+	return claude.DetectState(text)
+}
+
 func loadSessions(store *session.Store) ([]sessionItem, error) {
 	sessions, err := store.List()
 	if err != nil {
@@ -45,7 +69,7 @@ func loadSessions(store *session.Store) ([]sessionItem, error) {
 	for i, sess := range sessions {
 		items[i] = sessionItem{
 			session: sess,
-			running: kitty.TabExists(sess.KittyTabID),
+			state:   detectSessionState(sess),
 			context: claude.LatestPrompt(sess.Dir),
 		}
 	}
@@ -54,6 +78,10 @@ func loadSessions(store *session.Store) ([]sessionItem, error) {
 
 func openSession(sess *session.Session, store *session.Store) error {
 	if kitty.TabExists(sess.KittyTabID) {
+		// Focus the Claude pane directly if we have a window ID
+		if sess.KittyWindowID != 0 {
+			return kitty.FocusWindow(sess.KittyWindowID)
+		}
 		return kitty.FocusTab(sess.KittyTabID)
 	}
 
@@ -74,6 +102,7 @@ func openSession(sess *session.Session, store *session.Store) error {
 	}
 	_ = kitty.FocusWindow(windowID)
 	sess.KittyTabID = tabID
+	sess.KittyWindowID = windowID
 	return store.Save(sess)
 }
 
@@ -93,7 +122,7 @@ func createSession(name, dir string, store *session.Store) error {
 		return fmt.Errorf("cannot create split: %w", err)
 	}
 	_ = kitty.FocusWindow(windowID)
-	sess := session.New(name, dir, tabID)
+	sess := session.New(name, dir, tabID, windowID)
 	return store.Save(sess)
 }
 

@@ -5,7 +5,8 @@ import "github.com/charmbracelet/lipgloss"
 // Color palette
 const (
 	colorAccent    = lipgloss.Color("#7571F9") // indigo
-	colorSuccess   = lipgloss.Color("#02BF87") // teal
+	colorSuccess   = lipgloss.Color("#02BF87") // teal/green
+	colorAmber     = lipgloss.Color("#FFBF00") // amber
 	colorMuted     = lipgloss.Color("#636363") // gray
 	colorDanger    = lipgloss.Color("#ED567A") // coral
 	colorTextPri   = lipgloss.Color("#FFFDF5") // cream
@@ -26,12 +27,12 @@ var (
 			Background(colorAccent).
 			Padding(0, 1)
 
-	// Status badges — normal
-	runningBadge = lipgloss.NewStyle().Foreground(colorSuccess).SetString("● running")
+	// State badges — static (working and input badges are rendered dynamically with pulse animation)
+	idleBadge    = lipgloss.NewStyle().Foreground(colorSuccess).SetString("● idle")
 	stoppedBadge = lipgloss.NewStyle().Foreground(colorMuted).SetString("○ stopped")
 
-	// Status badges — selected (brighter for contrast)
-	selectedRunningBadge = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).SetString("● running")
+	// State badges — selected
+	selectedIdleBadge    = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).SetString("● idle")
 	selectedStoppedBadge = lipgloss.NewStyle().Foreground(colorTextSec).SetString("○ stopped")
 
 	// Selected row
