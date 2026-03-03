@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -46,7 +47,7 @@ type model struct {
 	mode          mode
 	width         int
 	height        int
-	inputValue    string
+	textInput     textinput.Model
 	repoDir       string
 	renameItem    sessionItem
 	hasRepos      bool
@@ -104,13 +105,20 @@ func newModel(store *session.Store, items []sessionItem, repoItems []repoItem) m
 	rl.SetShowHelp(false)
 	rl.SetFilteringEnabled(true)
 
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.TextStyle = inputStyle
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(colorAccent)
+	ti.CharLimit = 128
+
 	return model{
-		list:     l,
-		repoList: rl,
-		store:    store,
-		keys:     keys,
-		mode:     modeList,
-		hasRepos: len(repoItems) > 0,
+		list:      l,
+		repoList:  rl,
+		textInput: ti,
+		store:     store,
+		keys:      keys,
+		mode:      modeList,
+		hasRepos:  len(repoItems) > 0,
 	}
 }
 
@@ -232,7 +240,9 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				dir, _ := os.Getwd()
 				m.repoDir = dir
 				m.mode = modeInput
-				m.inputValue = suggestSessionNameForDir(dir)
+				m.textInput.SetValue(suggestSessionNameForDir(dir))
+				m.textInput.CursorEnd()
+				m.textInput.Focus()
 				m.err = nil
 			}
 			return m, nil
@@ -308,7 +318,9 @@ func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 	// Name conflicts or is empty — let user edit it
 	m.repoDir = dir
 	m.mode = modeInput
-	m.inputValue = name
+	m.textInput.SetValue(name)
+	m.textInput.CursorEnd()
+	m.textInput.Focus()
 	m.err = nil
 	if name != "" {
 		m.err = fmt.Errorf("session %q already exists — pick a different name", name)
@@ -317,10 +329,10 @@ func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.Type {
 		case tea.KeyEscape:
+			m.textInput.Blur()
 			if m.hasRepos {
 				m.mode = modeRepoPicker
 			} else {
@@ -329,27 +341,11 @@ func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyEnter:
 			return m.handleCreate()
-		case tea.KeyCtrlU:
-			m.inputValue = ""
-			return m, nil
-		case tea.KeyBackspace:
-			if len(m.inputValue) > 0 {
-				m.inputValue = m.inputValue[:len(m.inputValue)-1]
-			}
-			return m, nil
-		default:
-			if msg.Type == tea.KeyRunes {
-				for _, r := range msg.Runes {
-					if r == ' ' || r < 33 || r > 126 {
-						continue
-					}
-					m.inputValue += string(r)
-				}
-			}
-			return m, nil
 		}
 	}
-	return m, nil
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 func (m model) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -407,7 +403,7 @@ func (m model) handleOpen() (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleCreate() (tea.Model, tea.Cmd) {
-	name := m.inputValue
+	name := m.textInput.Value()
 	if name == "" {
 		m.err = fmt.Errorf("name cannot be empty")
 		return m, nil
@@ -424,9 +420,11 @@ func (m model) handleCreate() (tea.Model, tea.Cmd) {
 
 	if err := createSession(name, dir, m.store); err != nil {
 		m.err = err
+		m.textInput.Blur()
 		m.mode = modeList
 		return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 	}
+	m.textInput.Blur()
 	m.refreshList()
 	m.mode = modeList
 	return m, m.list.NewStatusMessage(fmt.Sprintf("created %q", name))
@@ -439,51 +437,38 @@ func (m model) startRename() (tea.Model, tea.Cmd) {
 	}
 	m.mode = modeRename
 	m.renameItem = item
-	m.inputValue = item.session.Name
+	m.textInput.SetValue(item.session.Name)
+	m.textInput.CursorEnd()
+	m.textInput.Focus()
 	m.err = nil
 	return m, nil
 }
 
 func (m model) updateRename(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.Type {
 		case tea.KeyEscape:
+			m.textInput.Blur()
 			m.mode = modeList
 			return m, nil
 		case tea.KeyEnter:
 			return m.handleRename()
-		case tea.KeyCtrlU:
-			m.inputValue = ""
-			return m, nil
-		case tea.KeyBackspace:
-			if len(m.inputValue) > 0 {
-				m.inputValue = m.inputValue[:len(m.inputValue)-1]
-			}
-			return m, nil
-		default:
-			if msg.Type == tea.KeyRunes {
-				for _, r := range msg.Runes {
-					if r == ' ' || r < 33 || r > 126 {
-						continue
-					}
-					m.inputValue += string(r)
-				}
-			}
-			return m, nil
 		}
 	}
-	return m, nil
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 func (m model) handleRename() (tea.Model, tea.Cmd) {
-	newName := m.inputValue
+	newName := m.textInput.Value()
 	oldName := m.renameItem.session.Name
 	if newName == "" {
 		m.err = fmt.Errorf("name cannot be empty")
 		return m, nil
 	}
 	if newName == oldName {
+		m.textInput.Blur()
 		m.mode = modeList
 		return m, nil
 	}
@@ -491,6 +476,7 @@ func (m model) handleRename() (tea.Model, tea.Cmd) {
 		m.err = err
 		return m, nil
 	}
+	m.textInput.Blur()
 	m.refreshList()
 	m.mode = modeList
 	return m, m.list.NewStatusMessage(fmt.Sprintf("renamed %q → %q", oldName, newName))
@@ -498,7 +484,7 @@ func (m model) handleRename() (tea.Model, tea.Cmd) {
 
 func (m model) renderRenamePrompt() string {
 	w, h := m.innerSize()
-	prompt := inputPromptStyle.Render("Rename: ") + inputStyle.Render(m.inputValue+"█")
+	prompt := inputPromptStyle.Render("Rename: ") + m.textInput.View()
 	if m.err != nil {
 		prompt += "\n" + errorStyle.Render("  "+m.err.Error())
 	}
@@ -581,10 +567,10 @@ func (m model) View() string {
 			help = helpKeyInlineStyle.Render("type to filter · ↑/↓ navigate · enter select · esc back")
 		case modeInput:
 			title = titleBarStyle.Render("new session")
-			help = helpKeyInlineStyle.Render("enter confirm · ctrl+u clear · esc back")
+			help = helpKeyInlineStyle.Render("enter confirm · ←/→ move cursor · esc back")
 		case modeRename:
 			title = titleBarStyle.Render("rename session")
-			help = helpKeyInlineStyle.Render("enter confirm · ctrl+u clear · esc cancel")
+			help = helpKeyInlineStyle.Render("enter confirm · ←/→ move cursor · esc cancel")
 		default:
 			title = titleBarStyle.Render("ks · kitty claude session manager")
 			help = helpKeyInlineStyle.Render("↑/k up · ↓/j down · / filter · o open · n new · r rename · c close · d delete · ? help")
@@ -658,7 +644,7 @@ func (m model) renderFramedView(titleRow, helpRow, body string) string {
 
 func (m model) renderInputPrompt() string {
 	w, h := m.innerSize()
-	prompt := inputPromptStyle.Render("Session name: ") + inputStyle.Render(m.inputValue+"█")
+	prompt := inputPromptStyle.Render("Session name: ") + m.textInput.View()
 	if m.err != nil {
 		prompt += "\n" + errorStyle.Render("  "+m.err.Error())
 	}
