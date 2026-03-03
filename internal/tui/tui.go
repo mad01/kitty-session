@@ -247,41 +247,67 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// When already filtering, let the list handle everything
-		if m.repoList.FilterState() == list.Filtering {
-			break
-		}
-
 		switch {
 		case msg.Type == tea.KeyEnter:
 			item, ok := m.repoList.SelectedItem().(repoItem)
 			if !ok {
 				return m, nil
 			}
-			m.repoDir = item.path
-			m.mode = modeInput
-			m.inputValue = suggestSessionNameForDir(item.path)
-			m.err = nil
-			return m, nil
+			return m.handleRepoSelect(item)
 		case msg.Type == tea.KeyEscape:
-			if m.repoList.FilterState() == list.FilterApplied {
-				break // let list clear the applied filter
+			if m.repoList.FilterState() == list.Filtering || m.repoList.FilterState() == list.FilterApplied {
+				m.repoList.ResetFilter()
+				return m, nil
 			}
 			m.mode = modeList
 			return m, nil
-		case msg.Type == tea.KeyRunes:
-			// Auto-enter filter mode when typing (/ triggers it natively)
-			if !(len(msg.Runes) == 1 && msg.Runes[0] == '/') {
-				slash := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-				m.repoList, _ = m.repoList.Update(slash)
+		default:
+			// When already filtering, let the list handle navigation keys
+			if m.repoList.FilterState() == list.Filtering {
+				break
 			}
-			// fall through to pass the character to the now-filtering list
+			if msg.Type == tea.KeyRunes {
+				// Auto-enter filter mode when typing (/ triggers it natively)
+				if !(len(msg.Runes) == 1 && msg.Runes[0] == '/') {
+					slash := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+					m.repoList, _ = m.repoList.Update(slash)
+				}
+			}
 		}
 	}
 
 	var cmd tea.Cmd
 	m.repoList, cmd = m.repoList.Update(msg)
 	return m, cmd
+}
+
+// handleRepoSelect creates a session directly from the selected repo,
+// falling back to the name input if the auto-generated name conflicts.
+func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
+	dir := item.path
+	name := suggestSessionNameForDir(dir)
+
+	if name != "" && !m.store.Exists(name) {
+		if err := createSession(name, dir, m.store); err != nil {
+			m.mode = modeList
+			m.repoList.ResetFilter()
+			return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
+		}
+		m.refreshList()
+		m.mode = modeList
+		m.repoList.ResetFilter()
+		return m, m.list.NewStatusMessage(fmt.Sprintf("created %q", name))
+	}
+
+	// Name conflicts or is empty — let user edit it
+	m.repoDir = dir
+	m.mode = modeInput
+	m.inputValue = name
+	m.err = nil
+	if name != "" {
+		m.err = fmt.Errorf("session %q already exists — pick a different name", name)
+	}
+	return m, nil
 }
 
 func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
