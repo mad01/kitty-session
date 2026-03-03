@@ -14,6 +14,8 @@ test:
 install: build
 	@mkdir -p ~/code/bin
 	@cp $(BINARY_NAME) ~/code/bin/$(BINARY_NAME)
+	@xattr -dr com.apple.provenance ~/code/bin/$(BINARY_NAME) 2>/dev/null || true
+	@codesign -fs - ~/code/bin/$(BINARY_NAME)
 	@echo "installed $(BINARY_NAME) to ~/code/bin/$(BINARY_NAME)"
 
 clean:
