@@ -36,8 +36,15 @@ func runRename(cmd *cobra.Command, args []string) error {
 	state.Rename(oldName, newName)
 
 	if kitty.TabExists(sess.KittyTabID) {
-		_ = kitty.FocusTab(sess.KittyTabID)
-		_ = kitty.SetTabTitle(newName)
+		winID := sess.KittyWindowID
+		if winID == 0 {
+			if id, err := kitty.FirstWindowInTab(sess.KittyTabID); err == nil {
+				winID = id
+			}
+		}
+		if winID != 0 {
+			_ = kitty.SetTabTitleForWindow(newName, winID)
+		}
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q renamed to %q\n", oldName, newName)

@@ -45,9 +45,18 @@ func LaunchSplit(dir string, args ...string) error {
 	return nil
 }
 
-// SetTabTitle sets the title of the tab containing the given window.
+// SetTabTitle sets the title of the currently active tab.
 func SetTabTitle(title string) error {
 	if err := exec.Command("kitty", "@", "set-tab-title", title).Run(); err != nil {
+		return fmt.Errorf("kitty @ set-tab-title: %w", err)
+	}
+	return nil
+}
+
+// SetTabTitleForWindow sets the title of the tab containing the given window ID
+// without changing focus.
+func SetTabTitleForWindow(title string, windowID int) error {
+	if err := exec.Command("kitty", "@", "set-tab-title", "--match=id:"+strconv.Itoa(windowID), title).Run(); err != nil {
 		return fmt.Errorf("kitty @ set-tab-title: %w", err)
 	}
 	return nil

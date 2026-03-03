@@ -180,8 +180,15 @@ func renameSession(sess *session.Session, newName string, store *session.Store) 
 	}
 	state.Rename(oldName, newName)
 	if kitty.TabExists(sess.KittyTabID) {
-		_ = kitty.FocusTab(sess.KittyTabID)
-		_ = kitty.SetTabTitle(newName)
+		winID := sess.KittyWindowID
+		if winID == 0 {
+			if id, err := kitty.FirstWindowInTab(sess.KittyTabID); err == nil {
+				winID = id
+			}
+		}
+		if winID != 0 {
+			_ = kitty.SetTabTitleForWindow(newName, winID)
+		}
 	}
 	return nil
 }
