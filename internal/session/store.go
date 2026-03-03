@@ -79,6 +79,21 @@ func (s *Store) Delete(name string) error {
 	return nil
 }
 
+func (s *Store) Rename(oldName, newName string) error {
+	sess, err := s.Load(oldName)
+	if err != nil {
+		return err
+	}
+	if s.Exists(newName) {
+		return fmt.Errorf("session %q already exists", newName)
+	}
+	sess.Name = newName
+	if err := s.Save(sess); err != nil {
+		return err
+	}
+	return s.Delete(oldName)
+}
+
 func (s *Store) Exists(name string) bool {
 	_, err := os.Stat(s.path(name))
 	return err == nil

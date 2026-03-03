@@ -45,12 +45,28 @@ func detectSessionState(sess *session.Session) claude.State {
 		return claude.StateStopped
 	}
 
-	// Check state file first (high-confidence, low-latency)
-	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
-		return mapStringToState(s)
+	// Check state file first (high-confidence, low-latency).
+	if s, t, err := state.Read(sess.Name); err == nil {
+		if state.IsFresh(t) {
+			return mapStringToState(s)
+		}
+		// State file is stale but said "working" recently — validate
+		// against terminal output. If the terminal clearly shows idle
+		// or input, use that; otherwise trust "working".
+		if s == "working" && state.IsRecentlyWorking(t) {
+			termState := readTerminalState(sess)
+			if termState == claude.StateIdle || termState == claude.StateNeedsInput {
+				return termState
+			}
+			return claude.StateWorking
+		}
 	}
 
-	// Fall back to terminal text parsing
+	return readTerminalState(sess)
+}
+
+// readTerminalState reads the Claude pane text and classifies the state.
+func readTerminalState(sess *session.Session) claude.State {
 	winID := sess.KittyWindowID
 	if winID == 0 {
 		id, err := kitty.FirstWindowInTab(sess.KittyTabID)
@@ -153,6 +169,19 @@ func closeSession(sess *session.Session) error {
 	state.Clean(sess.Name)
 	if kitty.TabExists(sess.KittyTabID) {
 		return kitty.CloseTab(sess.KittyTabID)
+	}
+	return nil
+}
+
+func renameSession(sess *session.Session, newName string, store *session.Store) error {
+	oldName := sess.Name
+	if err := store.Rename(oldName, newName); err != nil {
+		return err
+	}
+	state.Rename(oldName, newName)
+	if kitty.TabExists(sess.KittyTabID) {
+		_ = kitty.FocusTab(sess.KittyTabID)
+		_ = kitty.SetTabTitle(newName)
 	}
 	return nil
 }

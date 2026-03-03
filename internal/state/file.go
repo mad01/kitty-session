@@ -68,6 +68,25 @@ func IsFresh(t time.Time) bool {
 	return time.Since(t) <= freshness
 }
 
+// IsRecentlyWorking returns true if t is within a longer window (5 min),
+// used to trust "working" state across gaps between tool calls.
+func IsRecentlyWorking(t time.Time) bool {
+	return time.Since(t) <= 5*time.Minute
+}
+
+// Rename moves the state file from oldName to newName.
+func Rename(oldName, newName string) {
+	dir := Dir()
+	if dir == "" {
+		return
+	}
+	old := filepath.Join(dir, oldName+".json")
+	if _, err := os.Stat(old); err != nil {
+		return
+	}
+	_ = os.Rename(old, filepath.Join(dir, newName+".json"))
+}
+
 // Clean removes the state file for the named session.
 func Clean(name string) {
 	dir := Dir()

@@ -104,5 +104,5 @@ func DetectState(text string) State {
 	}
 
 	// No work signals found — Claude is likely done or between tasks
-	return StateWaiting
+	return StateIdle
 }

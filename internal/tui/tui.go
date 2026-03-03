@@ -24,6 +24,7 @@ const (
 	modeList mode = iota
 	modeRepoPicker
 	modeInput
+	modeRename
 	modeConfirm
 	modeHelp
 	modeQuitConfirm
@@ -47,6 +48,7 @@ type model struct {
 	height        int
 	inputValue    string
 	repoDir       string
+	renameItem    sessionItem
 	hasRepos      bool
 	confirmAction confirmAction
 	confirmItem   sessionItem
@@ -185,6 +187,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRepoPicker(msg)
 	case modeInput:
 		return m.updateInput(msg)
+	case modeRename:
+		return m.updateRename(msg)
 	case modeConfirm:
 		return m.updateConfirm(msg)
 	case modeHelp:
@@ -232,6 +236,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = nil
 			}
 			return m, nil
+		case key.Matches(msg, m.keys.rename):
+			return m.startRename()
 		case key.Matches(msg, m.keys.close):
 			return m.startConfirm(actionClose)
 		case key.Matches(msg, m.keys.delete):
@@ -426,6 +432,79 @@ func (m model) handleCreate() (tea.Model, tea.Cmd) {
 	return m, m.list.NewStatusMessage(fmt.Sprintf("created %q", name))
 }
 
+func (m model) startRename() (tea.Model, tea.Cmd) {
+	item, ok := m.list.SelectedItem().(sessionItem)
+	if !ok {
+		return m, nil
+	}
+	m.mode = modeRename
+	m.renameItem = item
+	m.inputValue = item.session.Name
+	m.err = nil
+	return m, nil
+}
+
+func (m model) updateRename(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEscape:
+			m.mode = modeList
+			return m, nil
+		case tea.KeyEnter:
+			return m.handleRename()
+		case tea.KeyCtrlU:
+			m.inputValue = ""
+			return m, nil
+		case tea.KeyBackspace:
+			if len(m.inputValue) > 0 {
+				m.inputValue = m.inputValue[:len(m.inputValue)-1]
+			}
+			return m, nil
+		default:
+			if msg.Type == tea.KeyRunes {
+				for _, r := range msg.Runes {
+					if r == ' ' || r < 33 || r > 126 {
+						continue
+					}
+					m.inputValue += string(r)
+				}
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m model) handleRename() (tea.Model, tea.Cmd) {
+	newName := m.inputValue
+	oldName := m.renameItem.session.Name
+	if newName == "" {
+		m.err = fmt.Errorf("name cannot be empty")
+		return m, nil
+	}
+	if newName == oldName {
+		m.mode = modeList
+		return m, nil
+	}
+	if err := renameSession(m.renameItem.session, newName, m.store); err != nil {
+		m.err = err
+		return m, nil
+	}
+	m.refreshList()
+	m.mode = modeList
+	return m, m.list.NewStatusMessage(fmt.Sprintf("renamed %q → %q", oldName, newName))
+}
+
+func (m model) renderRenamePrompt() string {
+	w, h := m.innerSize()
+	prompt := inputPromptStyle.Render("Rename: ") + inputStyle.Render(m.inputValue+"█")
+	if m.err != nil {
+		prompt += "\n" + errorStyle.Render("  "+m.err.Error())
+	}
+	return lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center, prompt)
+}
+
 func (m model) startConfirm(action confirmAction) (tea.Model, tea.Cmd) {
 	item, ok := m.list.SelectedItem().(sessionItem)
 	if !ok {
@@ -503,9 +582,12 @@ func (m model) View() string {
 		case modeInput:
 			title = titleBarStyle.Render("new session")
 			help = helpKeyInlineStyle.Render("enter confirm · ctrl+u clear · esc back")
+		case modeRename:
+			title = titleBarStyle.Render("rename session")
+			help = helpKeyInlineStyle.Render("enter confirm · ctrl+u clear · esc cancel")
 		default:
 			title = titleBarStyle.Render("ks · kitty claude session manager")
-			help = helpKeyInlineStyle.Render("↑/k up · ↓/j down · / filter · o open · n new · c close · d delete · ? help")
+			help = helpKeyInlineStyle.Render("↑/k up · ↓/j down · / filter · o open · n new · r rename · c close · d delete · ? help")
 		}
 
 		var body string
@@ -514,6 +596,8 @@ func (m model) View() string {
 			body = m.repoList.View()
 		case modeInput:
 			body = m.renderInputPrompt()
+		case modeRename:
+			body = m.renderRenamePrompt()
 		default:
 			body = m.list.View()
 		}
@@ -640,6 +724,7 @@ func (m model) renderHelp() string {
 	actionKeys := lipgloss.JoinVertical(lipgloss.Left,
 		helpRow("o / enter", "Open or focus session"),
 		helpRow("n", "Create new session"),
+		helpRow("r", "Rename session"),
 		helpRow("c", "Close tab (keep session)"),
 		helpRow("d", "Delete session"),
 	)

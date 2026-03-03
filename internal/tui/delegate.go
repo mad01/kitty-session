@@ -36,6 +36,7 @@ type delegateKeyMap struct {
 	newSes key.Binding
 	close  key.Binding
 	delete key.Binding
+	rename key.Binding
 }
 
 func newDelegateKeyMap() *delegateKeyMap {
@@ -56,16 +57,20 @@ func newDelegateKeyMap() *delegateKeyMap {
 			key.WithKeys("d"),
 			key.WithHelp("d", "delete"),
 		),
+		rename: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "rename"),
+		),
 	}
 }
 
 func (d delegateKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{d.open, d.newSes, d.close, d.delete}
+	return []key.Binding{d.open, d.newSes, d.close, d.delete, d.rename}
 }
 
 func (d delegateKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{d.open, d.newSes, d.close, d.delete},
+		{d.open, d.newSes, d.close, d.delete, d.rename},
 	}
 }
 

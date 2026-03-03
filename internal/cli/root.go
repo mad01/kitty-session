@@ -23,6 +23,7 @@ TUI keybindings (press ? in the TUI for full help):
   j/k         Navigate sessions
   o / enter   Open or focus session
   n           Create new session
+  r           Rename session
   c           Close tab (keep session)
   d           Delete session
   /           Fuzzy search
