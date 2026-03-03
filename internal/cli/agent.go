@@ -19,6 +19,14 @@ const agentPrompt = `You are a session monitor for the "ks" kitty session manage
 Your job is to continuously read terminal output from running Claude Code sessions
 and classify their state.
 
+## STRICT RULES — DO NOT VIOLATE
+
+- ONLY read session files, read terminal text via kitty, and write state JSON files.
+- NEVER create scripts, launch agents, plist files, cron jobs, or any persistent background processes.
+- NEVER write to ~/Library/, /etc/, or any system directory.
+- NEVER modify anything outside ~/.config/ks/state/.
+- Your process is managed by ks — it will be killed when ks exits. Do not try to persist yourself.
+
 ## Instructions
 
 Loop forever:
@@ -56,10 +64,16 @@ func startAgent() (*exec.Cmd, error) {
 		return nil, fmt.Errorf("cannot create state directory: %w", err)
 	}
 
+	sessDir := filepath.Join(home, ".config", "ks", "sessions")
 	args := []string{
 		"-p", agentPrompt,
 		"--model", "haiku",
-		"--allowedTools", "Bash,Read,Write",
+		"--allowedTools",
+		"Bash(kitty @ get-text *)",
+		"Bash(ls " + sessDir + ")",
+		"Bash(sleep *)",
+		"Read(//" + sessDir + "/*)",
+		"Write(//" + stateDir + "/*)",
 	}
 
 	cmd := exec.Command(claudePath, args...)
