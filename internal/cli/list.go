@@ -6,6 +6,7 @@ import (
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
+	"github.com/mad01/kitty-session/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -37,9 +38,11 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, sess := range sessions {
-		var state claude.State
+		var st claude.State
 		if !kitty.TabExists(sess.KittyTabID) {
-			state = claude.StateStopped
+			st = claude.StateStopped
+		} else if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
+			st = mapStateString(s)
 		} else {
 			winID := sess.KittyWindowID
 			if winID == 0 {
@@ -51,15 +54,31 @@ func runList(cmd *cobra.Command, args []string) error {
 			if winID != 0 {
 				text, err := kitty.GetText(winID)
 				if err == nil {
-					state = claude.DetectState(text)
+					st = claude.DetectState(text)
 				} else {
-					state = claude.StateWorking
+					st = claude.StateWorking
 				}
 			} else {
-				state = claude.StateWorking
+				st = claude.StateWorking
 			}
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, state, sess.Dir)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
 	}
 	return nil
+}
+
+// mapStateString converts a state file string to a claude.State.
+func mapStateString(s string) claude.State {
+	switch s {
+	case "working":
+		return claude.StateWorking
+	case "idle":
+		return claude.StateIdle
+	case "input":
+		return claude.StateNeedsInput
+	case "waiting":
+		return claude.StateWaiting
+	default:
+		return claude.StateUnknown
+	}
 }

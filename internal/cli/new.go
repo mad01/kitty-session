@@ -50,7 +50,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 	}
 
 	// Launch tab with claude
-	windowID, err := kitty.LaunchTab(dir, "--", "claude")
+	windowID, err := kitty.LaunchTab(dir, "--env", "KS_SESSION_NAME="+newName, "--", "claude")
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}

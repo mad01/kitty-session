@@ -9,6 +9,7 @@ import (
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
+	"github.com/mad01/kitty-session/internal/state"
 )
 
 // Compile-time interface check.
@@ -37,15 +38,21 @@ func shortenDir(dir string) string {
 }
 
 // detectSessionState determines the Claude state for a session.
+// It uses a hybrid approach: check state files first (written by hooks or
+// the agent monitor), then fall back to terminal text parsing.
 func detectSessionState(sess *session.Session) claude.State {
 	if !kitty.TabExists(sess.KittyTabID) {
 		return claude.StateStopped
 	}
 
-	// Resolve the window ID to read terminal text from
+	// Check state file first (high-confidence, low-latency)
+	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
+		return mapStringToState(s)
+	}
+
+	// Fall back to terminal text parsing
 	winID := sess.KittyWindowID
 	if winID == 0 {
-		// Fallback for old sessions without a stored window ID
 		id, err := kitty.FirstWindowInTab(sess.KittyTabID)
 		if err != nil {
 			return claude.StateWorking
@@ -58,6 +65,22 @@ func detectSessionState(sess *session.Session) claude.State {
 		return claude.StateWorking
 	}
 	return claude.DetectState(text)
+}
+
+// mapStringToState converts a state file string to a claude.State.
+func mapStringToState(s string) claude.State {
+	switch s {
+	case "working":
+		return claude.StateWorking
+	case "idle":
+		return claude.StateIdle
+	case "input":
+		return claude.StateNeedsInput
+	case "waiting":
+		return claude.StateWaiting
+	default:
+		return claude.StateUnknown
+	}
 }
 
 func loadSessions(store *session.Store) ([]sessionItem, error) {
@@ -86,7 +109,7 @@ func openSession(sess *session.Session, store *session.Store) error {
 	}
 
 	// Recreate the session — pass PATH so claude finds ~/.local/bin
-	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "PATH="+os.Getenv("PATH"), "--", "claude")
+	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "PATH="+os.Getenv("PATH"), "--env", "KS_SESSION_NAME="+sess.Name, "--", "claude")
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}
@@ -107,7 +130,7 @@ func openSession(sess *session.Session, store *session.Store) error {
 }
 
 func createSession(name, dir string, store *session.Store) error {
-	windowID, err := kitty.LaunchTab(dir, "--env", "PATH="+os.Getenv("PATH"), "--", "claude")
+	windowID, err := kitty.LaunchTab(dir, "--env", "PATH="+os.Getenv("PATH"), "--env", "KS_SESSION_NAME="+name, "--", "claude")
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}
@@ -127,6 +150,7 @@ func createSession(name, dir string, store *session.Store) error {
 }
 
 func closeSession(sess *session.Session) error {
+	state.Clean(sess.Name)
 	if kitty.TabExists(sess.KittyTabID) {
 		return kitty.CloseTab(sess.KittyTabID)
 	}
@@ -134,6 +158,7 @@ func closeSession(sess *session.Session) error {
 }
 
 func deleteSession(sess *session.Session, store *session.Store) error {
+	state.Clean(sess.Name)
 	if kitty.TabExists(sess.KittyTabID) {
 		if err := kitty.CloseTab(sess.KittyTabID); err != nil {
 			return err

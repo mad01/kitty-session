@@ -34,29 +34,49 @@ func TestDetectState(t *testing.T) {
 			want: StateNeedsInput,
 		},
 		{
-			name: "working state with output",
+			name: "working state with tool output",
 			text: "Reading file foo.go...\nAnalyzing code...\n",
+			want: StateWorking,
+		},
+		{
+			name: "working state with spinner",
+			text: "⠙ Processing files...\n",
 			want: StateWorking,
 		},
 		{
 			name: "empty text",
 			text: "",
-			want: StateWorking,
+			want: StateWaiting,
 		},
 		{
 			name: "only whitespace",
 			text: "   \n  \n\n  ",
-			want: StateWorking,
+			want: StateWaiting,
 		},
 		{
 			name: "prompt with text after chevron",
 			text: "Some output\n> some user input",
-			want: StateWorking,
+			want: StateWaiting,
 		},
 		{
 			name: "approve prompt",
 			text: "Claude wants to edit a file\nApprove? Yes / No\n",
 			want: StateNeedsInput,
+		},
+		{
+			name: "welcome screen",
+			text: " ╭──────────────────────────────────╮\n │ ✻ Welcome to Claude Code!       │\n │                                  │\n │ /help for help                   │\n ╰──────────────────────────────────╯\n",
+			want: StateWaiting,
+		},
+		{
+			name: "claude finished no prompt yet",
+			text: "Here is the summary of changes I made:\n- Updated foo.go\n- Fixed the bug\n",
+			want: StateWaiting,
+		},
+		{
+			name: "claude actively building",
+			text: "Building the project...\nCompiling main.go\n",
+			want: StateWorking,
 		},
 	}
 

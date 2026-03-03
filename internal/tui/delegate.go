@@ -108,6 +108,11 @@ func stateBadge(state claude.State, selected bool) string {
 			return selectedIdleBadge.String()
 		}
 		return idleBadge.String()
+	case claude.StateWaiting:
+		if selected {
+			return selectedWaitingBadge.String()
+		}
+		return waitingBadge.String()
 	default:
 		if selected {
 			return selectedStoppedBadge.String()

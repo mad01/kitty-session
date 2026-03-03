@@ -49,7 +49,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	// Tab is gone — recreate the session
-	windowID, err := kitty.LaunchTab(sess.Dir, "--", "claude")
+	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "KS_SESSION_NAME="+name, "--", "claude")
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}

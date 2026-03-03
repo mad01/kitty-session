@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/mad01/kitty-session/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -28,6 +31,14 @@ TUI keybindings (press ? in the TUI for full help):
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if agentFlag {
+			agent, err := startAgent()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: agent failed to start: %v\n", err)
+			} else {
+				defer stopAgent(agent)
+			}
+		}
 		return tui.Run()
 	},
 }

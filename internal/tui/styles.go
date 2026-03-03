@@ -29,10 +29,12 @@ var (
 
 	// State badges — static (working and input badges are rendered dynamically with pulse animation)
 	idleBadge    = lipgloss.NewStyle().Foreground(colorSuccess).SetString("● idle")
+	waitingBadge = lipgloss.NewStyle().Foreground(colorTextSec).SetString("○ waiting")
 	stoppedBadge = lipgloss.NewStyle().Foreground(colorMuted).SetString("○ stopped")
 
 	// State badges — selected
 	selectedIdleBadge    = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).SetString("● idle")
+	selectedWaitingBadge = lipgloss.NewStyle().Foreground(colorTextSec).Bold(true).SetString("○ waiting")
 	selectedStoppedBadge = lipgloss.NewStyle().Foreground(colorTextSec).SetString("○ stopped")
 
 	// Selected row
