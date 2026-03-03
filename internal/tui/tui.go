@@ -49,7 +49,6 @@ type model struct {
 	height        int
 	textInput     textinput.Model
 	repoDir       string
-	renameItem    sessionItem
 	hasRepos      bool
 	confirmAction confirmAction
 	confirmItem   sessionItem
@@ -120,6 +119,14 @@ func newModel(store *session.Store, items []sessionItem, repoItems []repoItem) m
 		mode:      modeList,
 		hasRepos:  len(repoItems) > 0,
 	}
+}
+
+// activateTextInput prepares the text input with a value and focuses it.
+func (m *model) activateTextInput(value string) {
+	m.textInput.SetValue(value)
+	m.textInput.CursorEnd()
+	m.textInput.Focus()
+	m.err = nil
 }
 
 // innerSize returns the content width and height inside the frame.
@@ -240,10 +247,7 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				dir, _ := os.Getwd()
 				m.repoDir = dir
 				m.mode = modeInput
-				m.textInput.SetValue(suggestSessionNameForDir(dir))
-				m.textInput.CursorEnd()
-				m.textInput.Focus()
-				m.err = nil
+				m.activateTextInput(suggestSessionNameForDir(dir))
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.rename):
@@ -318,10 +322,7 @@ func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 	// Name conflicts or is empty — let user edit it
 	m.repoDir = dir
 	m.mode = modeInput
-	m.textInput.SetValue(name)
-	m.textInput.CursorEnd()
-	m.textInput.Focus()
-	m.err = nil
+	m.activateTextInput(name)
 	if name != "" {
 		m.err = fmt.Errorf("session %q already exists — pick a different name", name)
 	}
@@ -436,11 +437,7 @@ func (m model) startRename() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mode = modeRename
-	m.renameItem = item
-	m.textInput.SetValue(item.session.Name)
-	m.textInput.CursorEnd()
-	m.textInput.Focus()
-	m.err = nil
+	m.activateTextInput(item.session.Name)
 	return m, nil
 }
 
@@ -461,8 +458,12 @@ func (m model) updateRename(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleRename() (tea.Model, tea.Cmd) {
+	item, ok := m.list.SelectedItem().(sessionItem)
+	if !ok {
+		return m, nil
+	}
 	newName := m.textInput.Value()
-	oldName := m.renameItem.session.Name
+	oldName := item.session.Name
 	if newName == "" {
 		m.err = fmt.Errorf("name cannot be empty")
 		return m, nil
@@ -472,7 +473,7 @@ func (m model) handleRename() (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	}
-	if err := renameSession(m.renameItem.session, newName, m.store); err != nil {
+	if err := renameSession(item.session, newName, m.store); err != nil {
 		m.err = err
 		return m, nil
 	}
@@ -482,9 +483,9 @@ func (m model) handleRename() (tea.Model, tea.Cmd) {
 	return m, m.list.NewStatusMessage(fmt.Sprintf("renamed %q → %q", oldName, newName))
 }
 
-func (m model) renderRenamePrompt() string {
+func (m model) renderTextPrompt(label string) string {
 	w, h := m.innerSize()
-	prompt := inputPromptStyle.Render("Rename: ") + m.textInput.View()
+	prompt := inputPromptStyle.Render(label) + m.textInput.View()
 	if m.err != nil {
 		prompt += "\n" + errorStyle.Render("  "+m.err.Error())
 	}
@@ -583,7 +584,7 @@ func (m model) View() string {
 		case modeInput:
 			body = m.renderInputPrompt()
 		case modeRename:
-			body = m.renderRenamePrompt()
+			body = m.renderTextPrompt("Rename: ")
 		default:
 			body = m.list.View()
 		}
@@ -643,13 +644,7 @@ func (m model) renderFramedView(titleRow, helpRow, body string) string {
 }
 
 func (m model) renderInputPrompt() string {
-	w, h := m.innerSize()
-	prompt := inputPromptStyle.Render("Session name: ") + m.textInput.View()
-	if m.err != nil {
-		prompt += "\n" + errorStyle.Render("  "+m.err.Error())
-	}
-	// h-3 accounts for frame overhead (title section + dividers + help row)
-	return lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center, prompt)
+	return m.renderTextPrompt("Session name: ")
 }
 
 // dialogSize returns the available content area inside frameStyle

@@ -56,7 +56,7 @@ func TestDetectState(t *testing.T) {
 		{
 			name: "prompt with text after chevron",
 			text: "Some output\n> some user input",
-			want: StateIdle,
+			want: StateWaiting,
 		},
 		{
 			name: "approve prompt",
@@ -71,7 +71,7 @@ func TestDetectState(t *testing.T) {
 		{
 			name: "claude finished no prompt yet",
 			text: "Here is the summary of changes I made:\n- Updated foo.go\n- Fixed the bug\n",
-			want: StateIdle,
+			want: StateWaiting,
 		},
 		{
 			name: "claude actively building",

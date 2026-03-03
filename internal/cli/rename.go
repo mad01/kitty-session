@@ -28,12 +28,8 @@ func runRename(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sess, err := store.Load(oldName)
+	sess, err := store.Rename(oldName, newName)
 	if err != nil {
-		return fmt.Errorf("session %q not found", oldName)
-	}
-
-	if err := store.Rename(oldName, newName); err != nil {
 		return err
 	}
 

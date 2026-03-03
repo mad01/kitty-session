@@ -53,7 +53,7 @@ func detectSessionState(sess *session.Session) claude.State {
 		// State file is stale but said "working" recently — validate
 		// against terminal output. If the terminal clearly shows idle
 		// or input, use that; otherwise trust "working".
-		if s == "working" && state.IsRecentlyWorking(t) {
+		if mapStringToState(s) == claude.StateWorking && state.IsRecentlyWorking(t) {
 			termState := readTerminalState(sess)
 			if termState == claude.StateIdle || termState == claude.StateNeedsInput {
 				return termState
@@ -175,7 +175,7 @@ func closeSession(sess *session.Session) error {
 
 func renameSession(sess *session.Session, newName string, store *session.Store) error {
 	oldName := sess.Name
-	if err := store.Rename(oldName, newName); err != nil {
+	if _, err := store.Rename(oldName, newName); err != nil {
 		return err
 	}
 	state.Rename(oldName, newName)

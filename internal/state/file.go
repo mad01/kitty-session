@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -17,16 +18,23 @@ type Entry struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+var (
+	dirOnce sync.Once
+	dirPath string
+)
+
 // Dir returns the state file directory (~/.config/ks/state/),
 // creating it on first call.
 func Dir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	dir := filepath.Join(home, ".config", "ks", "state")
-	_ = os.MkdirAll(dir, 0755)
-	return dir
+	dirOnce.Do(func() {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return
+		}
+		dirPath = filepath.Join(home, ".config", "ks", "state")
+		_ = os.MkdirAll(dirPath, 0755)
+	})
+	return dirPath
 }
 
 // Write persists state for the named session with the current timestamp.
@@ -80,11 +88,7 @@ func Rename(oldName, newName string) {
 	if dir == "" {
 		return
 	}
-	old := filepath.Join(dir, oldName+".json")
-	if _, err := os.Stat(old); err != nil {
-		return
-	}
-	_ = os.Rename(old, filepath.Join(dir, newName+".json"))
+	_ = os.Rename(filepath.Join(dir, oldName+".json"), filepath.Join(dir, newName+".json"))
 }
 
 // Clean removes the state file for the named session.

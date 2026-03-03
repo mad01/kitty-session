@@ -103,6 +103,8 @@ func DetectState(text string) State {
 		}
 	}
 
-	// No work signals found — Claude is likely done or between tasks
-	return StateIdle
+	// No clear signal — could be between tool calls or just finished.
+	// Return Waiting ("unknown") rather than Idle ("done") to avoid
+	// falsely advertising completion during inter-tool gaps.
+	return StateWaiting
 }

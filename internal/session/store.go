@@ -79,19 +79,20 @@ func (s *Store) Delete(name string) error {
 	return nil
 }
 
-func (s *Store) Rename(oldName, newName string) error {
+// Rename changes a session's name, returning the updated session.
+func (s *Store) Rename(oldName, newName string) (*Session, error) {
 	sess, err := s.Load(oldName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if s.Exists(newName) {
-		return fmt.Errorf("session %q already exists", newName)
+		return nil, fmt.Errorf("session %q already exists", newName)
 	}
 	sess.Name = newName
 	if err := s.Save(sess); err != nil {
-		return err
+		return nil, err
 	}
-	return s.Delete(oldName)
+	return sess, s.Delete(oldName)
 }
 
 func (s *Store) Exists(name string) bool {
