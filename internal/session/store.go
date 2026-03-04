@@ -9,7 +9,8 @@ import (
 )
 
 type Store struct {
-	dir string
+	dir      string
+	trashDir string
 }
 
 func NewStore() (*Store, error) {
@@ -21,7 +22,11 @@ func NewStore() (*Store, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("cannot create sessions directory: %w", err)
 	}
-	return &Store{dir: dir}, nil
+	trashDir := filepath.Join(dir, "trash")
+	if err := os.MkdirAll(trashDir, 0755); err != nil {
+		return nil, fmt.Errorf("cannot create trash directory: %w", err)
+	}
+	return &Store{dir: dir, trashDir: trashDir}, nil
 }
 
 func (s *Store) Save(sess *Session) error {
@@ -72,9 +77,50 @@ func (s *Store) List() ([]*Session, error) {
 }
 
 func (s *Store) Delete(name string) error {
-	path := s.path(name)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("cannot delete session file: %w", err)
+	src := s.path(name)
+	dst := filepath.Join(s.trashDir, name+".json")
+	if err := os.Rename(src, dst); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("cannot move session to trash: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListTrashed() ([]*Session, error) {
+	entries, err := os.ReadDir(s.trashDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cannot read trash directory: %w", err)
+	}
+	var sessions []*Session
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		data, err := os.ReadFile(filepath.Join(s.trashDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var sess Session
+		if err := json.Unmarshal(data, &sess); err != nil {
+			continue
+		}
+		sess.Name = name
+		sessions = append(sessions, &sess)
+	}
+	return sessions, nil
+}
+
+func (s *Store) Restore(name string) error {
+	src := filepath.Join(s.trashDir, name+".json")
+	dst := s.path(name)
+	if err := os.Rename(src, dst); err != nil {
+		return fmt.Errorf("cannot restore session: %w", err)
 	}
 	return nil
 }
@@ -92,7 +138,10 @@ func (s *Store) Rename(oldName, newName string) (*Session, error) {
 	if err := s.Save(sess); err != nil {
 		return nil, err
 	}
-	return sess, s.Delete(oldName)
+	if err := os.Remove(s.path(oldName)); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("cannot remove old session file: %w", err)
+	}
+	return sess, nil
 }
 
 func (s *Store) Exists(name string) bool {

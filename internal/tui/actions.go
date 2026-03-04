@@ -202,3 +202,22 @@ func deleteSession(sess *session.Session, store *session.Store) error {
 	}
 	return store.Delete(sess.Name)
 }
+
+func restoreSession(name string, store *session.Store) error {
+	return store.Restore(name)
+}
+
+func loadTrashedSessions(store *session.Store) ([]sessionItem, error) {
+	sessions, err := store.ListTrashed()
+	if err != nil {
+		return nil, err
+	}
+	items := make([]sessionItem, len(sessions))
+	for i, sess := range sessions {
+		items[i] = sessionItem{
+			session: sess,
+			state:   claude.StateStopped,
+		}
+	}
+	return items, nil
+}

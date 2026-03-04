@@ -32,11 +32,12 @@ var inputPulseColors = []lipgloss.Color{
 }
 
 type delegateKeyMap struct {
-	open   key.Binding
-	newSes key.Binding
-	close  key.Binding
-	delete key.Binding
-	rename key.Binding
+	open    key.Binding
+	newSes  key.Binding
+	close   key.Binding
+	delete  key.Binding
+	rename  key.Binding
+	restore key.Binding
 }
 
 func newDelegateKeyMap() *delegateKeyMap {
@@ -61,16 +62,20 @@ func newDelegateKeyMap() *delegateKeyMap {
 			key.WithKeys("r"),
 			key.WithHelp("r", "rename"),
 		),
+		restore: key.NewBinding(
+			key.WithKeys("u"),
+			key.WithHelp("u", "restore"),
+		),
 	}
 }
 
 func (d delegateKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{d.open, d.newSes, d.close, d.delete, d.rename}
+	return []key.Binding{d.open, d.newSes, d.close, d.delete, d.rename, d.restore}
 }
 
 func (d delegateKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{d.open, d.newSes, d.close, d.delete, d.rename},
+		{d.open, d.newSes, d.close, d.delete, d.rename, d.restore},
 	}
 }
 

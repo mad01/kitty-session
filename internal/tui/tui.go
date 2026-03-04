@@ -29,6 +29,7 @@ const (
 	modeConfirm
 	modeHelp
 	modeQuitConfirm
+	modeRestore
 )
 
 type confirmAction int
@@ -41,6 +42,7 @@ const (
 type model struct {
 	list          list.Model
 	repoList      list.Model
+	trashList     list.Model
 	helpViewport  viewport.Model
 	store         *session.Store
 	keys          *delegateKeyMap
@@ -181,6 +183,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetHeight(h - 3) // reserve lines for frame overhead (title section + dividers + help)
 		m.repoList.SetWidth(w)
 		m.repoList.SetHeight(h - 3)
+		if m.mode == modeRestore {
+			m.trashList.SetWidth(w)
+			m.trashList.SetHeight(h - 3)
+		}
 	case animTickMsg:
 		animFrame = (animFrame + 1) % len(workingPulseColors)
 		return m, animTickCmd()
@@ -208,6 +214,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConfirm(msg)
 	case modeHelp:
 		return m.updateHelp(msg)
+	case modeRestore:
+		return m.updateRestore(msg)
 	case modeQuitConfirm:
 		return m.updateQuitConfirm(msg)
 	default:
@@ -256,6 +264,8 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startConfirm(actionClose)
 		case key.Matches(msg, m.keys.delete):
 			return m.startConfirm(actionDelete)
+		case key.Matches(msg, m.keys.restore):
+			return m.startRestore()
 		}
 	}
 
@@ -387,6 +397,63 @@ func (m model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.helpViewport, cmd = m.helpViewport.Update(msg)
+	return m, cmd
+}
+
+func (m model) startRestore() (tea.Model, tea.Cmd) {
+	items, err := loadTrashedSessions(m.store)
+	if err != nil || len(items) == 0 {
+		return m, m.list.NewStatusMessage(helpBarStyle.Render("no deleted sessions to restore"))
+	}
+
+	listItems := make([]list.Item, len(items))
+	for i, item := range items {
+		listItems[i] = item
+	}
+
+	w, h := m.innerSize()
+	tl := list.New(listItems, newItemDelegate(), w, h-3)
+	tl.Styles.StatusBar = statusBarStyle
+	tl.Styles.FilterPrompt = filterPromptStyle
+	tl.Styles.FilterCursor = filterCursorStyle
+	tl.Styles.NoItems = noItemsStyle
+	tl.Styles.HelpStyle = helpStyle
+	tl.Styles.PaginationStyle = paginationStyle
+	tl.Styles.ActivePaginationDot = activeDotStyle
+	tl.Styles.InactivePaginationDot = inactiveDotStyle
+	tl.SetShowStatusBar(false)
+	tl.SetShowTitle(false)
+	tl.SetShowHelp(false)
+	tl.SetFilteringEnabled(false)
+
+	m.trashList = tl
+	m.mode = modeRestore
+	return m, nil
+}
+
+func (m model) updateRestore(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case msg.Type == tea.KeyEnter || msg.String() == "o":
+			item, ok := m.trashList.SelectedItem().(sessionItem)
+			if !ok {
+				return m, nil
+			}
+			if err := restoreSession(item.session.Name, m.store); err != nil {
+				m.mode = modeList
+				return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
+			}
+			m.refreshList()
+			m.mode = modeList
+			return m, m.list.NewStatusMessage(fmt.Sprintf("restored %q", item.session.Name))
+		case msg.Type == tea.KeyEscape:
+			m.mode = modeList
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.trashList, cmd = m.trashList.Update(msg)
 	return m, cmd
 }
 
@@ -572,9 +639,12 @@ func (m model) View() string {
 		case modeRename:
 			title = titleBarStyle.Render("rename session")
 			help = helpKeyInlineStyle.Render("enter confirm · ←/→ move cursor · esc cancel")
+		case modeRestore:
+			title = titleBarStyle.Render("restore deleted session")
+			help = helpKeyInlineStyle.Render("enter restore · esc back")
 		default:
 			title = titleBarStyle.Render("ks · kitty claude session manager")
-			help = helpKeyInlineStyle.Render("↑/k up · ↓/j down · / filter · o open · n new · r rename · c close · d delete · ? help")
+			help = helpKeyInlineStyle.Render("↑/k up · ↓/j down · / filter · o open · n new · r rename · c close · d delete · u restore · ? help")
 		}
 
 		var body string
@@ -585,6 +655,8 @@ func (m model) View() string {
 			body = m.renderInputPrompt()
 		case modeRename:
 			body = m.renderTextPrompt("Rename: ")
+		case modeRestore:
+			body = m.trashList.View()
 		default:
 			body = m.list.View()
 		}
@@ -708,6 +780,7 @@ func (m model) renderHelp() string {
 		helpRow("r", "Rename session"),
 		helpRow("c", "Close tab (keep session)"),
 		helpRow("d", "Delete session"),
+		helpRow("u", "Restore deleted session"),
 	)
 
 	filter := helpSectionStyle.Render("Filter")
