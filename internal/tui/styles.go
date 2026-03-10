@@ -46,6 +46,10 @@ var (
 	normalStyle = lipgloss.NewStyle().Foreground(colorTextSec)
 	dirStyle    = lipgloss.NewStyle().Foreground(colorMuted)
 
+	// Tmp repo item (amber)
+	tmpSelectedStyle = lipgloss.NewStyle().Foreground(colorAmber).Bold(true)
+	tmpNormalStyle   = lipgloss.NewStyle().Foreground(colorAmber)
+
 	// Input prompt
 	inputPromptStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	inputStyle       = lipgloss.NewStyle().Foreground(colorTextPri)

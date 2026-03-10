@@ -16,12 +16,22 @@ var _ list.Item = repoItem{}
 
 // repoItem implements list.Item for the repo picker.
 type repoItem struct {
-	name string // org/repo
-	path string // absolute filesystem path
+	name  string // org/repo
+	path  string // absolute filesystem path
+	isTmp bool   // scratch temp directory
 }
 
-func (r repoItem) Title() string       { return r.name }
-func (r repoItem) Description() string { return shortenDir(r.path) }
+func newTmpRepoItem() repoItem {
+	return repoItem{name: "tmp", isTmp: true}
+}
+
+func (r repoItem) Title() string { return r.name }
+func (r repoItem) Description() string {
+	if r.isTmp {
+		return "new scratch directory"
+	}
+	return shortenDir(r.path)
+}
 func (r repoItem) FilterValue() string { return r.name }
 
 // Compile-time interface check.
@@ -60,14 +70,24 @@ func (d repoDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 
 	if isSelected {
 		cursor := cursorStyle.Render("▸ ")
-		styledName := selectedNameStyle.Render(name)
+		var styledName string
+		if item.isTmp {
+			styledName = tmpSelectedStyle.Render(name)
+		} else {
+			styledName = selectedNameStyle.Render(name)
+		}
 		if dir != "" {
 			fmt.Fprint(w, cursor+styledName+"  "+selectedDirStyle.Render(dir))
 		} else {
 			fmt.Fprint(w, cursor+styledName)
 		}
 	} else {
-		styledName := normalStyle.Render(name)
+		var styledName string
+		if item.isTmp {
+			styledName = tmpNormalStyle.Render(name)
+		} else {
+			styledName = normalStyle.Render(name)
+		}
 		if dir != "" {
 			fmt.Fprint(w, "  "+styledName+"  "+dirStyle.Render(dir))
 		} else {
@@ -90,27 +110,24 @@ func truncateStr(s string, maxW int) string {
 	return s[:maxW-3] + "..."
 }
 
-// loadRepos scans configured directories for git repos.
-// Returns nil (not an error) if config is missing.
+// loadRepos scans configured directories for git repos and prepends a tmp item.
 func loadRepos() []repoItem {
+	var items []repoItem
+
 	cfg, err := config.Load()
-	if err != nil {
-		return nil
+	if err == nil {
+		repos, walkErr := finder.Walk(cfg.Dirs)
+		if walkErr == nil {
+			items = make([]repoItem, len(repos))
+			for i, r := range repos {
+				items[i] = repoItem{name: r.Name, path: r.Path}
+			}
+			sort.Slice(items, func(i, j int) bool {
+				return items[i].name < items[j].name
+			})
+		}
 	}
 
-	repos, err := finder.Walk(cfg.Dirs)
-	if err != nil {
-		return nil
-	}
-
-	items := make([]repoItem, len(repos))
-	for i, r := range repos {
-		items[i] = repoItem{name: r.Name, path: r.Path}
-	}
-
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].name < items[j].name
-	})
-
-	return items
+	// Always prepend tmp so the picker is never empty.
+	return append([]repoItem{newTmpRepoItem()}, items...)
 }

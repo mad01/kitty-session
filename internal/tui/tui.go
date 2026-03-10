@@ -51,7 +51,6 @@ type model struct {
 	height        int
 	textInput     textinput.Model
 	repoDir       string
-	hasRepos      bool
 	confirmAction confirmAction
 	confirmItem   sessionItem
 	err           error
@@ -116,10 +115,9 @@ func newModel(store *session.Store, items []sessionItem, repoItems []repoItem) m
 		list:      l,
 		repoList:  rl,
 		textInput: ti,
-		store:     store,
-		keys:      keys,
-		mode:      modeList,
-		hasRepos:  len(repoItems) > 0,
+		store: store,
+		keys:  keys,
+		mode:  modeList,
 	}
 }
 
@@ -247,16 +245,9 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.open):
 			return m.handleOpen()
 		case key.Matches(msg, m.keys.newSes):
-			if m.hasRepos {
-				m.mode = modeRepoPicker
-				m.repoList.ResetFilter()
-				m.err = nil
-			} else {
-				dir, _ := os.Getwd()
-				m.repoDir = dir
-				m.mode = modeInput
-				m.activateTextInput(suggestSessionNameForDir(dir))
-			}
+			m.mode = modeRepoPicker
+			m.repoList.ResetFilter()
+			m.err = nil
 			return m, nil
 		case key.Matches(msg, m.keys.rename):
 			return m.startRename()
@@ -315,6 +306,17 @@ func (m model) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 // falling back to the name input if the auto-generated name conflicts.
 func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 	dir := item.path
+
+	if item.isTmp {
+		tmpDir, err := os.MkdirTemp("", "ks-*")
+		if err != nil {
+			m.mode = modeList
+			m.repoList.ResetFilter()
+			return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
+		}
+		dir = tmpDir
+	}
+
 	name := suggestSessionNameForDir(dir)
 
 	if name != "" && !m.store.Exists(name) {
@@ -344,11 +346,7 @@ func (m model) updateInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEscape:
 			m.textInput.Blur()
-			if m.hasRepos {
-				m.mode = modeRepoPicker
-			} else {
-				m.mode = modeList
-			}
+			m.mode = modeRepoPicker
 			return m, nil
 		case tea.KeyEnter:
 			return m.handleCreate()
