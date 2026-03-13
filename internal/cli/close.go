@@ -43,6 +43,9 @@ func runClose(cmd *cobra.Command, args []string) error {
 	if sess.KittyShellWindowID != 0 {
 		_ = kitty.CloseTabForWindow(sess.KittyShellWindowID)
 	}
+	if sess.KittySummaryWindowID != 0 {
+		_ = kitty.CloseTabForWindow(sess.KittySummaryWindowID)
+	}
 
 	if keepSession {
 		fmt.Fprintf(cmd.OutOrStdout(), "session %q tab closed (session kept for recovery)\n", name)

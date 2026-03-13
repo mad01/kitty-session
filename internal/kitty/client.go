@@ -217,6 +217,14 @@ func FirstWindowInTab(tabID int) (int, error) {
 	return 0, fmt.Errorf("tab %d not found", tabID)
 }
 
+// SendText sends text to a specific window (pane) by ID.
+func SendText(windowID int, text string) error {
+	if err := exec.Command("kitty", "@", "send-text", "--match=id:"+strconv.Itoa(windowID), text).Run(); err != nil {
+		return fmt.Errorf("kitty @ send-text: %w", err)
+	}
+	return nil
+}
+
 func trimOutput(b []byte) string {
 	s := string(b)
 	// Trim whitespace and newlines

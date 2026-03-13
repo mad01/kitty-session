@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
 )
 
@@ -158,6 +159,15 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+// summaryTickMsg triggers periodic refresh of summary tabs.
+type summaryTickMsg time.Time
+
+func summaryTickCmd() tea.Cmd {
+	return tea.Tick(5*time.Minute, func(t time.Time) tea.Msg {
+		return summaryTickMsg(t)
+	})
+}
+
 // animTickMsg drives the pulsing animation for the working badge.
 type animTickMsg time.Time
 
@@ -168,7 +178,7 @@ func animTickCmd() tea.Cmd {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), animTickCmd())
+	return tea.Batch(tickCmd(), animTickCmd(), summaryTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -188,6 +198,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case animTickMsg:
 		animFrame = (animFrame + 1) % len(workingPulseColors)
 		return m, animTickCmd()
+	case summaryTickMsg:
+		// Refresh all active summary tabs
+		for _, item := range m.list.Items() {
+			if si, ok := item.(sessionItem); ok && si.session.KittySummaryWindowID != 0 {
+				_ = kitty.SendText(si.session.KittySummaryWindowID, "refresh\n")
+			}
+		}
+		return m, summaryTickCmd()
 	case tickMsg:
 		if m.mode == modeList {
 			m.refreshList()

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -49,11 +51,17 @@ func runHook(cmd *cobra.Command, args []string) error {
 	}
 
 	var s string
+	var refreshSummary bool
 	switch payload.Event {
 	case "PreToolUse":
 		s = "working"
+		// Refresh summary on plan mode transitions
+		if payload.Tool.Name == "EnterPlanMode" || payload.Tool.Name == "ExitPlanMode" {
+			refreshSummary = true
+		}
 	case "Stop":
 		s = "idle"
+		refreshSummary = true
 	case "Notification":
 		switch payload.Notification.Type {
 		case "permission_prompt", "elicitation_dialog":
@@ -67,5 +75,23 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return state.Write(name, s)
+	if err := state.Write(name, s); err != nil {
+		return err
+	}
+
+	if refreshSummary {
+		store, err := session.NewStore()
+		if err != nil {
+			return nil
+		}
+		sess, err := store.Load(name)
+		if err != nil {
+			return nil
+		}
+		if sess.KittySummaryWindowID != 0 {
+			_ = kitty.SendText(sess.KittySummaryWindowID, "refresh\n")
+		}
+	}
+
+	return nil
 }

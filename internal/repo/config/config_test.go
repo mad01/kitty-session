@@ -138,6 +138,44 @@ func TestEffectiveLayoutNilConfig(t *testing.T) {
 	}
 }
 
+func TestSummaryEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected bool
+	}{
+		{"default (no summary)", "dirs:\n  - /tmp\n", false},
+		{"summary false", "dirs:\n  - /tmp\nsummary: false\n", false},
+		{"summary true split layout", "dirs:\n  - /tmp\nsummary: true\n", false},
+		{"summary true tab layout", "dirs:\n  - /tmp\nlayout: tab\nsummary: true\n", true},
+		{"summary false tab layout", "dirs:\n  - /tmp\nlayout: tab\nsummary: false\n", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			cfgPath := filepath.Join(tmp, "config.yaml")
+			if err := os.WriteFile(cfgPath, []byte(tt.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadFrom(cfgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.SummaryEnabled(); got != tt.expected {
+				t.Errorf("SummaryEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSummaryEnabledNilConfig(t *testing.T) {
+	var cfg *Config
+	if cfg.SummaryEnabled() {
+		t.Error("expected SummaryEnabled() = false for nil config")
+	}
+}
+
 func TestLoadFromGlobalConfig(t *testing.T) {
 	tmp := t.TempDir()
 

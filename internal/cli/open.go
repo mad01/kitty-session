@@ -6,6 +6,7 @@ import (
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
+	"github.com/mad01/kitty-session/internal/summary"
 	"github.com/spf13/cobra"
 )
 
@@ -68,6 +69,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	sess.KittyShellWindowID = 0
+	sess.KittySummaryWindowID = 0
 	if layout == config.LayoutTab {
 		shellWindowID, err := kitty.LaunchTabInWindow(windowID, sess.Dir)
 		if err != nil {
@@ -77,6 +79,16 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	} else {
 		if err := kitty.LaunchSplit(sess.Dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)
+		}
+	}
+
+	// Launch summary tab if enabled
+	if cfg.SummaryEnabled() {
+		summaryWindowID, err := summary.LaunchTab(windowID, windowID, sess.Dir)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not create summary tab: %v\n", err)
+		} else {
+			sess.KittySummaryWindowID = summaryWindowID
 		}
 	}
 

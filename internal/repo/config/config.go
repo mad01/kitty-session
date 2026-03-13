@@ -19,8 +19,15 @@ const (
 
 // Config holds the repo finder configuration.
 type Config struct {
-	Dirs   []string `yaml:"dirs"`
-	Layout string   `yaml:"layout"`
+	Dirs    []string `yaml:"dirs"`
+	Layout  string   `yaml:"layout"`
+	Summary bool     `yaml:"summary"`
+}
+
+// SummaryEnabled returns true when the summary tab should be created.
+// Requires summary: true AND layout: tab.
+func (c *Config) SummaryEnabled() bool {
+	return c != nil && c.Summary && c.EffectiveLayout() == LayoutTab
 }
 
 // EffectiveLayout returns the configured layout, defaulting to split.

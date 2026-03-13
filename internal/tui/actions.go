@@ -11,6 +11,7 @@ import (
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
+	"github.com/mad01/kitty-session/internal/summary"
 )
 
 // Compile-time interface check.
@@ -141,6 +142,7 @@ func openSession(sess *session.Session, store *session.Store) error {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
 	sess.KittyShellWindowID = 0
+	sess.KittySummaryWindowID = 0
 	if layout == config.LayoutTab {
 		shellWindowID, err := kitty.LaunchTabInWindow(windowID, sess.Dir)
 		if err != nil {
@@ -150,6 +152,12 @@ func openSession(sess *session.Session, store *session.Store) error {
 	} else {
 		if err := kitty.LaunchSplit(sess.Dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)
+		}
+	}
+	if cfg.SummaryEnabled() {
+		summaryWindowID, err := summary.LaunchTab(windowID, windowID, sess.Dir)
+		if err == nil {
+			sess.KittySummaryWindowID = summaryWindowID
 		}
 	}
 	_ = kitty.FocusWindow(windowID)
@@ -183,6 +191,12 @@ func createSession(name, dir string, store *session.Store) error {
 	} else {
 		if err := kitty.LaunchSplit(dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)
+		}
+	}
+	if cfg.SummaryEnabled() {
+		summaryWindowID, err := summary.LaunchTab(windowID, windowID, dir)
+		if err == nil {
+			sess.KittySummaryWindowID = summaryWindowID
 		}
 	}
 	_ = kitty.FocusWindow(windowID)
@@ -230,6 +244,9 @@ func closeSessionTabs(sess *session.Session) {
 	}
 	if sess.KittyShellWindowID != 0 {
 		_ = kitty.CloseTabForWindow(sess.KittyShellWindowID)
+	}
+	if sess.KittySummaryWindowID != 0 {
+		_ = kitty.CloseTabForWindow(sess.KittySummaryWindowID)
 	}
 }
 
