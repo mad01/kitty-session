@@ -67,10 +67,13 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
 
+	sess.KittyShellWindowID = 0
 	if layout == config.LayoutTab {
-		if _, err := kitty.LaunchTabInWindow(windowID, sess.Dir); err != nil {
+		shellWindowID, err := kitty.LaunchTabInWindow(windowID, sess.Dir)
+		if err != nil {
 			return fmt.Errorf("cannot create shell tab: %w", err)
 		}
+		sess.KittyShellWindowID = shellWindowID
 	} else {
 		if err := kitty.LaunchSplit(sess.Dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)

@@ -36,11 +36,12 @@ func runClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session %q not found", name)
 	}
 
-	// Close the kitty tab if it's still running
+	// Close the kitty tab(s) if still running
 	if kitty.TabExists(sess.KittyTabID) {
-		if err := kitty.CloseTab(sess.KittyTabID); err != nil {
-			return fmt.Errorf("cannot close tab: %w", err)
-		}
+		_ = kitty.CloseTab(sess.KittyTabID)
+	}
+	if sess.KittyShellWindowID != 0 {
+		_ = kitty.CloseTabForWindow(sess.KittyShellWindowID)
 	}
 
 	if keepSession {

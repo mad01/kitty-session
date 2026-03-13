@@ -140,10 +140,13 @@ func openSession(sess *session.Session, store *session.Store) error {
 	if err != nil {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
+	sess.KittyShellWindowID = 0
 	if layout == config.LayoutTab {
-		if _, err := kitty.LaunchTabInWindow(windowID, sess.Dir); err != nil {
+		shellWindowID, err := kitty.LaunchTabInWindow(windowID, sess.Dir)
+		if err != nil {
 			return fmt.Errorf("cannot create shell tab: %w", err)
 		}
+		sess.KittyShellWindowID = shellWindowID
 	} else {
 		if err := kitty.LaunchSplit(sess.Dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)
@@ -170,25 +173,25 @@ func createSession(name, dir string, store *session.Store) error {
 	if err != nil {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
+	sess := session.New(name, dir, tabID, windowID)
 	if layout == config.LayoutTab {
-		if _, err := kitty.LaunchTabInWindow(windowID, dir); err != nil {
+		shellWindowID, err := kitty.LaunchTabInWindow(windowID, dir)
+		if err != nil {
 			return fmt.Errorf("cannot create shell tab: %w", err)
 		}
+		sess.KittyShellWindowID = shellWindowID
 	} else {
 		if err := kitty.LaunchSplit(dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)
 		}
 	}
 	_ = kitty.FocusWindow(windowID)
-	sess := session.New(name, dir, tabID, windowID)
 	return store.Save(sess)
 }
 
 func closeSession(sess *session.Session) error {
 	state.Clean(sess.Name)
-	if kitty.TabExists(sess.KittyTabID) {
-		return kitty.CloseTab(sess.KittyTabID)
-	}
+	closeSessionTabs(sess)
 	return nil
 }
 
@@ -214,12 +217,20 @@ func renameSession(sess *session.Session, newName string, store *session.Store) 
 
 func deleteSession(sess *session.Session, store *session.Store) error {
 	state.Clean(sess.Name)
-	if kitty.TabExists(sess.KittyTabID) {
-		if err := kitty.CloseTab(sess.KittyTabID); err != nil {
-			return err
-		}
-	}
+	closeSessionTabs(sess)
 	return store.Delete(sess.Name)
+}
+
+// closeSessionTabs closes all kitty tabs belonging to a session.
+// For split layout this is just the main tab; for tab layout it also
+// closes the separate shell tab.
+func closeSessionTabs(sess *session.Session) {
+	if kitty.TabExists(sess.KittyTabID) {
+		_ = kitty.CloseTab(sess.KittyTabID)
+	}
+	if sess.KittyShellWindowID != 0 {
+		_ = kitty.CloseTabForWindow(sess.KittyShellWindowID)
+	}
 }
 
 func restoreSession(name string, store *session.Store) error {

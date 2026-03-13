@@ -94,6 +94,14 @@ func CloseTab(tabID int) error {
 	return nil
 }
 
+// CloseTabForWindow closes the tab containing the given window (pane) ID.
+func CloseTabForWindow(windowID int) error {
+	if err := exec.Command("kitty", "@", "close-tab", "--match=id:"+strconv.Itoa(windowID)).Run(); err != nil {
+		return fmt.Errorf("kitty @ close-tab for window: %w", err)
+	}
+	return nil
+}
+
 // ListTabs returns all tabs across all kitty OS windows.
 func ListTabs() ([]Tab, error) {
 	out, err := exec.Command("kitty", "@", "ls").Output()

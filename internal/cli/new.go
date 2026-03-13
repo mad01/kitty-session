@@ -72,10 +72,13 @@ func runNew(cmd *cobra.Command, args []string) error {
 	}
 
 	// Launch shell as split or tab based on layout config
+	sess := session.New(newName, dir, tabID, windowID)
 	if layout == config.LayoutTab {
-		if _, err := kitty.LaunchTabInWindow(windowID, dir); err != nil {
+		shellWindowID, err := kitty.LaunchTabInWindow(windowID, dir)
+		if err != nil {
 			return fmt.Errorf("cannot create shell tab: %w", err)
 		}
+		sess.KittyShellWindowID = shellWindowID
 	} else {
 		if err := kitty.LaunchSplit(dir); err != nil {
 			return fmt.Errorf("cannot create split: %w", err)
@@ -87,8 +90,6 @@ func runNew(cmd *cobra.Command, args []string) error {
 		// Non-fatal: session is still usable
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
 	}
-
-	sess := session.New(newName, dir, tabID, windowID)
 	if err := store.Save(sess); err != nil {
 		return fmt.Errorf("cannot save session: %w", err)
 	}
