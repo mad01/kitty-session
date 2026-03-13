@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -49,6 +50,10 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot resolve directory: %w", err)
 	}
 
+	// Load config for layout preference
+	cfg, _ := config.Load()
+	layout := cfg.EffectiveLayout()
+
 	// Launch tab with claude
 	windowID, err := kitty.LaunchTab(dir, "--env", "KS_SESSION_NAME="+newName, "--", "claude")
 	if err != nil {
@@ -66,9 +71,15 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
 
-	// Launch shell split below
-	if err := kitty.LaunchSplit(dir); err != nil {
-		return fmt.Errorf("cannot create split: %w", err)
+	// Launch shell as split or tab based on layout config
+	if layout == config.LayoutTab {
+		if _, err := kitty.LaunchTabInWindow(windowID, dir); err != nil {
+			return fmt.Errorf("cannot create shell tab: %w", err)
+		}
+	} else {
+		if err := kitty.LaunchSplit(dir); err != nil {
+			return fmt.Errorf("cannot create split: %w", err)
+		}
 	}
 
 	// Focus back on the claude window (top pane)

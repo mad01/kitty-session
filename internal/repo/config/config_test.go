@@ -74,6 +74,70 @@ func TestLoadFromInvalidYAML(t *testing.T) {
 	}
 }
 
+func TestEffectiveLayoutDefault(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	content := []byte("dirs:\n  - /tmp/repos\n")
+	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.EffectiveLayout(); got != LayoutSplit {
+		t.Errorf("expected %q, got %q", LayoutSplit, got)
+	}
+}
+
+func TestEffectiveLayoutTab(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	content := []byte("dirs:\n  - /tmp/repos\nlayout: tab\n")
+	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.EffectiveLayout(); got != LayoutTab {
+		t.Errorf("expected %q, got %q", LayoutTab, got)
+	}
+}
+
+func TestEffectiveLayoutInvalid(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	content := []byte("dirs:\n  - /tmp/repos\nlayout: invalid\n")
+	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.EffectiveLayout(); got != LayoutSplit {
+		t.Errorf("expected %q for invalid layout, got %q", LayoutSplit, got)
+	}
+}
+
+func TestEffectiveLayoutNilConfig(t *testing.T) {
+	var cfg *Config
+	if got := cfg.EffectiveLayout(); got != LayoutSplit {
+		t.Errorf("expected %q for nil config, got %q", LayoutSplit, got)
+	}
+}
+
 func TestLoadFromGlobalConfig(t *testing.T) {
 	tmp := t.TempDir()
 

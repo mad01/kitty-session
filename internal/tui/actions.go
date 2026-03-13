@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
 )
@@ -124,6 +125,9 @@ func openSession(sess *session.Session, store *session.Store) error {
 		return kitty.FocusTab(sess.KittyTabID)
 	}
 
+	cfg, _ := config.Load()
+	layout := cfg.EffectiveLayout()
+
 	// Recreate the session — pass PATH so claude finds ~/.local/bin
 	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "PATH="+os.Getenv("PATH"), "--env", "KS_SESSION_NAME="+sess.Name, "--", "claude")
 	if err != nil {
@@ -136,8 +140,14 @@ func openSession(sess *session.Session, store *session.Store) error {
 	if err != nil {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
-	if err := kitty.LaunchSplit(sess.Dir); err != nil {
-		return fmt.Errorf("cannot create split: %w", err)
+	if layout == config.LayoutTab {
+		if _, err := kitty.LaunchTabInWindow(windowID, sess.Dir); err != nil {
+			return fmt.Errorf("cannot create shell tab: %w", err)
+		}
+	} else {
+		if err := kitty.LaunchSplit(sess.Dir); err != nil {
+			return fmt.Errorf("cannot create split: %w", err)
+		}
 	}
 	_ = kitty.FocusWindow(windowID)
 	sess.KittyTabID = tabID
@@ -146,6 +156,9 @@ func openSession(sess *session.Session, store *session.Store) error {
 }
 
 func createSession(name, dir string, store *session.Store) error {
+	cfg, _ := config.Load()
+	layout := cfg.EffectiveLayout()
+
 	windowID, err := kitty.LaunchTab(dir, "--env", "PATH="+os.Getenv("PATH"), "--env", "KS_SESSION_NAME="+name, "--", "claude")
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
@@ -157,8 +170,14 @@ func createSession(name, dir string, store *session.Store) error {
 	if err != nil {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
-	if err := kitty.LaunchSplit(dir); err != nil {
-		return fmt.Errorf("cannot create split: %w", err)
+	if layout == config.LayoutTab {
+		if _, err := kitty.LaunchTabInWindow(windowID, dir); err != nil {
+			return fmt.Errorf("cannot create shell tab: %w", err)
+		}
+	} else {
+		if err := kitty.LaunchSplit(dir); err != nil {
+			return fmt.Errorf("cannot create split: %w", err)
+		}
 	}
 	_ = kitty.FocusWindow(windowID)
 	sess := session.New(name, dir, tabID, windowID)

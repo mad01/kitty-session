@@ -35,6 +35,22 @@ func LaunchTab(dir string, args ...string) (int, error) {
 	return id, nil
 }
 
+// LaunchTabInWindow creates a new tab in the OS window that contains windowID.
+// Returns the new window (pane) ID inside that tab.
+func LaunchTabInWindow(windowID int, dir string, args ...string) (int, error) {
+	cmdArgs := []string{"@", "launch", "--type=tab", "--match=id:" + strconv.Itoa(windowID), "--cwd=" + dir}
+	cmdArgs = append(cmdArgs, args...)
+	out, err := exec.Command("kitty", cmdArgs...).Output()
+	if err != nil {
+		return 0, fmt.Errorf("kitty @ launch tab-in-window: %w", err)
+	}
+	id, err := strconv.Atoi(trimOutput(out))
+	if err != nil {
+		return 0, fmt.Errorf("cannot parse window id: %w (output: %q)", err, string(out))
+	}
+	return id, nil
+}
+
 // LaunchSplit creates a horizontal split in the current tab running in dir.
 func LaunchSplit(dir string, args ...string) error {
 	cmdArgs := []string{"@", "launch", "--type=window", "--location=hsplit", "--bias=30", "--cwd=" + dir}

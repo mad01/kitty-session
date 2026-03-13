@@ -11,9 +11,25 @@ import (
 
 const configFileName = "config.yaml"
 
+// Layout constants for session window arrangement.
+const (
+	LayoutSplit = "split"
+	LayoutTab   = "tab"
+)
+
 // Config holds the repo finder configuration.
 type Config struct {
-	Dirs []string `yaml:"dirs"`
+	Dirs   []string `yaml:"dirs"`
+	Layout string   `yaml:"layout"`
+}
+
+// EffectiveLayout returns the configured layout, defaulting to split.
+// Safe to call on a nil receiver.
+func (c *Config) EffectiveLayout() string {
+	if c != nil && c.Layout == LayoutTab {
+		return LayoutTab
+	}
+	return LayoutSplit
 }
 
 // Load reads config.yaml from ~/.config/ks/config.yaml.

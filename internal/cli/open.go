@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -49,6 +50,9 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	// Tab is gone — recreate the session
+	cfg, _ := config.Load()
+	layout := cfg.EffectiveLayout()
+
 	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "KS_SESSION_NAME="+name, "--", "claude")
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
@@ -63,8 +67,14 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find tab: %w", err)
 	}
 
-	if err := kitty.LaunchSplit(sess.Dir); err != nil {
-		return fmt.Errorf("cannot create split: %w", err)
+	if layout == config.LayoutTab {
+		if _, err := kitty.LaunchTabInWindow(windowID, sess.Dir); err != nil {
+			return fmt.Errorf("cannot create shell tab: %w", err)
+		}
+	} else {
+		if err := kitty.LaunchSplit(sess.Dir); err != nil {
+			return fmt.Errorf("cannot create split: %w", err)
+		}
 	}
 
 	if err := kitty.FocusWindow(windowID); err != nil {

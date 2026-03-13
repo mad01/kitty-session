@@ -1,6 +1,6 @@
 # kitty-session
 
-Kitty Claude Session Manager — manage named kitty terminal sessions with Claude on top and a shell on bottom.
+Kitty Claude Session Manager — manage named kitty terminal sessions with Claude and a shell, using either a split layout (Claude on top, shell on bottom) or a tab layout (separate tabs).
 
 ## Screenshots
 
@@ -20,7 +20,7 @@ Press `n` to open the repository picker. Browse all configured repos or type to 
 
 ### Open a session
 
-Select a session and press `o` to open it. Each session is a kitty tab split with Claude Code on top and a shell on bottom.
+Select a session and press `o` to open it. Each session opens Claude Code and a shell — as a horizontal split (default) or as separate tabs.
 
 ![Running session](images/session.png)
 
@@ -76,10 +76,14 @@ repo() { local d=$(ks repo); [[ -n "$d" ]] && cd "$d"; }
 
 ## Config
 
-Repository directories are configured in `~/.config/ks/config.yaml`:
+Configuration lives in `~/.config/ks/config.yaml`:
 
 ```yaml
 dirs:
   - ~/code/src/github.com/mad01
   - ~/workspace
+layout: split  # "split" (default) or "tab"
 ```
+
+- `dirs` — parent directories to scan for repositories
+- `layout` — `split` puts Claude and shell in a horizontal split (Claude on top 30%, shell on bottom 70%). `tab` creates separate kitty tabs for Claude and shell within the same OS window.
