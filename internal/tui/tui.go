@@ -660,7 +660,7 @@ func (m model) View() string {
 			help = helpKeyInlineStyle.Render("enter restore · esc back")
 		default:
 			title = titleBarStyle.Render("ks · kitty claude session manager")
-			help = helpKeyInlineStyle.Render("↑/k up · ↓/j down · / filter · o open · n new · r rename · c close · d delete · u restore · ? help")
+			help = helpKeyInlineStyle.Render("k/j navigate · o open · n new · d delete · ? help")
 		}
 
 		var body string
