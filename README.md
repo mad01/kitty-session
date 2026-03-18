@@ -68,6 +68,33 @@ ks repo --json                 # list all repos as JSON
 ks repo --toon                 # list all repos as TOON (token-optimized for LLMs)
 ```
 
+### Output formats
+
+`ks repo` supports multiple output formats for different consumers:
+
+| Flag | Format | Use case |
+|------|--------|----------|
+| *(none)* | Interactive fuzzy finder | Human — pick a repo |
+| `--list` | TSV (`name\tpath`) | Shell scripts, piping |
+| `--json` | JSON array | Structured tooling |
+| `--toon` | [TOON](https://github.com/alpkeskin/gotoon) | LLMs (30-60% fewer tokens than JSON) |
+
+**`--json` example:**
+```json
+[
+  {
+    "name": "mad01/kitty-session",
+    "path": "/Users/you/code/src/github.com/mad01/kitty-session"
+  }
+]
+```
+
+**`--toon` example:**
+```
+repos[1]{name,path}:
+ mad01/kitty-session,/Users/you/code/src/github.com/mad01/kitty-session
+```
+
 ### Shell function
 
 Add to your shell config to jump to a repo:
