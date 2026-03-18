@@ -22,12 +22,22 @@ type Config struct {
 	Dirs    []string `yaml:"dirs"`
 	Layout  string   `yaml:"layout"`
 	Summary bool     `yaml:"summary"`
+	TmpDir  string   `yaml:"tmpdir"`
 }
 
 // SummaryEnabled returns true when the summary tab should be created.
 // Requires summary: true AND layout: tab.
 func (c *Config) SummaryEnabled() bool {
 	return c != nil && c.Summary && c.EffectiveLayout() == LayoutTab
+}
+
+// EffectiveTmpDir returns the configured tmpdir for scratch sessions.
+// Returns empty string when unset, meaning os.MkdirTemp default should be used.
+func (c *Config) EffectiveTmpDir() string {
+	if c != nil && c.TmpDir != "" {
+		return expandTilde(c.TmpDir)
+	}
+	return ""
 }
 
 // EffectiveLayout returns the configured layout, defaulting to split.
@@ -73,6 +83,7 @@ func loadFrom(path string) (*Config, error) {
 	for i, d := range cfg.Dirs {
 		cfg.Dirs[i] = expandTilde(d)
 	}
+	cfg.TmpDir = expandTilde(cfg.TmpDir)
 
 	return &cfg, nil
 }

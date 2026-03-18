@@ -169,6 +169,72 @@ func TestSummaryEnabled(t *testing.T) {
 	}
 }
 
+func TestEffectiveTmpDirDefault(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	content := []byte("dirs:\n  - /tmp/repos\n")
+	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.EffectiveTmpDir(); got != "" {
+		t.Errorf("expected empty string for default tmpdir, got %q", got)
+	}
+}
+
+func TestEffectiveTmpDirCustom(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	content := []byte("dirs:\n  - /tmp/repos\ntmpdir: /custom/workspaces\n")
+	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.EffectiveTmpDir(); got != "/custom/workspaces" {
+		t.Errorf("expected /custom/workspaces, got %q", got)
+	}
+}
+
+func TestEffectiveTmpDirTilde(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	content := []byte("dirs:\n  - /tmp/repos\ntmpdir: ~/.config/ks/workspaces\n")
+	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".config/ks/workspaces")
+	if got := cfg.EffectiveTmpDir(); got != expected {
+		t.Errorf("expected %s, got %s", expected, got)
+	}
+}
+
+func TestEffectiveTmpDirNilConfig(t *testing.T) {
+	var cfg *Config
+	if got := cfg.EffectiveTmpDir(); got != "" {
+		t.Errorf("expected empty string for nil config, got %q", got)
+	}
+}
+
 func TestSummaryEnabledNilConfig(t *testing.T) {
 	var cfg *Config
 	if cfg.SummaryEnabled() {

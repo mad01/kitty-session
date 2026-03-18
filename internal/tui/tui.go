@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 )
 
@@ -326,7 +327,18 @@ func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 	dir := item.path
 
 	if item.isTmp {
-		tmpDir, err := os.MkdirTemp("", "ks-*")
+		tmpBase := ""
+		if cfg, err := config.Load(); err == nil {
+			tmpBase = cfg.EffectiveTmpDir()
+		}
+		if tmpBase != "" {
+			if err := os.MkdirAll(tmpBase, 0o755); err != nil {
+				m.mode = modeList
+				m.repoList.ResetFilter()
+				return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
+			}
+		}
+		tmpDir, err := os.MkdirTemp(tmpBase, "ks-*")
 		if err != nil {
 			m.mode = modeList
 			m.repoList.ResetFilter()

@@ -83,7 +83,9 @@ dirs:
   - ~/code/src/github.com/mad01
   - ~/workspace
 layout: split  # "split" (default) or "tab"
+tmpdir: ~/.config/ks/claude-session-workspaces  # optional
 ```
 
 - `dirs` — parent directories to scan for repositories
 - `layout` — `split` puts Claude and shell in a horizontal split (Claude on top 30%, shell on bottom 70%). `tab` creates separate kitty tabs for Claude and shell within the same OS window.
+- `tmpdir` — base directory for scratch sessions created via the `tmp` picker item. Defaults to the OS temp directory when unset. Setting a custom path (e.g. `~/.config/ks/claude-session-workspaces`) keeps scratch workspaces in a predictable location that won't be cleaned up by the OS.
