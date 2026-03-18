@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,6 +159,100 @@ func TestRepoListMultipleRepos(t *testing.T) {
 	rootCmd.SetOut(nil)
 	rootCmd.SetErr(nil)
 	repoListFlag = false
+}
+
+func TestRepoTableFlag(t *testing.T) {
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "org", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, repoDir)
+	gitSetRemote(t, repoDir, "git@github.com:testorg/myrepo.git")
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "--table"})
+	repoListFlag = false
+	repoJSONFlag = false
+	repoTableFlag = false
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "REPO") {
+		t.Errorf("expected table header REPO, got: %s", output)
+	}
+	if !strings.Contains(output, "PATH") {
+		t.Errorf("expected table header PATH, got: %s", output)
+	}
+	if !strings.Contains(output, "testorg/myrepo") {
+		t.Errorf("expected testorg/myrepo in table, got: %s", output)
+	}
+	if !strings.Contains(output, repoDir) {
+		t.Errorf("expected path %s in table, got: %s", repoDir, output)
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	repoListFlag = false
+	repoJSONFlag = false
+	repoTableFlag = false
+}
+
+func TestRepoJSONFlag(t *testing.T) {
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "org", "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, repoDir)
+	gitSetRemote(t, repoDir, "git@github.com:testorg/myrepo.git")
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "--json"})
+	repoListFlag = false
+	repoJSONFlag = false
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var repos []struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &repos); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, buf.String())
+	}
+
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repos))
+	}
+	if repos[0].Name != "testorg/myrepo" {
+		t.Errorf("expected name testorg/myrepo, got %s", repos[0].Name)
+	}
+	if repos[0].Path != repoDir {
+		t.Errorf("expected path %s, got %s", repoDir, repos[0].Path)
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	repoListFlag = false
+	repoJSONFlag = false
 }
 
 func gitInit(t *testing.T, dir string) {
