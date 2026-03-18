@@ -65,7 +65,7 @@ ks version                     # print version
 ks repo                        # fuzzy repo finder
 ks repo --list                 # list all repos
 ks repo --json                 # list all repos as JSON
-ks repo --table                # list all repos as formatted table
+ks repo --toon                 # list all repos as TOON (token-optimized for LLMs)
 ```
 
 ### Shell function

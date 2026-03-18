@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	"github.com/alpkeskin/gotoon"
 	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
 	"github.com/spf13/cobra"
 
@@ -14,9 +13,9 @@ import (
 )
 
 var (
-	repoListFlag  bool
-	repoJSONFlag  bool
-	repoTableFlag bool
+	repoListFlag bool
+	repoJSONFlag bool
+	repoToonFlag bool
 )
 
 var repoCmd = &cobra.Command{
@@ -29,7 +28,7 @@ var repoCmd = &cobra.Command{
 func init() {
 	repoCmd.Flags().BoolVar(&repoListFlag, "list", false, "list all repos (non-interactive)")
 	repoCmd.Flags().BoolVar(&repoJSONFlag, "json", false, "output as JSON (implies --list)")
-	repoCmd.Flags().BoolVar(&repoTableFlag, "table", false, "output as formatted table (implies --list)")
+	repoCmd.Flags().BoolVar(&repoToonFlag, "toon", false, "output as TOON for LLMs (implies --list)")
 	rootCmd.AddCommand(repoCmd)
 }
 
@@ -63,8 +62,17 @@ func runRepo(cmd *cobra.Command, args []string) error {
 		return enc.Encode(items)
 	}
 
-	if repoTableFlag {
-		return renderRepoTable(cmd, repos)
+	if repoToonFlag {
+		items := make([]map[string]any, len(repos))
+		for i, r := range repos {
+			items[i] = map[string]any{"name": r.Name, "path": r.Path}
+		}
+		encoded, err := gotoon.Encode(map[string]any{"repos": items})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), encoded)
+		return nil
 	}
 
 	if repoListFlag {
@@ -86,28 +94,5 @@ func runRepo(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintln(cmd.OutOrStdout(), repos[idx].Path)
-	return nil
-}
-
-func renderRepoTable(cmd *cobra.Command, repos []finder.Repo) error {
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7571F9"))
-	cellStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C1C6B2"))
-
-	t := table.New().
-		Headers("REPO", "PATH").
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#636363"))).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return headerStyle
-			}
-			return cellStyle
-		})
-
-	for _, r := range repos {
-		t.Row(r.Name, r.Path)
-	}
-
-	fmt.Fprintln(cmd.OutOrStdout(), t.Render())
 	return nil
 }
