@@ -101,6 +101,21 @@ func mapStringToState(s string) claude.State {
 	}
 }
 
+// claudeLaunchArgs builds the kitty launch arguments for starting claude.
+// When continuing is true, --continue is appended so claude resumes the last
+// conversation in the session directory.
+func claudeLaunchArgs(name string, continuing bool) []string {
+	args := []string{
+		"--env", "PATH=" + os.Getenv("PATH"),
+		"--env", "KS_SESSION_NAME=" + name,
+		"--", "claude",
+	}
+	if continuing {
+		args = append(args, "--continue")
+	}
+	return args
+}
+
 func loadSessions(store *session.Store) ([]sessionItem, error) {
 	sessions, err := store.List()
 	if err != nil {
@@ -129,8 +144,8 @@ func openSession(sess *session.Session, store *session.Store) error {
 	cfg, _ := config.Load()
 	layout := cfg.EffectiveLayout()
 
-	// Recreate the session — pass PATH so claude finds ~/.local/bin
-	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "PATH="+os.Getenv("PATH"), "--env", "KS_SESSION_NAME="+sess.Name, "--", "claude")
+	// Recreate the session — use --continue to resume the last conversation.
+	windowID, err := kitty.LaunchTab(sess.Dir, claudeLaunchArgs(sess.Name, true)...)
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}
@@ -170,7 +185,7 @@ func createSession(name, dir string, store *session.Store) error {
 	cfg, _ := config.Load()
 	layout := cfg.EffectiveLayout()
 
-	windowID, err := kitty.LaunchTab(dir, "--env", "PATH="+os.Getenv("PATH"), "--env", "KS_SESSION_NAME="+name, "--", "claude")
+	windowID, err := kitty.LaunchTab(dir, claudeLaunchArgs(name, false)...)
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}
