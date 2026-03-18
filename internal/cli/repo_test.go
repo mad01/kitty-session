@@ -161,7 +161,7 @@ func TestRepoListMultipleRepos(t *testing.T) {
 	repoListFlag = false
 }
 
-func TestRepoTableFlag(t *testing.T) {
+func TestRepoToonFlag(t *testing.T) {
 	tmp := t.TempDir()
 	repoDir := filepath.Join(tmp, "org", "myrepo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -176,27 +176,24 @@ func TestRepoTableFlag(t *testing.T) {
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
-	rootCmd.SetArgs([]string{"repo", "--table"})
+	rootCmd.SetArgs([]string{"repo", "--toon"})
 	repoListFlag = false
 	repoJSONFlag = false
-	repoTableFlag = false
+	repoToonFlag = false
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "REPO") {
-		t.Errorf("expected table header REPO, got: %s", output)
-	}
-	if !strings.Contains(output, "PATH") {
-		t.Errorf("expected table header PATH, got: %s", output)
+	if !strings.Contains(output, "repos") {
+		t.Errorf("expected 'repos' key in TOON output, got: %s", output)
 	}
 	if !strings.Contains(output, "testorg/myrepo") {
-		t.Errorf("expected testorg/myrepo in table, got: %s", output)
+		t.Errorf("expected testorg/myrepo in TOON output, got: %s", output)
 	}
 	if !strings.Contains(output, repoDir) {
-		t.Errorf("expected path %s in table, got: %s", repoDir, output)
+		t.Errorf("expected path %s in TOON output, got: %s", repoDir, output)
 	}
 
 	rootCmd.SetArgs(nil)
@@ -204,7 +201,7 @@ func TestRepoTableFlag(t *testing.T) {
 	rootCmd.SetErr(nil)
 	repoListFlag = false
 	repoJSONFlag = false
-	repoTableFlag = false
+	repoToonFlag = false
 }
 
 func TestRepoJSONFlag(t *testing.T) {
