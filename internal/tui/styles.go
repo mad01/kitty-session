@@ -11,6 +11,7 @@ var (
 	colorDanger  = lipgloss.AdaptiveColor{Light: "#E45649", Dark: "#ED567A"} // red / coral
 	colorTextPri = lipgloss.AdaptiveColor{Light: "#383A42", Dark: "#FFFDF5"} // foreground
 	colorTextSec = lipgloss.AdaptiveColor{Light: "#696C77", Dark: "#C1C6B2"} // dimmed foreground
+	colorTextInv = lipgloss.AdaptiveColor{Light: "#FAFAFA", Dark: "#FFFDF5"} // inverse text (on accent bg)
 )
 
 var (
@@ -23,7 +24,7 @@ var (
 	// Title bar (used as list title style)
 	titleBarStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorTextPri).
+			Foreground(colorTextInv).
 			Background(colorAccent).
 			Padding(0, 1)
 
