@@ -2,15 +2,15 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Color palette
-const (
-	colorAccent    = lipgloss.Color("#7571F9") // indigo
-	colorSuccess   = lipgloss.Color("#02BF87") // teal/green
-	colorAmber     = lipgloss.Color("#FFBF00") // amber
-	colorMuted     = lipgloss.Color("#636363") // gray
-	colorDanger    = lipgloss.Color("#ED567A") // coral
-	colorTextPri   = lipgloss.Color("#FFFDF5") // cream
-	colorTextSec   = lipgloss.Color("#C1C6B2") // light gray
+// Color palette — AdaptiveColor{Light, Dark}
+var (
+	colorAccent  = lipgloss.AdaptiveColor{Light: "#A626A4", Dark: "#7571F9"} // magenta / indigo
+	colorSuccess = lipgloss.AdaptiveColor{Light: "#40A14F", Dark: "#02BF87"} // green
+	colorAmber   = lipgloss.AdaptiveColor{Light: "#C18401", Dark: "#FFBF00"} // yellow/amber
+	colorMuted   = lipgloss.AdaptiveColor{Light: "#A0A1A7", Dark: "#636363"} // gray
+	colorDanger  = lipgloss.AdaptiveColor{Light: "#E45649", Dark: "#ED567A"} // red / coral
+	colorTextPri = lipgloss.AdaptiveColor{Light: "#383A42", Dark: "#FFFDF5"} // foreground
+	colorTextSec = lipgloss.AdaptiveColor{Light: "#696C77", Dark: "#C1C6B2"} // dimmed foreground
 )
 
 var (
