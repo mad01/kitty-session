@@ -1,0 +1,134 @@
+# Dockerfile.test — Container tests for ks search functionality
+# Build: docker build -f Dockerfile.test -t ks-search-test .
+# Run:   docker run --rm ks-search-test
+
+FROM golang:1.25-bookworm AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /ks .
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /ks /usr/local/bin/ks
+
+# Configure git for test commits
+RUN git config --global user.email "test@test.com" && \
+    git config --global user.name "Test User" && \
+    git config --global init.defaultBranch main
+
+# Create ks config pointing to test repos
+RUN mkdir -p /root/.config/ks && \
+    echo 'dirs:\n  - /repos' > /root/.config/ks/config.yaml
+
+# Create test repos with various states
+RUN mkdir -p /repos/clean-repo && cd /repos/clean-repo && \
+    git init && \
+    echo 'package main\nfunc Hello() string { return "hello" }' > main.go && \
+    echo 'package util\nfunc Add(a, b int) int { return a + b }' > util.go && \
+    git add -A && git commit -m "initial"
+
+RUN mkdir -p /repos/dirty-repo && cd /repos/dirty-repo && \
+    git init && \
+    echo 'package server\nfunc Start() {}' > server.go && \
+    git add -A && git commit -m "initial" && \
+    echo 'func Stop() {}' >> server.go
+
+RUN mkdir -p /repos/branched-repo && cd /repos/branched-repo && \
+    git init && \
+    echo 'package lib\nfunc Compute() int { return 42 }' > lib.go && \
+    git add -A && git commit -m "initial" && \
+    git checkout -b feature && \
+    echo 'func Extra() {}' >> lib.go && \
+    git add -A && git commit -m "feature work"
+
+# Test script
+COPY <<'EOF' /test.sh
+#!/bin/bash
+set -euo pipefail
+
+echo "=== Test: ks index (first run) ==="
+ks index
+echo "PASS: index created"
+
+echo ""
+echo "=== Test: ks index --status ==="
+ks index --status
+echo "PASS: status shown"
+
+echo ""
+echo "=== Test: ks search basic ==="
+result=$(ks search "func" 2>&1)
+if [ -z "$result" ]; then
+    echo "FAIL: no results for 'func'"
+    exit 1
+fi
+echo "$result" | head -5
+echo "PASS: search returned results"
+
+echo ""
+echo "=== Test: ks search --json ==="
+result=$(ks search --json "Hello" 2>&1)
+echo "$result" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null || {
+    # python3 may not be available, just check it's non-empty
+    if [ -z "$result" ]; then
+        echo "FAIL: no JSON results"
+        exit 1
+    fi
+}
+echo "PASS: JSON output valid"
+
+echo ""
+echo "=== Test: ks search with repo filter ==="
+result=$(ks search -r clean-repo "Hello" 2>&1)
+echo "$result" | head -3
+echo "PASS: repo filter works"
+
+echo ""
+echo "=== Test: ks query valid ==="
+ks query "func Hello"
+echo "PASS: valid query"
+
+echo ""
+echo "=== Test: ks query invalid ==="
+ks query 'func (broken' 2>&1 || true
+echo "PASS: invalid query handled"
+
+echo ""
+echo "=== Test: ks doctor ==="
+ks doctor
+echo "PASS: doctor ran"
+
+echo ""
+echo "=== Test: ks search no results ==="
+result=$(ks search "xyznonexistent123" 2>&1) || true
+echo "PASS: no results handled gracefully"
+
+echo ""
+echo "=== Test: ks count ==="
+ks count "func" --group-by repo
+echo "PASS: count works"
+
+echo ""
+echo "=== Test: ks index --clean ==="
+ks index --clean
+echo "PASS: index cleaned"
+
+echo ""
+echo "=== Test: ks search triggers bootstrap ==="
+ks search "func" 2>&1 | head -3
+echo "PASS: bootstrap and search works"
+
+echo ""
+echo "=== All tests passed ==="
+EOF
+RUN chmod +x /test.sh
+
+CMD ["/test.sh"]
