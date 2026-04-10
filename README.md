@@ -107,6 +107,8 @@ repo() { local d=$(ks repo); [[ -n "$d" ]] && cd "$d"; }
 
 `ks mcp` starts an [MCP](https://modelcontextprotocol.io) stdio server that exposes the search, repo-lookup, and file-read functionality as native tools for Claude Code and other MCP clients. The subprocess is spawned per call by the MCP client — there is no long-running daemon, no port, no service to manage.
 
+See [`docs/mcp.md`](docs/mcp.md) for the full tool reference (input/output schemas, query syntax, examples, troubleshooting).
+
 ### Tools
 
 | Tool | Purpose |
