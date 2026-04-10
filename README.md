@@ -103,6 +103,38 @@ Add to your shell config to jump to a repo:
 repo() { local d=$(ks repo); [[ -n "$d" ]] && cd "$d"; }
 ```
 
+## MCP Server
+
+`ks mcp` starts an [MCP](https://modelcontextprotocol.io) stdio server that exposes the search, repo-lookup, and file-read functionality as native tools for Claude Code and other MCP clients. The subprocess is spawned per call by the MCP client — there is no long-running daemon, no port, no service to manage.
+
+### Tools
+
+| Tool | Purpose |
+|---|---|
+| `ks_repo_lookup` | Resolve a repo name to its absolute local checkout path |
+| `ks_search` | Search code across locally checked-out repos (zoekt syntax) |
+| `ks_count` | Count matches grouped by repo or language |
+| `ks_read` | Read a file from a named local repo |
+| `ks_query_validate` | Validate a zoekt query and return its parsed tree |
+
+`ks_search` and `ks_count` reuse the same gRPC search daemon that backs the cobra commands, so zoekt index shards stay mmap'd in memory across MCP calls.
+
+### Register with Claude Code
+
+```bash
+claude mcp add --scope user ks -- ks mcp
+```
+
+That writes a user-scoped entry into Claude Code's config; Claude will see the `ks_*` tools in its tool list on the next session start.
+
+### Smoke test
+
+```bash
+( printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'; sleep 1 ) | ks mcp
+```
+
+Expected: one `initialize` response followed by a `tools/list` response containing the five `ks_*` tools with their input and output schemas.
+
 ## Config
 
 Configuration lives in `~/.config/ks/config.yaml`:
