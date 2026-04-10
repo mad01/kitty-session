@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"github.com/sourcegraph/zoekt"
 	zoektsearch "github.com/sourcegraph/zoekt/search"
 	"google.golang.org/grpc"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	pb "github.com/mad01/kitty-session/internal/daemon/proto"
 	"github.com/mad01/kitty-session/internal/search"
@@ -126,6 +128,15 @@ func (s *searchServer) Shutdown(_ context.Context, _ *pb.ShutdownRequest) (*pb.S
 
 // Serve starts the gRPC daemon on a Unix socket.
 func Serve(indexDir, socketPath string, idleTimeout time.Duration) error {
+	// Set up rotating log writer so the daemon log does not grow unbounded.
+	logWriter := &lumberjack.Logger{
+		Filename:   DefaultLogPath(),
+		MaxSize:    5, // MB
+		MaxBackups: 1,
+	}
+	defer logWriter.Close()
+	log.SetOutput(logWriter)
+
 	searcher, err := zoektsearch.NewDirectorySearcher(indexDir)
 	if err != nil {
 		return fmt.Errorf("open index at %s: %w", indexDir, err)
