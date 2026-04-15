@@ -18,8 +18,10 @@ const numWorkers = 32
 func Walk(dirs []string) ([]Repo, error) {
 	work := make(chan string, 4096)
 	type result struct {
-		path string
-		name string
+		path   string
+		name   string
+		remote string
+		host   string
 	}
 	results := make(chan result, 256)
 
@@ -59,9 +61,9 @@ func Walk(dirs []string) ([]Repo, error) {
 				}
 
 				if isRepo {
-					name := repoName(dir)
+					name, remote, host := repoInfo(dir)
 					if name != "" {
-						results <- result{path: dir, name: name}
+						results <- result{path: dir, name: name, remote: remote, host: host}
 					}
 					inflight.Done()
 					continue
@@ -97,20 +99,21 @@ func Walk(dirs []string) ([]Repo, error) {
 	for r := range results {
 		if !seen[r.path] {
 			seen[r.path] = true
-			repos = append(repos, Repo{Name: r.name, Path: r.path})
+			repos = append(repos, Repo{Name: r.name, Path: r.path, Remote: r.remote, Host: r.host})
 		}
 	}
 	return repos, nil
 }
 
-// repoName reads the origin remote URL directly from .git/config.
-func repoName(dir string) string {
-	url := readOriginURL(filepath.Join(dir, ".git", "config"))
-	if url != "" {
-		return ParseRemote(url)
+// repoInfo reads the origin remote URL from .git/config and returns
+// the parsed name (org/repo), the raw remote URL, and the extracted hostname.
+func repoInfo(dir string) (name, remote, host string) {
+	raw := readOriginURL(filepath.Join(dir, ".git", "config"))
+	if raw != "" {
+		return ParseRemote(raw), raw, ParseHost(raw)
 	}
-	// Fallback to directory name
-	return filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir)
+	// Fallback to directory name — no remote info available
+	return filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir), "", ""
 }
 
 // readOriginURL parses a git config file to extract the URL of [remote "origin"].

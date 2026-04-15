@@ -5,6 +5,37 @@ import (
 	"strings"
 )
 
+// ParseHost extracts the hostname from a git remote URL.
+// SSH: git@HOST:... → HOST, user@HOST:... → HOST
+// HTTPS: https://HOST/... → HOST
+func ParseHost(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+
+	// SSH format: user@HOST:path
+	if i := strings.Index(rawURL, ":"); i != -1 && !strings.Contains(rawURL, "://") {
+		host := rawURL[:i]
+		// Strip user@ prefix
+		if at := strings.LastIndex(host, "@"); at != -1 {
+			host = host[at+1:]
+		}
+		return host
+	}
+
+	// HTTPS format: https://HOST/path
+	if i := strings.Index(rawURL, "://"); i != -1 {
+		rest := rawURL[i+3:]
+		if j := strings.Index(rest, "/"); j != -1 {
+			return rest[:j]
+		}
+		return rest
+	}
+
+	return ""
+}
+
 // ParseRemote extracts "org/repo" from a git remote URL.
 // Supports SSH (git@host:org/repo.git) and HTTPS (https://host/org/repo.git) formats.
 func ParseRemote(url string) string {

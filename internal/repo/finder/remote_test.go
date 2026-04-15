@@ -2,6 +2,33 @@ package finder
 
 import "testing"
 
+func TestParseHost(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "ssh github", url: "git@github.com:org/repo.git", want: "github.com"},
+		{name: "ssh custom ghe", url: "git@ghe.example.net:team/service.git", want: "ghe.example.net"},
+		{name: "ssh user@ custom host", url: "deploy@git.corp.com:infra/admission.git", want: "git.corp.com"},
+		{name: "ssh git@ custom host", url: "git@git.corp.com:infra/repo.git", want: "git.corp.com"},
+		{name: "https github", url: "https://github.com/org/repo.git", want: "github.com"},
+		{name: "https custom ghe", url: "https://ghe.example.net/team/service.git", want: "ghe.example.net"},
+		{name: "https custom host", url: "https://git.corp.com/infra/repo", want: "git.corp.com"},
+		{name: "empty", url: "", want: ""},
+		{name: "whitespace", url: "  git@github.com:org/repo.git  ", want: "github.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseHost(tt.url)
+			if got != tt.want {
+				t.Errorf("ParseHost(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRemote(t *testing.T) {
 	tests := []struct {
 		name string

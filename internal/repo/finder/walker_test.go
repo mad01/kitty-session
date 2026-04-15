@@ -41,16 +41,31 @@ func TestWalk(t *testing.T) {
 		t.Fatalf("expected 2 repos, got %d", len(repos))
 	}
 
-	names := make(map[string]string)
+	byName := make(map[string]Repo)
 	for _, r := range repos {
-		names[r.Name] = r.Path
+		byName[r.Name] = r
 	}
 
-	if _, ok := names["testorg/repo1"]; !ok {
-		t.Error("expected testorg/repo1 in results")
+	r1, ok := byName["testorg/repo1"]
+	if !ok {
+		t.Fatal("expected testorg/repo1 in results")
 	}
-	if _, ok := names["testorg/repo2"]; !ok {
-		t.Error("expected testorg/repo2 in results")
+	if r1.Remote != "git@github.com:testorg/repo1.git" {
+		t.Errorf("repo1 Remote = %q, want %q", r1.Remote, "git@github.com:testorg/repo1.git")
+	}
+	if r1.Host != "github.com" {
+		t.Errorf("repo1 Host = %q, want %q", r1.Host, "github.com")
+	}
+
+	r2, ok := byName["testorg/repo2"]
+	if !ok {
+		t.Fatal("expected testorg/repo2 in results")
+	}
+	if r2.Remote != "https://github.com/testorg/repo2.git" {
+		t.Errorf("repo2 Remote = %q, want %q", r2.Remote, "https://github.com/testorg/repo2.git")
+	}
+	if r2.Host != "github.com" {
+		t.Errorf("repo2 Host = %q, want %q", r2.Host, "github.com")
 	}
 }
 
@@ -82,6 +97,12 @@ func TestWalkNoRemoteFallback(t *testing.T) {
 	}
 	if repos[0].Name != "myorg/myrepo" {
 		t.Errorf("expected fallback name myorg/myrepo, got %s", repos[0].Name)
+	}
+	if repos[0].Remote != "" {
+		t.Errorf("expected empty Remote for no-remote repo, got %q", repos[0].Remote)
+	}
+	if repos[0].Host != "" {
+		t.Errorf("expected empty Host for no-remote repo, got %q", repos[0].Host)
 	}
 }
 

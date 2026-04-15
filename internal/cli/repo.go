@@ -33,8 +33,10 @@ func init() {
 }
 
 type repoJSON struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Remote string `json:"remote,omitempty"`
+	Host   string `json:"host,omitempty"`
 }
 
 func runRepo(cmd *cobra.Command, args []string) error {
@@ -55,7 +57,7 @@ func runRepo(cmd *cobra.Command, args []string) error {
 	if repoJSONFlag {
 		items := make([]repoJSON, len(repos))
 		for i, r := range repos {
-			items[i] = repoJSON{Name: r.Name, Path: r.Path}
+			items[i] = repoJSON{Name: r.Name, Path: r.Path, Remote: r.Remote, Host: r.Host}
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -65,7 +67,7 @@ func runRepo(cmd *cobra.Command, args []string) error {
 	if repoToonFlag {
 		items := make([]map[string]any, len(repos))
 		for i, r := range repos {
-			items[i] = map[string]any{"name": r.Name, "path": r.Path}
+			items[i] = map[string]any{"name": r.Name, "path": r.Path, "remote": r.Remote, "host": r.Host}
 		}
 		encoded, err := gotoon.Encode(map[string]any{"repos": items})
 		if err != nil {
