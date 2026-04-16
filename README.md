@@ -1,126 +1,58 @@
 # kitty-session
 
-Kitty Claude Session Manager — manage named kitty terminal sessions with Claude and a shell, using either a split layout (Claude on top, shell on bottom) or a tab layout (separate tabs).
+`ks` is a session manager for [kitty](https://sw.kovidgoyal.net/kitty/). It creates named kitty tabs that pair [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with a shell, tracks their state, and lets you jump between them from an interactive TUI or shell scripts.
 
 ## Screenshots
 
 ### Session list
 
-The main view lists all sessions with their status and working directory.
+The main TUI view lists every session with its live state and working directory.
 
 ![Session list](images/default.png)
 
-### Create a new session
+### Create a session
 
-Press `n` to open the repository picker. Browse all configured repos or type to fuzzy-filter.
+Press `n` to open the repository picker. Browse everything `ks` has scanned or type to fuzzy-filter.
 
 ![Repository picker](images/repos.png)
-
 ![Filtering repos](images/repos-filter.png)
 
-### Open a session
+### Inside a session
 
-Select a session and press `o` to open it. Each session opens Claude Code and a shell — as a horizontal split (default) or as separate tabs.
+Each session runs Claude Code and a shell in the same tab, either split horizontally (default) or as separate tabs.
 
 ![Running session](images/session.png)
 
-### Help
+### Help overlay
 
-Press `?` to see all available keybindings.
+Press `?` for the full keybindings.
 
 ![Help overlay](images/help.png)
 
 ## Install
 
-```bash
-make install    # builds and copies ks to ~/code/bin/
-```
-
-## Usage
-
-### TUI
+You need [kitty](https://sw.kovidgoyal.net/kitty/) with remote control enabled and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`. Go 1.25 or later is required to build from source.
 
 ```bash
-ks              # launch interactive session manager
+make install
 ```
 
-TUI keybindings:
-- `j/k` Navigate sessions
-- `o / enter` Open or focus session
-- `n` Create new session (opens repo picker)
-- `c` Close tab (keep session)
-- `d` Delete session
-- `/` Fuzzy search
-- `?` Toggle help
-- `q` Quit
+This builds `ks` and copies it to `~/code/bin/`. Adjust the `Makefile` or copy the binary yourself if you prefer another location.
 
-### Subcommands
+For everything else — first session, configuration, subcommands, hooks — see the docs below.
 
-```bash
-ks new -n <name> [-d <dir>]   # create session
-ks open <name>                 # focus or recreate session
-ks close <name> [--keep]       # close session tab
-ks list                        # list all sessions
-ks version                     # print version
-ks repo                        # fuzzy repo finder
-ks repo --list                 # list all repos
-ks repo --json                 # list all repos as JSON
-ks repo --toon                 # list all repos as TOON (token-optimized for LLMs)
-```
+## Documentation
 
-### Output formats
+- [Getting started](docs/getting-started.md) — install, minimal config, first session
+- [Configuration](docs/configuration.md) — `~/.config/ks/config.yaml` reference
+- [TUI guide](docs/tui.md) — modes, keybindings, state badges, trash and restore
+- [Command reference](docs/commands.md) — every subcommand and flag
+- [Repo finder](docs/repo-finder.md) — `ks repo` and its output formats
+- [Hooks and state detection](docs/hooks-and-state.md) — how `ks` knows what Claude is doing
+- [Summary tab](docs/summary-tab.md) — the optional Haiku-powered session summary
+- [Architecture](docs/architecture.md) — package layout, data flow, extending `ks`
+- [Troubleshooting](docs/troubleshooting.md) — common failures and fixes
 
-`ks repo` supports multiple output formats for different consumers:
+## Code search
 
-| Flag | Format | Use case |
-|------|--------|----------|
-| *(none)* | Interactive fuzzy finder | Human — pick a repo |
-| `--list` | TSV (`name\tpath`) | Shell scripts, piping |
-| `--json` | JSON array | Structured tooling |
-| `--toon` | [TOON](https://github.com/alpkeskin/gotoon) | LLMs (30-60% fewer tokens than JSON) |
-
-**`--json` example:**
-```json
-[
-  {
-    "name": "mad01/kitty-session",
-    "path": "/Users/you/code/src/github.com/mad01/kitty-session"
-  }
-]
-```
-
-**`--toon` example:**
-```
-repos[1]{name,path}:
- mad01/kitty-session,/Users/you/code/src/github.com/mad01/kitty-session
-```
-
-### Shell function
-
-Add to your shell config to jump to a repo:
-
-```bash
-repo() { local d=$(ks repo); [[ -n "$d" ]] && cd "$d"; }
-```
-
-## Code search and MCP
-
-The MCP server, search daemon, and zoekt integration that used to live in this repo have been extracted into a standalone project: [**code-search-local (`csl`)**](https://github.com/mad01/code-search-local). That's where the `csl_search`, `csl_repo_lookup`, and friends now live.
-
-`ks` kept the `repo` subcommand for the shell `repo()` helper. Anything search-related belongs in csl.
-
-## Config
-
-Configuration lives in `~/.config/ks/config.yaml`:
-
-```yaml
-dirs:
-  - ~/code/src/github.com/mad01
-  - ~/workspace
-layout: split  # "split" (default) or "tab"
-tmpdir: ~/.config/ks/claude-session-workspaces  # optional
-```
-
-- `dirs` — parent directories to scan for repositories
-- `layout` — `split` puts Claude and shell in a horizontal split (Claude on top 30%, shell on bottom 70%). `tab` creates separate kitty tabs for Claude and shell within the same OS window.
-- `tmpdir` — base directory for scratch sessions created via the `tmp` picker item. Defaults to the OS temp directory when unset. Setting a custom path (e.g. `~/.config/ks/claude-session-workspaces`) keeps scratch workspaces in a predictable location that won't be cleaned up by the OS.
+The MCP server, search daemon, and zoekt integration that used to live in this repo now live in [code-search-local (`csl`)](https://github.com/mad01/code-search-local). `ks` kept the `repo` subcommand so the shell `repo()` helper keeps working.
