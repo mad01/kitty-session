@@ -103,39 +103,11 @@ Add to your shell config to jump to a repo:
 repo() { local d=$(ks repo); [[ -n "$d" ]] && cd "$d"; }
 ```
 
-## MCP Server
+## Code search and MCP
 
-`ks mcp` starts an [MCP](https://modelcontextprotocol.io) stdio server that exposes the search, repo-lookup, and file-read functionality as native tools for Claude Code and other MCP clients. The subprocess is spawned per call by the MCP client — there is no long-running daemon, no port, no service to manage.
+The MCP server, search daemon, and zoekt integration that used to live in this repo have been extracted into a standalone project: [**code-search-local (`csl`)**](https://github.com/mad01/code-search-local). That's where the `csl_search`, `csl_repo_lookup`, and friends now live.
 
-See [`docs/mcp.md`](docs/mcp.md) for the full tool reference (input/output schemas, query syntax, examples, troubleshooting).
-
-### Tools
-
-| Tool | Purpose |
-|---|---|
-| `ks_repo_lookup` | Resolve a repo name to its absolute local checkout path |
-| `ks_search` | Search code across locally checked-out repos (zoekt syntax) |
-| `ks_count` | Count matches grouped by repo or language |
-| `ks_read` | Read a file from a named local repo |
-| `ks_query_validate` | Validate a zoekt query and return its parsed tree |
-
-`ks_search` and `ks_count` reuse the same gRPC search daemon that backs the cobra commands, so zoekt index shards stay mmap'd in memory across MCP calls.
-
-### Register with Claude Code
-
-```bash
-claude mcp add --scope user ks -- ks mcp
-```
-
-That writes a user-scoped entry into Claude Code's config; Claude will see the `ks_*` tools in its tool list on the next session start.
-
-### Smoke test
-
-```bash
-( printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}\n{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'; sleep 1 ) | ks mcp
-```
-
-Expected: one `initialize` response followed by a `tools/list` response containing the five `ks_*` tools with their input and output schemas.
+`ks` kept the `repo` subcommand for the shell `repo()` helper. Anything search-related belongs in csl.
 
 ## Config
 
