@@ -252,6 +252,196 @@ func TestRepoJSONFlag(t *testing.T) {
 	repoJSONFlag = false
 }
 
+func TestRepoQuerySingleExactMatchPrintsPath(t *testing.T) {
+	tmp := t.TempDir()
+	for _, name := range []string{"dotfiles", "kitty-session"} {
+		repoDir := filepath.Join(tmp, name)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitInit(t, repoDir)
+		gitSetRemote(t, repoDir, "git@github.com:mad01/"+name+".git")
+	}
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "mad01/dotfiles"})
+	resetRepoFlags()
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute error: %v\noutput: %s", err, buf.String())
+	}
+
+	wantPath := filepath.Join(tmp, "dotfiles")
+	got := strings.TrimSpace(buf.String())
+	if got != wantPath {
+		t.Errorf("expected %q, got %q", wantPath, got)
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	resetRepoFlags()
+}
+
+func TestRepoQuerySubstringSingleMatchPrintsPath(t *testing.T) {
+	tmp := t.TempDir()
+	for _, name := range []string{"dotfiles", "kitty-session"} {
+		repoDir := filepath.Join(tmp, name)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitInit(t, repoDir)
+		gitSetRemote(t, repoDir, "git@github.com:mad01/"+name+".git")
+	}
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "DOTFILES"}) // also exercises case-insensitivity
+	resetRepoFlags()
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute error: %v\noutput: %s", err, buf.String())
+	}
+
+	wantPath := filepath.Join(tmp, "dotfiles")
+	got := strings.TrimSpace(buf.String())
+	if got != wantPath {
+		t.Errorf("expected %q, got %q", wantPath, got)
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	resetRepoFlags()
+}
+
+func TestRepoQueryNoMatchErrors(t *testing.T) {
+	tmp := t.TempDir()
+	repoDir := filepath.Join(tmp, "dotfiles")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, repoDir)
+	gitSetRemote(t, repoDir, "git@github.com:mad01/dotfiles.git")
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "nope-not-a-real-repo"})
+	resetRepoFlags()
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for no matches, got nil")
+	}
+	if !strings.Contains(err.Error(), "no repos match query") {
+		t.Errorf("expected error message about no matches, got: %v", err)
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	resetRepoFlags()
+}
+
+func TestRepoQueryMultipleMatchesErrors(t *testing.T) {
+	tmp := t.TempDir()
+	for _, owner := range []string{"org-a", "org-b"} {
+		repoDir := filepath.Join(tmp, owner+"-dotfiles")
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitInit(t, repoDir)
+		gitSetRemote(t, repoDir, "git@github.com:"+owner+"/dotfiles.git")
+	}
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "dotfiles"})
+	resetRepoFlags()
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for multiple matches, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "multiple repos match") {
+		t.Errorf("expected multi-match error, got: %v", err)
+	}
+	for _, want := range []string{"org-a/dotfiles", "org-b/dotfiles"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected candidate %q in error, got: %v", want, err)
+		}
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	resetRepoFlags()
+}
+
+func TestRepoListWithQueryFiltersWithoutErroring(t *testing.T) {
+	tmp := t.TempDir()
+	for _, name := range []string{"dotfiles", "kitty-session", "ralph"} {
+		repoDir := filepath.Join(tmp, name)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitInit(t, repoDir)
+		gitSetRemote(t, repoDir, "git@github.com:mad01/"+name+".git")
+	}
+
+	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
+	defer cleanup()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"repo", "--list", "kitty"})
+	resetRepoFlags()
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("execute error: %v\noutput: %s", err, buf.String())
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "mad01/kitty-session") {
+		t.Errorf("expected kitty-session in output, got: %s", output)
+	}
+	for _, unwanted := range []string{"mad01/dotfiles", "mad01/ralph"} {
+		if strings.Contains(output, unwanted) {
+			t.Errorf("did not expect %q in filtered list, got: %s", unwanted, output)
+		}
+	}
+
+	rootCmd.SetArgs(nil)
+	rootCmd.SetOut(nil)
+	rootCmd.SetErr(nil)
+	resetRepoFlags()
+}
+
+func resetRepoFlags() {
+	repoListFlag = false
+	repoJSONFlag = false
+	repoToonFlag = false
+}
+
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
 	cmd := exec.Command("git", "init")

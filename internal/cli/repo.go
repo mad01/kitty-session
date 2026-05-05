@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/alpkeskin/gotoon"
 	fuzzyfinder "github.com/ktr0731/go-fuzzyfinder"
@@ -19,10 +20,14 @@ var (
 )
 
 var repoCmd = &cobra.Command{
-	Use:   "repo",
+	Use:   "repo [query]",
 	Short: "Interactive git repository finder",
-	Long:  "Scan configured directories for git repositories and pick one with a fuzzy finder.",
-	RunE:  runRepo,
+	Long: "Scan configured directories for git repositories and pick one with a fuzzy finder.\n\n" +
+		"With no query, opens an interactive picker.\n" +
+		"With a query, prints the path of the single matching repo (case-insensitive substring on org/repo).\n" +
+		"Errors out non-zero if the query matches zero or multiple repos.",
+	Args: cobra.MaximumNArgs(1),
+	RunE: runRepo,
 }
 
 func init() {
@@ -52,6 +57,30 @@ func runRepo(cmd *cobra.Command, args []string) error {
 
 	if len(repos) == 0 {
 		return fmt.Errorf("no git repositories found")
+	}
+
+	var query string
+	if len(args) == 1 {
+		query = args[0]
+		repos = filterRepos(repos, query)
+	}
+
+	nonInteractive := repoJSONFlag || repoToonFlag || repoListFlag
+
+	if !nonInteractive && query != "" {
+		switch len(repos) {
+		case 1:
+			fmt.Fprintln(cmd.OutOrStdout(), repos[0].Path)
+			return nil
+		case 0:
+			return fmt.Errorf("no repos match query %q", query)
+		default:
+			names := make([]string, len(repos))
+			for i, r := range repos {
+				names[i] = r.Name
+			}
+			return fmt.Errorf("multiple repos match query %q:\n  - %s", query, strings.Join(names, "\n  - "))
+		}
 	}
 
 	if repoJSONFlag {
@@ -97,4 +126,16 @@ func runRepo(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintln(cmd.OutOrStdout(), repos[idx].Path)
 	return nil
+}
+
+// filterRepos returns the subset of repos whose Name contains query (case-insensitive).
+func filterRepos(repos []finder.Repo, query string) []finder.Repo {
+	q := strings.ToLower(query)
+	out := repos[:0:0]
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.Name), q) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
