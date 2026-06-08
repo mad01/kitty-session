@@ -1,0 +1,20 @@
+apiVersion: catalog.mad01/v1alpha1
+kind: System
+metadata:
+  name: kitty-session
+  description: Session manager for the kitty terminal pairing Claude Code with a shell per session
+  tags: [go, cli]
+spec:
+  owner: mad01
+---
+apiVersion: catalog.mad01/v1alpha1
+kind: Component
+metadata:
+  name: ks
+  description: TUI session manager that creates named kitty tabs pairing Claude Code with a shell
+  tags: [go, cli, tui]
+spec:
+  type: cli
+  lifecycle: production
+  owner: mad01
+  system: kitty-session
