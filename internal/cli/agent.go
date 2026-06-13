@@ -12,7 +12,8 @@ import (
 var agentFlag bool
 
 func init() {
-	rootCmd.PersistentFlags().BoolVar(&agentFlag, "agent", false, "run background Haiku agent for state detection")
+	rootCmd.PersistentFlags().
+		BoolVar(&agentFlag, "agent", false, "run background Haiku agent for state detection")
 }
 
 const agentPrompt = `You are a session monitor for the "ks" kitty session manager.
@@ -60,7 +61,7 @@ func startAgent() (*exec.Cmd, error) {
 		return nil, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	stateDir := filepath.Join(home, ".config", "ks", "state")
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create state directory: %w", err)
 	}
 

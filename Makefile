@@ -22,7 +22,7 @@ clean:
 	@rm -f $(BINARY_NAME)
 
 fmt:
-	@gofmt -w .
+	@golines -m 100 --base-formatter=gofumpt -w .
 
 lint:
 	@golangci-lint run ./...

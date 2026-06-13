@@ -54,7 +54,14 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	cfg, _ := config.Load()
 	layout := cfg.EffectiveLayout()
 
-	windowID, err := kitty.LaunchTab(sess.Dir, "--env", "KS_SESSION_NAME="+name, "--", "claude", "--continue")
+	windowID, err := kitty.LaunchTab(
+		sess.Dir,
+		"--env",
+		"KS_SESSION_NAME="+name,
+		"--",
+		"claude",
+		"--continue",
+	)
 	if err != nil {
 		return fmt.Errorf("cannot create tab: %w", err)
 	}

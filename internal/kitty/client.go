@@ -38,7 +38,13 @@ func LaunchTab(dir string, args ...string) (int, error) {
 // LaunchTabInWindow creates a new tab in the OS window that contains windowID.
 // Returns the new window (pane) ID inside that tab.
 func LaunchTabInWindow(windowID int, dir string, args ...string) (int, error) {
-	cmdArgs := []string{"@", "launch", "--type=tab", "--match=id:" + strconv.Itoa(windowID), "--cwd=" + dir}
+	cmdArgs := []string{
+		"@",
+		"launch",
+		"--type=tab",
+		"--match=id:" + strconv.Itoa(windowID),
+		"--cwd=" + dir,
+	}
 	cmdArgs = append(cmdArgs, args...)
 	out, err := exec.Command("kitty", cmdArgs...).Output()
 	if err != nil {
@@ -53,7 +59,14 @@ func LaunchTabInWindow(windowID int, dir string, args ...string) (int, error) {
 
 // LaunchSplit creates a horizontal split in the current tab running in dir.
 func LaunchSplit(dir string, args ...string) error {
-	cmdArgs := []string{"@", "launch", "--type=window", "--location=hsplit", "--bias=30", "--cwd=" + dir}
+	cmdArgs := []string{
+		"@",
+		"launch",
+		"--type=window",
+		"--location=hsplit",
+		"--bias=30",
+		"--cwd=" + dir,
+	}
 	cmdArgs = append(cmdArgs, args...)
 	if err := exec.Command("kitty", cmdArgs...).Run(); err != nil {
 		return fmt.Errorf("kitty @ launch split: %w", err)
@@ -193,7 +206,8 @@ func FindTabForWindow(windowID int) (int, error) {
 
 // GetText reads the terminal text from a specific window (pane) by ID.
 func GetText(windowID int) (string, error) {
-	out, err := exec.Command("kitty", "@", "get-text", "--match=id:"+strconv.Itoa(windowID)).Output()
+	out, err := exec.Command("kitty", "@", "get-text", "--match=id:"+strconv.Itoa(windowID)).
+		Output()
 	if err != nil {
 		return "", fmt.Errorf("kitty @ get-text: %w", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -117,9 +116,9 @@ func newModel(store *session.Store, items []sessionItem, repoItems []repoItem) m
 		list:      l,
 		repoList:  rl,
 		textInput: ti,
-		store: store,
-		keys:  keys,
-		mode:  modeList,
+		store:     store,
+		keys:      keys,
+		mode:      modeList,
 	}
 }
 
@@ -660,7 +659,9 @@ func (m model) View() string {
 		switch m.mode {
 		case modeRepoPicker:
 			title = titleBarStyle.Render("select repository")
-			help = helpKeyInlineStyle.Render("type to filter · ↑/↓ navigate · enter select · esc back")
+			help = helpKeyInlineStyle.Render(
+				"type to filter · ↑/↓ navigate · enter select · esc back",
+			)
 		case modeInput:
 			title = titleBarStyle.Render("new session")
 			help = helpKeyInlineStyle.Render("enter confirm · ←/→ move cursor · esc back")
@@ -795,14 +796,16 @@ func (m model) renderHelp() string {
 	title := helpTitleStyle.Render("ks — Kitty Claude Session Manager")
 
 	nav := helpSectionStyle.Render("Navigation")
-	navKeys := lipgloss.JoinVertical(lipgloss.Left,
+	navKeys := lipgloss.JoinVertical(
+		lipgloss.Left,
 		helpRow("j/k / ↑↓", "Move up/down"),
 		helpRow("g / home", "Go to top"),
 		helpRow("G / end", "Go to bottom"),
 	)
 
 	actions := helpSectionStyle.Render("Actions")
-	actionKeys := lipgloss.JoinVertical(lipgloss.Left,
+	actionKeys := lipgloss.JoinVertical(
+		lipgloss.Left,
 		helpRow("o / enter", "Open or focus session"),
 		helpRow("n", "Create new session"),
 		helpRow("r", "Rename session"),
@@ -812,18 +815,21 @@ func (m model) renderHelp() string {
 	)
 
 	filter := helpSectionStyle.Render("Filter")
-	filterKeys := lipgloss.JoinVertical(lipgloss.Left,
+	filterKeys := lipgloss.JoinVertical(
+		lipgloss.Left,
 		helpRow("/", "Start fuzzy search"),
 		helpRow("esc", "Clear filter"),
 	)
 
 	general := helpSectionStyle.Render("General")
-	generalKeys := lipgloss.JoinVertical(lipgloss.Left,
+	generalKeys := lipgloss.JoinVertical(
+		lipgloss.Left,
 		helpRow("?", "Toggle this help"),
 		helpRow("q", "Quit"),
 	)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		title, "",
 		nav, navKeys, "",
 		actions, actionKeys, "",

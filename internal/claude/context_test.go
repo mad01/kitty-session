@@ -72,12 +72,18 @@ func TestLatestPromptFromJSON(t *testing.T) {
 		},
 		{
 			name: "truncates long prompt at 60 chars",
-			json: `{"version":1,"entries":[{"firstPrompt":"` + strings.Repeat("a", 80) + `","modified":"2026-01-16T15:00:00Z","isSidechain":false}]}`,
+			json: `{"version":1,"entries":[{"firstPrompt":"` + strings.Repeat(
+				"a",
+				80,
+			) + `","modified":"2026-01-16T15:00:00Z","isSidechain":false}]}`,
 			want: strings.Repeat("a", 60) + "\u2026",
 		},
 		{
 			name: "exactly 60 chars not truncated",
-			json: `{"version":1,"entries":[{"firstPrompt":"` + strings.Repeat("b", 60) + `","modified":"2026-01-16T15:00:00Z","isSidechain":false}]}`,
+			json: `{"version":1,"entries":[{"firstPrompt":"` + strings.Repeat(
+				"b",
+				60,
+			) + `","modified":"2026-01-16T15:00:00Z","isSidechain":false}]}`,
 			want: strings.Repeat("b", 60),
 		},
 		{

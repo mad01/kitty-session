@@ -33,7 +33,8 @@ var repoCmd = &cobra.Command{
 func init() {
 	repoCmd.Flags().BoolVar(&repoListFlag, "list", false, "list all repos (non-interactive)")
 	repoCmd.Flags().BoolVar(&repoJSONFlag, "json", false, "output as JSON (implies --list)")
-	repoCmd.Flags().BoolVar(&repoToonFlag, "toon", false, "output as TOON for LLMs (implies --list)")
+	repoCmd.Flags().
+		BoolVar(&repoToonFlag, "toon", false, "output as TOON for LLMs (implies --list)")
 	rootCmd.AddCommand(repoCmd)
 }
 
@@ -79,7 +80,11 @@ func runRepo(cmd *cobra.Command, args []string) error {
 			for i, r := range repos {
 				names[i] = r.Name
 			}
-			return fmt.Errorf("multiple repos match query %q:\n  - %s", query, strings.Join(names, "\n  - "))
+			return fmt.Errorf(
+				"multiple repos match query %q:\n  - %s",
+				query,
+				strings.Join(names, "\n  - "),
+			)
 		}
 	}
 
@@ -96,7 +101,12 @@ func runRepo(cmd *cobra.Command, args []string) error {
 	if repoToonFlag {
 		items := make([]map[string]any, len(repos))
 		for i, r := range repos {
-			items[i] = map[string]any{"name": r.Name, "path": r.Path, "remote": r.Remote, "host": r.Host}
+			items[i] = map[string]any{
+				"name":   r.Name,
+				"path":   r.Path,
+				"remote": r.Remote,
+				"host":   r.Host,
+			}
 		}
 		encoded, err := gotoon.Encode(map[string]any{"repos": items})
 		if err != nil {

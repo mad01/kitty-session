@@ -148,7 +148,11 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	var row string
 	if isSelected {
 		cursor := cursorStyle.Render("▸ ")
-		row = cursor + selectedNameStyle.Render(name) + " " + badge + "  " + selectedDirStyle.Render(dir)
+		row = cursor + selectedNameStyle.Render(
+			name,
+		) + " " + badge + "  " + selectedDirStyle.Render(
+			dir,
+		)
 	} else {
 		row = "  " + normalStyle.Render(name) + " " + badge + "  " + dirStyle.Render(dir)
 	}

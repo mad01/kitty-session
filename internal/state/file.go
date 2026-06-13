@@ -32,7 +32,7 @@ func Dir() string {
 			return
 		}
 		dirPath = filepath.Join(home, ".config", "ks", "state")
-		_ = os.MkdirAll(dirPath, 0755)
+		_ = os.MkdirAll(dirPath, 0o755)
 	})
 	return dirPath
 }
@@ -51,7 +51,7 @@ func Write(name, state string) error {
 	if err != nil {
 		return fmt.Errorf("cannot marshal state: %w", err)
 	}
-	return os.WriteFile(filepath.Join(dir, name+".json"), data, 0644)
+	return os.WriteFile(filepath.Join(dir, name+".json"), data, 0o644)
 }
 
 // Read returns the state string and timestamp for the named session.

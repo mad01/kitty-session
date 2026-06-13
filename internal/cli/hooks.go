@@ -78,7 +78,6 @@ func ksMatcherGroups(binary string) map[string]matcherGroup {
 	}
 }
 
-
 // ksHookCommands returns both the portable (~/) and absolute forms of the hook command
 // so we can clean up entries written by either version.
 func ksHookCommands(binary string) []string {
@@ -207,7 +206,7 @@ func readSettings(path string) (map[string]any, error) {
 
 // writeSettings marshals settings and writes them atomically.
 func writeSettings(path string, settings map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("cannot create settings directory: %w", err)
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -215,7 +214,7 @@ func writeSettings(path string, settings map[string]any) error {
 		return fmt.Errorf("cannot marshal settings: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 // getOrCreateHooksMap extracts or creates the "hooks" map from settings.

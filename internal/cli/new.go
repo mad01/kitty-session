@@ -12,8 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var newName string
-var newDir string
+var (
+	newName string
+	newDir  string
+)
 
 var newCmd = &cobra.Command{
 	Use:   "new",
@@ -36,7 +38,12 @@ func runNew(cmd *cobra.Command, args []string) error {
 	}
 
 	if store.Exists(newName) {
-		return fmt.Errorf("session %q already exists (use 'ks open %s' or 'ks close %s' first)", newName, newName, newName)
+		return fmt.Errorf(
+			"session %q already exists (use 'ks open %s' or 'ks close %s' first)",
+			newName,
+			newName,
+			newName,
+		)
 	}
 
 	dir := newDir

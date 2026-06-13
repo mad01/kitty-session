@@ -19,11 +19,11 @@ func NewStore() (*Store, error) {
 		return nil, fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	dir := filepath.Join(home, ".config", "ks", "sessions")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create sessions directory: %w", err)
 	}
 	trashDir := filepath.Join(dir, "trash")
-	if err := os.MkdirAll(trashDir, 0755); err != nil {
+	if err := os.MkdirAll(trashDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create trash directory: %w", err)
 	}
 	return &Store{dir: dir, trashDir: trashDir}, nil
@@ -35,7 +35,7 @@ func (s *Store) Save(sess *Session) error {
 		return fmt.Errorf("cannot marshal session: %w", err)
 	}
 	path := s.path(sess.Name)
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("cannot write session file: %w", err)
 	}
 	return nil

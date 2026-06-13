@@ -24,7 +24,8 @@ var tmpCmd = &cobra.Command{
 }
 
 func init() {
-	tmpCmd.Flags().StringVarP(&tmpSessionName, "name", "n", "", "session name (auto-generated if omitted)")
+	tmpCmd.Flags().
+		StringVarP(&tmpSessionName, "name", "n", "", "session name (auto-generated if omitted)")
 	rootCmd.AddCommand(tmpCmd)
 }
 

@@ -11,7 +11,10 @@ var (
 	colorDanger  = lipgloss.AdaptiveColor{Light: "#E45649", Dark: "#ED567A"} // red / coral
 	colorTextPri = lipgloss.AdaptiveColor{Light: "#383A42", Dark: "#FFFDF5"} // foreground
 	colorTextSec = lipgloss.AdaptiveColor{Light: "#696C77", Dark: "#C1C6B2"} // dimmed foreground
-	colorTextInv = lipgloss.AdaptiveColor{Light: "#FAFAFA", Dark: "#FFFDF5"} // inverse text (on accent bg)
+	colorTextInv = lipgloss.AdaptiveColor{
+		Light: "#FAFAFA",
+		Dark:  "#FFFDF5",
+	} // inverse text (on accent bg)
 )
 
 var (
@@ -34,8 +37,14 @@ var (
 	stoppedBadge = lipgloss.NewStyle().Foreground(colorMuted).SetString("○ stopped")
 
 	// State badges — selected
-	selectedIdleBadge    = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).SetString("● idle")
-	selectedWaitingBadge = lipgloss.NewStyle().Foreground(colorTextSec).Bold(true).SetString("○ waiting")
+	selectedIdleBadge = lipgloss.NewStyle().
+				Foreground(colorSuccess).
+				Bold(true).
+				SetString("● idle")
+	selectedWaitingBadge = lipgloss.NewStyle().
+				Foreground(colorTextSec).
+				Bold(true).
+				SetString("○ waiting")
 	selectedStoppedBadge = lipgloss.NewStyle().Foreground(colorTextSec).SetString("○ stopped")
 
 	// Selected row
@@ -60,8 +69,8 @@ var (
 	errorStyle   = lipgloss.NewStyle().Foreground(colorDanger)
 
 	// Help (inline bar)
-	helpBarStyle        = lipgloss.NewStyle().Foreground(colorMuted)
-	helpKeyInlineStyle  = lipgloss.NewStyle().Foreground(colorAccent)
+	helpBarStyle       = lipgloss.NewStyle().Foreground(colorMuted)
+	helpKeyInlineStyle = lipgloss.NewStyle().Foreground(colorAccent)
 
 	// Full help screen
 	helpTitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(colorAccent).MarginBottom(1)
@@ -91,5 +100,4 @@ var (
 	paginationStyle   = lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2)
 	activeDotStyle    = lipgloss.NewStyle().Foreground(colorAccent)
 	inactiveDotStyle  = lipgloss.NewStyle().Foreground(colorMuted)
-
 )
