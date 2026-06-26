@@ -48,7 +48,11 @@ func runClose(cmd *cobra.Command, args []string) error {
 	}
 
 	if keepSession {
-		fmt.Fprintf(cmd.OutOrStdout(), "session %q tab closed (session kept for recovery)\n", name)
+		_, _ = fmt.Fprintf(
+			cmd.OutOrStdout(),
+			"session %q tab closed (session kept for recovery)\n",
+			name,
+		)
 		return nil
 	}
 
@@ -56,6 +60,6 @@ func runClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot delete session file: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "session %q closed\n", name)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session %q closed\n", name)
 	return nil
 }

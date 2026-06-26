@@ -246,12 +246,12 @@ func TestLoadFromGlobalConfig(t *testing.T) {
 	tmp := t.TempDir()
 
 	// Set HOME to tmp so Load() looks in tmp/.config/ks/
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmp)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmp)
 
 	cfgDir := filepath.Join(tmp, ".config", "ks")
-	os.MkdirAll(cfgDir, 0o755)
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cfgPath := filepath.Join(cfgDir, "config.yaml")
 
 	content := []byte("dirs:\n  - /global/repos\n")

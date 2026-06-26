@@ -84,7 +84,9 @@ func TestWalkNoRemoteFallback(t *testing.T) {
 
 	// Create a repo with no remote — should fallback to dir name
 	repoDir := filepath.Join(tmp, "myorg", "myrepo")
-	os.MkdirAll(repoDir, 0o755)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	gitInit(t, repoDir)
 
 	repos, err := Walk([]string{tmp})
@@ -161,7 +163,9 @@ func TestReadOriginURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmp := t.TempDir()
 			cfgPath := filepath.Join(tmp, "config")
-			os.WriteFile(cfgPath, []byte(tt.content), 0o644)
+			if err := os.WriteFile(cfgPath, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
 			got := readOriginURL(cfgPath)
 			if got != tt.want {

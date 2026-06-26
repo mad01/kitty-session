@@ -11,8 +11,8 @@ import (
 )
 
 // setupTestConfig creates ~/.config/ks/config.yaml under a fake HOME
-// and returns a cleanup function that restores HOME.
-func setupTestConfig(t *testing.T, cfgContent string) (home string, cleanup func()) {
+// (restored automatically when the test ends) and returns that HOME.
+func setupTestConfig(t *testing.T, cfgContent string) (home string) {
 	t.Helper()
 	tmp := t.TempDir()
 	cfgDir := filepath.Join(tmp, ".config", "ks")
@@ -22,9 +22,8 @@ func setupTestConfig(t *testing.T, cfgContent string) (home string, cleanup func
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(cfgContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmp)
-	return tmp, func() { os.Setenv("HOME", origHome) }
+	t.Setenv("HOME", tmp)
+	return tmp
 }
 
 func TestRepoListFlag(t *testing.T) {
@@ -38,8 +37,7 @@ func TestRepoListFlag(t *testing.T) {
 	gitSetRemote(t, repoDir, "git@github.com:testorg/myrepo.git")
 
 	// Set up config under fake HOME
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	// Capture output
 	var buf bytes.Buffer
@@ -70,10 +68,7 @@ func TestRepoListFlag(t *testing.T) {
 
 func TestRepoListFlagNoConfig(t *testing.T) {
 	tmp := t.TempDir()
-
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmp)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmp)
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -95,10 +90,11 @@ func TestRepoListFlagNoConfig(t *testing.T) {
 func TestRepoListFlagEmptyDirs(t *testing.T) {
 	tmp := t.TempDir()
 	emptyDir := filepath.Join(tmp, "empty")
-	os.MkdirAll(emptyDir, 0o755)
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+emptyDir+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+emptyDir+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -130,8 +126,7 @@ func TestRepoListMultipleRepos(t *testing.T) {
 		gitSetRemote(t, repoDir, "git@github.com:org/"+name+".git")
 	}
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -170,8 +165,7 @@ func TestRepoToonFlag(t *testing.T) {
 	gitInit(t, repoDir)
 	gitSetRemote(t, repoDir, "git@github.com:testorg/myrepo.git")
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -213,8 +207,7 @@ func TestRepoJSONFlag(t *testing.T) {
 	gitInit(t, repoDir)
 	gitSetRemote(t, repoDir, "git@github.com:testorg/myrepo.git")
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -263,8 +256,7 @@ func TestRepoQuerySingleExactMatchPrintsPath(t *testing.T) {
 		gitSetRemote(t, repoDir, "git@github.com:mad01/"+name+".git")
 	}
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -299,8 +291,7 @@ func TestRepoQuerySubstringSingleMatchPrintsPath(t *testing.T) {
 		gitSetRemote(t, repoDir, "git@github.com:mad01/"+name+".git")
 	}
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -333,8 +324,7 @@ func TestRepoQueryNoMatchErrors(t *testing.T) {
 	gitInit(t, repoDir)
 	gitSetRemote(t, repoDir, "git@github.com:mad01/dotfiles.git")
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -367,8 +357,7 @@ func TestRepoQueryMultipleMatchesErrors(t *testing.T) {
 		gitSetRemote(t, repoDir, "git@github.com:"+owner+"/dotfiles.git")
 	}
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -407,8 +396,7 @@ func TestRepoListWithQueryFiltersWithoutErroring(t *testing.T) {
 		gitSetRemote(t, repoDir, "git@github.com:mad01/"+name+".git")
 	}
 
-	_, cleanup := setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
-	defer cleanup()
+	setupTestConfig(t, "dirs:\n  - "+tmp+"\n")
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)

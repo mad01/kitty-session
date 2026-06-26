@@ -286,14 +286,14 @@ func (m model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch {
-		case msg.Type == tea.KeyEnter:
+		switch msg.Type {
+		case tea.KeyEnter:
 			item, ok := m.repoList.SelectedItem().(repoItem)
 			if !ok {
 				return m, nil
 			}
 			return m.handleRepoSelect(item)
-		case msg.Type == tea.KeyEscape:
+		case tea.KeyEscape:
 			if m.repoList.FilterState() == list.Filtering || m.repoList.FilterState() == list.FilterApplied {
 				m.repoList.ResetFilter()
 				return m, nil
@@ -307,7 +307,7 @@ func (m model) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.Type == tea.KeyRunes {
 				// Auto-enter filter mode when typing (/ triggers it natively)
-				if !(len(msg.Runes) == 1 && msg.Runes[0] == '/') {
+				if len(msg.Runes) != 1 || msg.Runes[0] != '/' {
 					slash := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
 					m.repoList, _ = m.repoList.Update(slash)
 				}

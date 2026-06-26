@@ -77,9 +77,9 @@ func (d repoDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			styledName = selectedNameStyle.Render(name)
 		}
 		if dir != "" {
-			fmt.Fprint(w, cursor+styledName+"  "+selectedDirStyle.Render(dir))
+			_, _ = fmt.Fprint(w, cursor+styledName+"  "+selectedDirStyle.Render(dir))
 		} else {
-			fmt.Fprint(w, cursor+styledName)
+			_, _ = fmt.Fprint(w, cursor+styledName)
 		}
 	} else {
 		var styledName string
@@ -89,9 +89,9 @@ func (d repoDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 			styledName = normalStyle.Render(name)
 		}
 		if dir != "" {
-			fmt.Fprint(w, "  "+styledName+"  "+dirStyle.Render(dir))
+			_, _ = fmt.Fprint(w, "  "+styledName+"  "+dirStyle.Render(dir))
 		} else {
-			fmt.Fprint(w, "  "+styledName)
+			_, _ = fmt.Fprint(w, "  "+styledName)
 		}
 	}
 }
