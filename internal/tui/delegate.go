@@ -162,5 +162,5 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		ctxLine = contextStyle.Render("    ╰ " + item.context)
 	}
 
-	_, _ = fmt.Fprint(w, row+"\n"+ctxLine)
+	fmt.Fprint(w, row+"\n"+ctxLine)
 }

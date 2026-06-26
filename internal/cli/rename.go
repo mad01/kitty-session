@@ -47,6 +47,6 @@ func runRename(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session %q renamed to %q\n", oldName, newName)
+	fmt.Fprintf(cmd.OutOrStdout(), "session %q renamed to %q\n", oldName, newName)
 	return nil
 }

@@ -46,7 +46,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("cannot focus tab: %w", err)
 			}
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session %q focused\n", name)
+		fmt.Fprintf(cmd.OutOrStdout(), "session %q focused\n", name)
 		return nil
 	}
 
@@ -93,7 +93,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	if cfg.SummaryEnabled() {
 		summaryWindowID, err := summary.LaunchTab(windowID, windowID, sess.Dir)
 		if err != nil {
-			_, _ = fmt.Fprintf(
+			fmt.Fprintf(
 				cmd.ErrOrStderr(),
 				"warning: could not create summary tab: %v\n",
 				err,
@@ -104,7 +104,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := kitty.FocusWindow(windowID); err != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
 	}
 
 	// Update session with new tab and window IDs
@@ -114,6 +114,6 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot save session: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session %q recreated in %s\n", name, sess.Dir)
+	fmt.Fprintf(cmd.OutOrStdout(), "session %q recreated in %s\n", name, sess.Dir)
 	return nil
 }

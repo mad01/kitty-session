@@ -137,7 +137,7 @@ func runHooksInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "hooks installed")
+	fmt.Fprintln(cmd.OutOrStdout(), "hooks installed")
 	return nil
 }
 
@@ -184,7 +184,7 @@ func runHooksUninstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "hooks uninstalled")
+	fmt.Fprintln(cmd.OutOrStdout(), "hooks uninstalled")
 	return nil
 }
 

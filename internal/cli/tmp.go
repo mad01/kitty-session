@@ -92,7 +92,7 @@ func runTmp(cmd *cobra.Command, args []string) error {
 	if cfg.SummaryEnabled() {
 		summaryWindowID, err := summary.LaunchTab(windowID, windowID, tmpDir)
 		if err != nil {
-			_, _ = fmt.Fprintf(
+			fmt.Fprintf(
 				cmd.ErrOrStderr(),
 				"warning: could not create summary tab: %v\n",
 				err,
@@ -103,12 +103,12 @@ func runTmp(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := kitty.FocusWindow(windowID); err != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
 	}
 	if err := store.Save(sess); err != nil {
 		return fmt.Errorf("cannot save session: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", name, tmpDir)
+	fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", name, tmpDir)
 	return nil
 }

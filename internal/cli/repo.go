@@ -71,7 +71,7 @@ func runRepo(cmd *cobra.Command, args []string) error {
 	if !nonInteractive && query != "" {
 		switch len(repos) {
 		case 1:
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), repos[0].Path)
+			fmt.Fprintln(cmd.OutOrStdout(), repos[0].Path)
 			return nil
 		case 0:
 			return fmt.Errorf("no repos match query %q", query)
@@ -112,14 +112,14 @@ func runRepo(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), encoded)
+		fmt.Fprintln(cmd.OutOrStdout(), encoded)
 		return nil
 	}
 
 	if repoListFlag {
 		w := cmd.OutOrStdout()
 		for _, r := range repos {
-			_, _ = fmt.Fprintf(w, "%s\t%s\n", r.Name, r.Path)
+			fmt.Fprintf(w, "%s\t%s\n", r.Name, r.Path)
 		}
 		return nil
 	}
@@ -134,7 +134,7 @@ func runRepo(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), repos[idx].Path)
+	fmt.Fprintln(cmd.OutOrStdout(), repos[idx].Path)
 	return nil
 }
 

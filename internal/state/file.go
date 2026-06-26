@@ -97,5 +97,5 @@ func Clean(name string) {
 	if dir == "" {
 		return
 	}
-	_ = os.Remove(filepath.Join(dir, name+".json"))
+	os.Remove(filepath.Join(dir, name+".json"))
 }

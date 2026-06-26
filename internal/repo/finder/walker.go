@@ -122,7 +122,7 @@ func readOriginURL(path string) string {
 	if err != nil {
 		return ""
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	inOrigin := false

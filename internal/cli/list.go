@@ -33,7 +33,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(sessions) == 0 {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "no sessions")
+		fmt.Fprintln(cmd.OutOrStdout(), "no sessions")
 		return nil
 	}
 
@@ -62,7 +62,7 @@ func runList(cmd *cobra.Command, args []string) error {
 				st = claude.StateWorking
 			}
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
 	}
 	return nil
 }
