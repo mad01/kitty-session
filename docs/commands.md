@@ -4,23 +4,29 @@ Every subcommand exposed by the `ks` CLI, with flags and exit behavior.
 
 `ks` uses [cobra](https://github.com/spf13/cobra) for argument parsing. Exit code is `0` on success and `1` on any error. Errors print to stderr; `SilenceUsage` is on, so cobra won't spam the usage block on error.
 
+`ks` keeps its sessions in a kitty instance of its own, listening on the socket from `kitty_socket` in the config (default `~/.config/ks/kitty.sock`). Commands that create or focus tabs start that instance when it is not running; `close`, `rename`, `list` and `quit` never start it.
+
 ## `ks`
 
 ```
-Usage: ks [flags]
+Usage: ks [--agent]
 ```
 
-Running `ks` with no subcommand launches the interactive TUI.
+Attach. Starts the instance if its socket does not answer. Resumes every active session whose claude window is gone, 100 ms apart, and leaves stopped sessions alone. Then focuses the session you used last: the newest `focused_at`, the oldest active one, which is tab 1, if none was ever focused, the home tab when there is no active session. Prints one line:
+
+```
+ks: 2 resumed, 1 already running, 1 stopped
+```
+
+Sessions that fail to resume are reported as warnings on stderr; the attach continues past them. Two seconds after the last launch every relaunched claude window is checked again; one that is gone is not counted as resumed and gets its own line, `ks: <name> exited right after launch`. Running `ks` while everything is already up is a no-op apart from the focus.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--agent` | Start a background Haiku agent that monitors session state via `kitty @ get-text`. Fallback for when Claude Code hooks aren't installed. Agent is killed (along with its process group) when the TUI exits. |
+| `--agent` | When this attach starts the instance, its home sidebar runs with `--agent`, so the background Haiku state monitor lives as long as the instance. With the instance already running the flag prints a note and does nothing. |
 
-The `--agent` flag is persistent, so it's recognized on subcommands too, but only the root command's TUI path actually launches the agent.
-
-See [TUI guide](tui.md) for keybindings.
+The `--agent` flag is persistent, so it's recognized on subcommands too; only `ks` (when starting the instance) and `ks sidebar` act on it.
 
 ## `ks new`
 
@@ -39,13 +45,23 @@ Create a new session. Fails if a session with the same name already exists.
 
 Behavior:
 
-1. Reads `~/.config/ks/config.yaml` for `layout`, `summary`, and `tmpdir` (missing config is non-fatal for this command).
-2. Launches a new kitty OS window running `claude` in the target directory, with `KS_SESSION_NAME=<name>` exported.
-3. Sets the kitty tab title to the session name.
-4. Launches the shell pane — as a horizontal split (default) or as a sibling tab when `layout: tab`.
-5. Launches the summary tab if `summary: true` and `layout: tab`.
-6. Focuses the Claude pane.
-7. Writes `~/.config/ks/sessions/<name>.json`.
+1. Reads `~/.config/ks/config.yaml` (a missing file is fine).
+2. Starts the instance if needed. A fresh instance first brings every active session back, oldest first and out of sight, so the new session becomes the last tab, the same order bare `ks` produces.
+3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
+4. Creates a tab in the instance running `ks sidebar --session-id <id>`, switches it to the `splits` layout and titles it `<name>`.
+5. Splits claude in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
+6. Shows the tab by focusing the claude window.
+7. Writes the kitty IDs and `focused_at` back to the session file.
+
+Claude Code asks whether you trust the files in a folder it has not seen before. The first thing a session in a new directory shows is that dialog; answer it once.
+
+## `ks tmp`
+
+```
+Usage: ks tmp [-n <name>]
+```
+
+Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, under `tmpdir` from the config or the OS temp dir. The name defaults to `tmp-<MMDD-HHMM>`, with a random suffix when that is taken. Every scratch directory is new to Claude Code, so each `ks tmp` session opens with the folder-trust dialog. Like `ks new`, a `ks tmp` that has to start the instance brings the active sessions back first.
 
 ## `ks open <name>`
 
@@ -53,10 +69,11 @@ Behavior:
 Usage: ks open <name>
 ```
 
-Focus or recreate the named session.
+Focus or recreate the named session. Starts the instance if needed; a fresh instance first brings every active session back, oldest first, before this one is opened.
 
-- If the kitty tab is still alive, focus its Claude pane (or the tab itself if the window ID wasn't recorded).
-- If the tab is gone, recreate it: launch Claude with `--continue` to resume the most recent Claude conversation in that directory, re-create the shell pane and (if enabled) summary tab, then persist the new kitty IDs back to the session file.
+- If the claude window is alive, focus it.
+- If only the sidebar is left (claude exited or was closed), relaunch claude beside it in the same tab.
+- Otherwise close whatever tab the session still owns and create the tab again. Claude starts with `--resume <id>` when the record has a `claude_session_id` whose transcript still exists, with `--continue` when the directory has any Claude transcript, and bare otherwise. A `--continue` with nothing to continue makes claude exit at once. The new kitty IDs are written back to the session file.
 
 ## `ks close <name>`
 
@@ -64,15 +81,15 @@ Focus or recreate the named session.
 Usage: ks close <name> [--keep]
 ```
 
-Close the session's kitty tabs.
+Close the session's tab. Works while the instance is down; the tab is then reported as left alone and the record is handled regardless.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--keep` | Keep the session file on disk so it can be reopened later. Without this, the session file is moved to `~/.config/ks/sessions/trash/`. |
+| `--keep` | Keep the session file on disk, marked `stopped`, so it can be reopened later. Without this, the session file is moved to `~/.config/ks/sessions/trash/`. |
 
-With `--keep`, only the kitty tabs go away — the record remains so `ks open <name>` can recreate it. Without `--keep`, the record is trashed; restore it from the TUI (`u` key).
+With `--keep`, only the tab goes away; `ks open <name>` recreates it. Without `--keep`, the record is trashed; restore it from the sidebar (`u` key).
 
 ## `ks list`
 
@@ -86,15 +103,17 @@ Print one line per session to stdout:
 <name>               <state>    <dir>
 ```
 
-State detection uses the same priority as the TUI:
+State detection:
 
-1. If the kitty tab no longer exists → `stopped`.
+1. If the record is `stopped`, or no window tagged with the session's id matches its claude window → `stopped`.
 2. If a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
-3. Otherwise, read the Claude pane via `kitty @ get-text` and run the terminal-text classifier.
+3. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
+
+The sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text and adds `done`); see [Sidebar guide](tui.md#states).
+
+When the instance is not running every active session prints `stopped` and a last line says `ks instance not running`. Prints `no sessions` if no session files are found.
 
 See [Hooks and state detection](hooks-and-state.md) for the full flow.
-
-Prints `no sessions` if no session files are found.
 
 ## `ks rename <old> <new>`
 
@@ -102,9 +121,37 @@ Prints `no sessions` if no session files are found.
 Usage: ks rename <old-name> <new-name>
 ```
 
-Rename a session. Renames the session file, renames the state file if one exists, and updates the kitty tab title.
+Rename a session. Renames the session file, renames the state file if one exists, and retitles the tab when the session has one. Fails if `<new-name>` already exists. A tab title that cannot be set (instance down) is a warning. The sidebar in that tab keeps the old `--session` argument until the session is recreated.
 
-Fails if `<new-name>` already exists.
+## `ks quit`
+
+```
+Usage: ks quit
+```
+
+Close every window of the instance, which ends it. Session records stay `active`, so the next `ks` brings them all back; the command says how many:
+
+```
+ks instance closed; 3 active session(s) will resume on the next attach
+```
+
+Prints `ks instance not running` when there is nothing to close.
+
+## `ks sidebar`
+
+```
+Usage: ks sidebar [--session-id <id> | --session <name>] [--agent]
+```
+
+Run the sidebar in the current window. The instance runs one in its home tab (`ks sidebar`) and one on the left of every session tab (`ks sidebar --session-id <id>`); run it by hand to get the sidebar in any terminal. It never starts the instance. Inside the instance it waits for the socket to answer, since kitty runs the home sidebar as its first window. Anywhere else it exits with `ks instance not running` when nothing answers.
+
+| Flag | Description |
+|---|---|
+| `--session-id` | The id of the session whose tab this sidebar sits in. The launcher passes it; it is stable across renames, so the own row and the `l`/`tab`/`q` keys, `shell split` and the width re-pin follow a renamed session without a restart. |
+| `--session` | The same, by name, for a human running the command. |
+| `--agent` | Start the background Haiku state monitor for as long as the sidebar runs. Stopped on SIGHUP/SIGTERM/SIGINT as well as a clean exit, so `ks quit` or a tab close does not orphan it. |
+
+See [Sidebar guide](tui.md) for rows, states and keys.
 
 ## `ks repo`
 
@@ -121,9 +168,54 @@ Find a git repository under the `dirs` configured in `~/.config/ks/config.yaml`.
 | *(none)* | Interactive [go-fuzzyfinder](https://github.com/ktr0731/go-fuzzyfinder); prints the selected repo's path. |
 | `--list` | TSV: `<name>\t<path>` per repo. |
 | `--json` | JSON array with `name`, `path`, `remote`, and `host` (last two omitted when empty). |
-| `--toon` | [TOON](https://github.com/alpkeskin/gotoon) encoding — compact for LLM consumers. |
+| `--toon` | [TOON](https://github.com/alpkeskin/gotoon) encoding, compact for LLM consumers. |
 
 When invoked in a non-TTY context (for example piped into `read`) the interactive mode still runs if stdin is a TTY. Use one of the flag modes for clean scripting. See [Repo finder](repo-finder.md) for the shell function and output format examples.
+
+## `ks import`
+
+```
+Usage: ks import [--dry-run] [--from <session.json>] [--no-open]
+```
+
+Bring the claude agents that [herdr](https://github.com/herdrdev/herdr) runs into ks. herdr is another session manager; it keeps its layout in `~/.config/herdr/session.json` (or `$XDG_CONFIG_HOME/herdr/session.json`), one entry per pane with the agent's Claude session id. `ks import` reads that file and writes one active ks record per claude pane, so the next `ks` resumes each conversation with `claude --resume <id>`. herdr's file is never modified.
+
+Only herdr's default session file is read. herdr can run named sessions, which keep their own `session.json` under `~/.config/herdr/sessions/<name>/`; point `--from` at one of those to import it.
+
+For each pane:
+
+- A pane without an agent is a shell and is skipped. Panes running another agent (codex, pi) are skipped: ks only hosts claude. A claude pane herdr knows by transcript path rather than id is skipped too.
+- A claude pane whose Claude session id a ks record already carries is reported as `exists` and left alone, so rerunning the command is safe.
+- Otherwise a record is written. Its name is the herdr workspace name, else the tab name, sanitized the way `ks new` would. With neither it is the directory's base name plus git branch, the same name the sidebar's repo picker suggests. A taken name gets `-2`, `-3`, and so on, the lowest free suffix.
+- The transcript path is derived from the directory and id. When the file is gone the record is still written, with a `warning: <name>: transcript missing, will start fresh` line, since the launcher then falls back to `--continue` or a bare `claude`.
+
+Output is one aligned line per pane, the skipped ones last, then a summary:
+
+```
+imported  migraine-me-main  ~/code/src/github.com/mad01/migraine-me  b75ee90c
+exists    dropbrain-app     ~/code/src/github.com/mad01/dropbrain-app  211b8c21
+skipped                     ~/code/src/github.com/mad01/thismoon       shell, no agent
+ks: 1 imported, 1 already present, 1 skipped
+```
+
+**herdr still running.** After writing, `ks import` checks whether a herdr daemon answers on `herdr.sock` beside the session file. If it does, nothing is opened: starting claude on a transcript herdr's own claude is still writing to would run two sessions on one conversation. Instead stderr says:
+
+```
+ks: herdr is still running these agents; not opening them.
+    Stop it with: herdr session stop default   then run: ks
+```
+
+When herdr is not running and something was imported, the command attaches the same way bare `ks` does and prints its `ks: N resumed, ...` line. When nothing was imported the instance is not started.
+
+A missing session file is an error naming the path and `--from`. A file of another format version than 3 is rejected with the version found. A file with no panes at all prints `ks: no agents found` and exits 0.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Print the plan with `import` in place of `imported`, write nothing, start nothing. |
+| `--from <path>` | Read this herdr session file instead of the default session's. |
+| `--no-open` | Write the records, do not start the instance; the next `ks` brings them up. |
 
 ## `ks version`
 
@@ -141,9 +233,9 @@ Usage: ks hooks install
 
 Register `ks _hook` with Claude Code by editing `~/.claude/settings.json`. Creates the file (and directory) if missing. Writes back pretty-printed JSON with a trailing newline.
 
-For each of `PreToolUse`, `Stop`, `Notification`, and `SessionStart`, `ks` installs a matcher group that invokes `<ks-binary> _hook`. The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
+For each of `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`, `ks` installs a matcher group that invokes `<ks-binary> _hook`. The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
 
-Re-running `install` is idempotent — existing `ks` matcher groups are removed before new ones are written, so stale entries from an older binary path get cleaned up. Any non-`ks` hook entries are preserved.
+Re-running `install` is idempotent: existing `ks` matcher groups are removed before new ones are written, so stale entries from an older binary path get cleaned up. Any non-`ks` hook entries are preserved.
 
 ## `ks hooks uninstall`
 
@@ -155,11 +247,19 @@ Reverse of `install`: strip every matcher group whose command resolves to `ks _h
 
 ## `ks _hook` (hidden)
 
-Invoked by Claude Code hooks, not by humans. Reads a JSON payload from stdin, maps the `event` (and for `Notification`, the `type`) to one of `working` / `idle` / `input` / `waiting`, and writes `~/.config/ks/state/<KS_SESSION_NAME>.json`.
+Invoked by Claude Code hooks, not by humans. Reads a JSON payload from stdin, maps the `event` (and for `Notification`, the `type`) to one of `working` / `idle` / `input` / `waiting`, and writes `~/.config/ks/state/<name>.json`.
 
-If `KS_SESSION_NAME` is not set, the command exits silently — it's safe to have the hook installed globally even in terminals that aren't `ks` sessions.
+If `KS_SESSION_NAME` is not set, the command exits silently; it's safe to have the hook installed globally even in terminals that aren't `ks` sessions.
 
 See [Hooks and state detection](hooks-and-state.md) for the full event-to-state table.
+
+## `ks _sidebar-demo` (hidden)
+
+```
+Usage: ks _sidebar-demo [--width <cols>] [--session <name>]
+```
+
+Run the sidebar on six fake agents covering every state, with an in-memory backend: no kitty, no session files, nothing touched. A development aid for reviewing the look in any terminal. `--width` sets the frame width (default 36); `--session` names the fake agent treated as this tab's own (default `kitty-session`).
 
 ## Scripting recipes
 
@@ -169,13 +269,16 @@ See [Hooks and state detection](hooks-and-state.md) for the full event-to-state 
 ks list | awk '{print $1}'
 ```
 
-### Open every session sequentially (for session health check)
+### Bring everything back after a reboot
 
 ```bash
-ks list | awk '{print $1}' | while read name; do
-  ks open "$name"
-  sleep 1
-done
+ks
+```
+
+### Inspect the instance
+
+```bash
+kitty @ --to unix:$HOME/.config/ks/kitty.sock ls
 ```
 
 ### Pipe repo picker into `cd` via a shell function

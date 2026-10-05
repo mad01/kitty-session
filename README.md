@@ -1,12 +1,12 @@
 # kitty-session
 
-`ks` is a session manager for [kitty](https://sw.kovidgoyal.net/kitty/). It creates named kitty tabs that pair [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with a shell, tracks their state, and lets you jump between them from an interactive TUI or shell scripts.
+`ks` is a session manager for [kitty](https://sw.kovidgoyal.net/kitty/). It runs a kitty instance of its own in which every [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) session is a tab: the `ks` sidebar on the left, claude on the right. It tracks each session's state, brings every session back with one command, and lets you jump between them from the sidebar or shell scripts.
 
 ## Screenshots
 
 ### Session list
 
-The main TUI view lists every session with its live state and working directory.
+The sidebar lists every agent with its state and Claude's current tab title. (Screenshots predate the sidebar; run `ks _sidebar-demo` for a live preview on fake data.)
 
 ![Session list](images/default.png)
 
@@ -19,19 +19,19 @@ Press `n` to open the repository picker. Browse everything `ks` has scanned or t
 
 ### Inside a session
 
-Each session runs Claude Code and a shell in the same tab, either split horizontally (default) or as separate tabs.
+Each session tab pairs the sidebar with Claude Code. (Screenshots predate the sidebar layout.)
 
 ![Running session](images/session.png)
 
-### Help overlay
+### Menu
 
-Press `?` for the full keybindings.
+Press `m` for every action, from new agent to quit.
 
 ![Help overlay](images/help.png)
 
 ## Install
 
-You need [kitty](https://sw.kovidgoyal.net/kitty/) with remote control enabled and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`. Go 1.25 or later is required to build from source.
+You need [kitty](https://sw.kovidgoyal.net/kitty/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`; `ks` starts its own kitty instance. Go 1.25 or later is required to build from source.
 
 ```bash
 make install
@@ -45,11 +45,11 @@ For everything else — first session, configuration, subcommands, hooks — see
 
 - [Getting started](docs/getting-started.md) — install, minimal config, first session
 - [Configuration](docs/configuration.md) — `~/.config/ks/config.yaml` reference
-- [TUI guide](docs/tui.md) — modes, keybindings, state badges, trash and restore
+- [Sidebar guide](docs/tui.md) — rows, states, keys, menu, trash and restore
 - [Command reference](docs/commands.md) — every subcommand and flag
 - [Repo finder](docs/repo-finder.md) — `ks repo` and its output formats
 - [Hooks and state detection](docs/hooks-and-state.md) — how `ks` knows what Claude is doing
-- [Summary tab](docs/summary-tab.md) — the optional Haiku-powered session summary
+- [Summary tab](docs/summary-tab.md) — deprecated, kept for the record
 - [Architecture](docs/architecture.md) — package layout, data flow, extending `ks`
 - [Troubleshooting](docs/troubleshooting.md) — common failures and fixes
 

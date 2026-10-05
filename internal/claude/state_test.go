@@ -89,3 +89,16 @@ func TestDetectState(t *testing.T) {
 		})
 	}
 }
+
+func TestParseState(t *testing.T) {
+	for _, st := range []State{StateWorking, StateIdle, StateNeedsInput, StateWaiting} {
+		if got := ParseState(st.String()); got != st {
+			t.Errorf("ParseState(%q) = %v, want %v", st.String(), got, st)
+		}
+	}
+	for _, s := range []string{"", "stopped", "bogus"} {
+		if got := ParseState(s); got != StateUnknown {
+			t.Errorf("ParseState(%q) = %v, want StateUnknown", s, got)
+		}
+	}
+}

@@ -1,77 +1,53 @@
 package claude
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
-type sessionsIndex struct {
-	Entries []entry `json:"entries"`
-}
-
-type entry struct {
-	FirstPrompt string    `json:"firstPrompt"`
-	Modified    time.Time `json:"modified"`
-	IsSidechain bool      `json:"isSidechain"`
-}
-
-// encodePath converts an absolute directory path to the encoding Claude uses
-// for its projects directory: replace / with - and trim the leading -.
+// encodePath converts a directory path to the name Claude Code gives its
+// projects directory: every character outside [A-Za-z0-9] becomes "-", so
+// /Users/u/.config/x is -Users-u--config-x. The leading dash is kept.
 func encodePath(dir string) string {
-	return strings.TrimLeft(strings.ReplaceAll(dir, "/", "-"), "-")
+	return strings.Map(func(r rune) rune {
+		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
+			return r
+		}
+		return '-'
+	}, dir)
 }
 
-// LatestPrompt returns the firstPrompt from the most recently modified
-// non-sidechain session for the given working directory. Returns "" on any error.
-func LatestPrompt(dir string) string {
+// projectDir returns the directory under ~/.claude/projects that Claude Code
+// keeps for sessions started in dir.
+func projectDir(dir string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
-
-	indexPath := filepath.Join(home, ".claude", "projects", encodePath(dir), "sessions-index.json")
-	return latestPromptFromFile(indexPath)
+	return filepath.Join(home, ".claude", "projects", encodePath(dir)), nil
 }
 
-// latestPromptFromFile reads a sessions-index.json file and returns the
-// firstPrompt from the most recently modified non-sidechain entry.
-func latestPromptFromFile(path string) string {
-	data, err := os.ReadFile(path)
+// TranscriptPath returns where Claude Code stores the transcript of session
+// sessionID started in dir. Claude Code deletes transcripts after its cleanup
+// period, so the file's presence tells whether claude --resume can still work.
+func TranscriptPath(dir, sessionID string) (string, error) {
+	project, err := projectDir(dir)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return latestPromptFromJSON(data)
+	return filepath.Join(project, sessionID+".jsonl"), nil
 }
 
-// latestPromptFromJSON parses sessions-index JSON and returns the firstPrompt
-// from the most recently modified non-sidechain entry, truncated to 60 chars.
-func latestPromptFromJSON(data []byte) string {
-	var idx sessionsIndex
-	if err := json.Unmarshal(data, &idx); err != nil {
-		return ""
+// HasTranscripts reports whether Claude Code has any transcript for sessions
+// started in dir, which is what claude --continue needs to find one. With
+// none, --continue prints "No conversation found" and exits.
+func HasTranscripts(dir string) bool {
+	project, err := projectDir(dir)
+	if err != nil {
+		return false
 	}
-
-	var latest entry
-	var found bool
-	for _, e := range idx.Entries {
-		if e.IsSidechain {
-			continue
-		}
-		if !found || e.Modified.After(latest.Modified) {
-			latest = e
-			found = true
-		}
-	}
-	if !found {
-		return ""
-	}
-
-	prompt := latest.FirstPrompt
-	if len(prompt) > 60 {
-		prompt = prompt[:60] + "\u2026"
-	}
-	return prompt
+	matches, err := filepath.Glob(filepath.Join(project, "*.jsonl"))
+	return err == nil && len(matches) > 0
 }

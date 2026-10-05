@@ -3,14 +3,11 @@ package cli
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/mad01/kitty-session/internal/kitty"
-	"github.com/mad01/kitty-session/internal/repo/config"
-	"github.com/mad01/kitty-session/internal/session"
-	"github.com/mad01/kitty-session/internal/summary"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +16,7 @@ var tmpSessionName string
 var tmpCmd = &cobra.Command{
 	Use:   "tmp",
 	Short: "Create a temporary Claude session",
-	Long:  "Create a named kitty tab with Claude in a temporary directory.",
+	Long:  "Create a session tab with claude in a temporary directory.",
 	RunE:  runTmp,
 }
 
@@ -30,85 +27,45 @@ func init() {
 }
 
 func runTmp(cmd *cobra.Command, args []string) error {
-	store, err := session.NewStore()
+	w, err := ensureWiring(false)
+	if err != nil {
+		return err
+	}
+	resumeOnFreshStart(cmd, w)
+
+	tmpDir, err := launcher.ScratchDir(w.cfg.EffectiveTmpDir())
 	if err != nil {
 		return err
 	}
 
-	cfg, _ := config.Load()
-
-	tmpBase := cfg.EffectiveTmpDir()
-	if tmpBase != "" {
-		if err := os.MkdirAll(tmpBase, 0o755); err != nil {
-			return fmt.Errorf("cannot create tmpdir: %w", err)
-		}
-	}
-	tmpDir, err := os.MkdirTemp(tmpBase, "ks-*")
-	if err != nil {
-		return fmt.Errorf("cannot create temp directory: %w", err)
-	}
-
 	name := tmpSessionName
-	if name == "" {
+	auto := name == ""
+	if auto {
 		name = fmt.Sprintf("tmp-%s", time.Now().Format("0102-1504"))
-		if store.Exists(name) {
-			b := make([]byte, 2)
-			_, _ = rand.Read(b)
-			name = name + "-" + hex.EncodeToString(b)
-		}
-	} else if store.Exists(name) {
-		return fmt.Errorf("session %q already exists (use 'ks open %s' or 'ks close %s' first)", name, name, name)
 	}
-
-	layout := cfg.EffectiveLayout()
-
-	windowID, err := kitty.LaunchTab(tmpDir, "--env", "KS_SESSION_NAME="+name, "--", "claude")
+	res, err := w.launcher.Open(launcher.Request{Name: name, Dir: tmpDir})
+	if auto && errors.Is(err, launcher.ErrExists) {
+		// Two tmp sessions in the same minute: disambiguate the generated name.
+		name = name + "-" + randomSuffix()
+		res, err = w.launcher.Open(launcher.Request{Name: name, Dir: tmpDir})
+	}
 	if err != nil {
-		return fmt.Errorf("cannot create tab: %w", err)
+		return withExistsHint(err, name)
 	}
-
-	if err := kitty.SetTabTitle(name); err != nil {
-		return fmt.Errorf("cannot set tab title: %w", err)
-	}
-
-	tabID, err := kitty.FindTabForWindow(windowID)
-	if err != nil {
-		return fmt.Errorf("cannot find tab: %w", err)
-	}
-
-	sess := session.New(name, tmpDir, tabID, windowID)
-	if layout == config.LayoutTab {
-		shellWindowID, err := kitty.LaunchTabInWindow(windowID, tmpDir)
-		if err != nil {
-			return fmt.Errorf("cannot create shell tab: %w", err)
-		}
-		sess.KittyShellWindowID = shellWindowID
-	} else {
-		if err := kitty.LaunchSplit(tmpDir); err != nil {
-			return fmt.Errorf("cannot create split: %w", err)
-		}
-	}
-
-	if cfg.SummaryEnabled() {
-		summaryWindowID, err := summary.LaunchTab(windowID, windowID, tmpDir)
-		if err != nil {
-			fmt.Fprintf(
-				cmd.ErrOrStderr(),
-				"warning: could not create summary tab: %v\n",
-				err,
-			)
-		} else {
-			sess.KittySummaryWindowID = summaryWindowID
-		}
-	}
-
-	if err := kitty.FocusWindow(windowID); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
-	}
-	if err := store.Save(sess); err != nil {
-		return fmt.Errorf("cannot save session: %w", err)
-	}
+	printWarnings(cmd, res.Warnings)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", name, tmpDir)
 	return nil
+}
+
+// suffixBytes is the length of the random disambiguator before hex encoding.
+const suffixBytes = 2
+
+// randomSuffix returns a short random hex string for a generated name.
+func randomSuffix() string {
+	b := make([]byte, suffixBytes)
+	if _, err := rand.Read(b); err != nil {
+		panic("tmp: crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }

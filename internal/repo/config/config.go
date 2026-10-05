@@ -1,3 +1,6 @@
+// Package config loads ~/.config/ks/config.yaml, the one user-authored file
+// ks reads: the repo roots for the picker, the scratch directory, and the
+// settings of the ks-owned kitty instance.
 package config
 
 import (
@@ -9,26 +12,38 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const configFileName = "config.yaml"
-
-// Layout constants for session window arrangement.
 const (
-	LayoutSplit = "split"
-	LayoutTab   = "tab"
+	configFileName = "config.yaml"
+	// defaultSocketFile is the instance's remote-control socket under ~/.config/ks/.
+	defaultSocketFile = "kitty.sock"
+	// socketScheme prefixes a socket path for kitty's --to and --listen-on flags.
+	socketScheme = "unix:"
 )
 
-// Config holds the repo finder configuration.
-type Config struct {
-	Dirs    []string `yaml:"dirs"`
-	Layout  string   `yaml:"layout"`
-	Summary bool     `yaml:"summary"`
-	TmpDir  string   `yaml:"tmpdir"`
-}
+// Sidebar width bounds, in terminal cells.
+const (
+	// DefaultSidebarWidth applies when sidebar_width is unset.
+	DefaultSidebarWidth = 36
+	// MinSidebarWidth is the narrowest sidebar the TUI can still render.
+	MinSidebarWidth = 20
+)
 
-// SummaryEnabled returns true when the summary tab should be created.
-// Requires summary: true AND layout: tab.
-func (c *Config) SummaryEnabled() bool {
-	return c != nil && c.Summary && c.EffectiveLayout() == LayoutTab
+// Config is the parsed config.yaml. A nil *Config behaves like an empty file,
+// so callers that tolerate a missing config can use the accessors directly.
+type Config struct {
+	Dirs []string `yaml:"dirs"`
+	// Layout and Summary shaped the topology before ks owned its kitty
+	// instance. They are still parsed so old files load, and otherwise ignored.
+	Layout  string `yaml:"layout"`
+	Summary bool   `yaml:"summary"`
+	TmpDir  string `yaml:"tmpdir"`
+	// KittySocket is the path of the instance's remote-control socket.
+	KittySocket string `yaml:"kitty_socket"`
+	// SidebarWidth is the width of each session's sidebar window in cells.
+	SidebarWidth int `yaml:"sidebar_width"`
+	// KittyOverrides are extra key=value settings the instance starts with,
+	// each passed to kitty as -o after the ones ks needs.
+	KittyOverrides []string `yaml:"kitty_overrides"`
 }
 
 // EffectiveTmpDir returns the configured tmpdir for scratch sessions.
@@ -40,13 +55,40 @@ func (c *Config) EffectiveTmpDir() string {
 	return ""
 }
 
-// EffectiveLayout returns the configured layout, defaulting to split.
-// Safe to call on a nil receiver.
-func (c *Config) EffectiveLayout() string {
-	if c != nil && c.Layout == LayoutTab {
-		return LayoutTab
+// Socket returns the instance's remote-control address in the form kitty's
+// --to and --listen-on flags take: unix:<absolute path>. Unset, it is
+// ~/.config/ks/kitty.sock.
+func (c *Config) Socket() (string, error) {
+	if c != nil && c.KittySocket != "" {
+		return socketScheme + c.KittySocket, nil
 	}
-	return LayoutSplit
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return socketScheme + filepath.Join(home, ".config", "ks", defaultSocketFile), nil
+}
+
+// SocketPath returns the file path behind a Socket address.
+func SocketPath(socket string) string {
+	return strings.TrimPrefix(socket, socketScheme)
+}
+
+// EffectiveSidebarWidth returns the sidebar width in cells: the configured
+// value raised to MinSidebarWidth, or DefaultSidebarWidth when unset.
+func (c *Config) EffectiveSidebarWidth() int {
+	if c == nil || c.SidebarWidth == 0 {
+		return DefaultSidebarWidth
+	}
+	return max(c.SidebarWidth, MinSidebarWidth)
+}
+
+// Overrides returns the extra kitty settings for the instance, nil when none.
+func (c *Config) Overrides() []string {
+	if c == nil {
+		return nil
+	}
+	return c.KittyOverrides
 }
 
 // Load reads config.yaml from ~/.config/ks/config.yaml.
@@ -84,6 +126,26 @@ func loadFrom(path string) (*Config, error) {
 		cfg.Dirs[i] = expandTilde(d)
 	}
 	cfg.TmpDir = expandTilde(cfg.TmpDir)
+	if cfg.KittySocket != "" {
+		// A relative socket path resolves against the config file's directory
+		// (~/.config/ks), never the process working directory, so ks reaches
+		// the same instance whatever directory it is run from.
+		sock := expandTilde(cfg.KittySocket)
+		if !filepath.IsAbs(sock) {
+			sock = filepath.Join(filepath.Dir(path), sock)
+		}
+		cfg.KittySocket = filepath.Clean(sock)
+	}
+	for i, o := range cfg.KittyOverrides {
+		if !strings.Contains(o, "=") {
+			return nil, fmt.Errorf(
+				"parsing %s: kitty_overrides[%d] %q is not key=value",
+				path,
+				i,
+				o,
+			)
+		}
+	}
 
 	return &cfg, nil
 }
