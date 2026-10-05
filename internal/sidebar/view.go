@@ -29,7 +29,7 @@ func (m model) View() string {
 	for _, l := range lines {
 		b.WriteString("\n" + side + l + side)
 	}
-	b.WriteString("\n" + borderStyle.Render("╰" + hline + "╯"))
+	b.WriteString("\n" + borderStyle.Render("╰"+hline+"╯"))
 	return b.String()
 }
 
@@ -37,7 +37,10 @@ func (m model) View() string {
 func (m model) listLines(inner int) []string {
 	n := m.innerHeight()
 	lines := make([]string, 0, n)
-	lines = append(lines, spread(inner, headerStyle.Render("agents"), sortLabelStyle.Render("priority")))
+	lines = append(
+		lines,
+		spread(inner, headerStyle.Render("agents"), sortLabelStyle.Render("priority")),
+	)
 	lines = append(lines, m.filterLine(inner))
 	lines = append(lines, m.rowLines(inner, n-listChrome)...)
 	lines = append(lines, m.statusLine(inner))

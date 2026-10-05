@@ -25,18 +25,20 @@ func (f *fakeBackend) record(format string, args ...any) error {
 	return f.fail
 }
 
-func (f *fakeBackend) List() ([]Agent, error)        { return f.agents, nil }
-func (f *fakeBackend) Focus(name string) error       { return f.record("focus:%s", name) }
-func (f *fakeBackend) New(name, dir string) error    { return f.record("new:%s:%s", name, dir) }
-func (f *fakeBackend) SuggestName(dir string) string { return "sug-" + dir[strings.LastIndex(dir, "/")+1:] }
-func (f *fakeBackend) TmpDir() (string, error)       { return "/tmp/ks-fake", f.record("tmpdir") }
-func (f *fakeBackend) Restore(name string) error     { return f.record("restore:%s", name) }
-func (f *fakeBackend) Trashed() ([]string, error)    { return f.trashed, nil }
-func (f *fakeBackend) FocusAgentWindow() error       { return f.record("focus-agent") }
-func (f *fakeBackend) ShellSplit() error             { return f.record("shell-split") }
-func (f *fakeBackend) HooksStatus() (string, error)  { return "hooks ok", f.record("hooks") }
-func (f *fakeBackend) Quit() error                   { return f.record("quit") }
-func (f *fakeBackend) Repos() ([]Repo, error)        { return f.repos, nil }
+func (f *fakeBackend) List() ([]Agent, error)     { return f.agents, nil }
+func (f *fakeBackend) Focus(name string) error    { return f.record("focus:%s", name) }
+func (f *fakeBackend) New(name, dir string) error { return f.record("new:%s:%s", name, dir) }
+func (f *fakeBackend) SuggestName(dir string) string {
+	return "sug-" + dir[strings.LastIndex(dir, "/")+1:]
+}
+func (f *fakeBackend) TmpDir() (string, error)      { return "/tmp/ks-fake", f.record("tmpdir") }
+func (f *fakeBackend) Restore(name string) error    { return f.record("restore:%s", name) }
+func (f *fakeBackend) Trashed() ([]string, error)   { return f.trashed, nil }
+func (f *fakeBackend) FocusAgentWindow() error      { return f.record("focus-agent") }
+func (f *fakeBackend) ShellSplit() error            { return f.record("shell-split") }
+func (f *fakeBackend) HooksStatus() (string, error) { return "hooks ok", f.record("hooks") }
+func (f *fakeBackend) Quit() error                  { return f.record("quit") }
+func (f *fakeBackend) Repos() ([]Repo, error)       { return f.repos, nil }
 
 func (f *fakeBackend) Close(name string, keep bool) error {
 	return f.record("close:%s:%v", name, keep)
@@ -57,21 +59,33 @@ var errFake = errors.New("fake failure")
 func mockupAgents() []Agent {
 	base := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	return []Agent{
-		{Name: "kitty-session", Dir: "/home/u/code/kitty-session", Title: "Claude Code",
-			State: StateIdle, ChangedAt: base.Add(-25 * time.Minute)},
-		{Name: "migraine-me", Dir: "/home/u/code/migraine-me", Title: "Migrane iOS 27.1 update",
-			State: StateIdle, ChangedAt: base.Add(-20 * time.Minute)},
-		{Name: "dropbrain-app", Dir: "/home/u/code/dropbrain-app",
+		{
+			Name: "kitty-session", Dir: "/home/u/code/kitty-session", Title: "Claude Code",
+			State: StateIdle, ChangedAt: base.Add(-25 * time.Minute),
+		},
+		{
+			Name: "migraine-me", Dir: "/home/u/code/migraine-me", Title: "Migrane iOS 27.1 update",
+			State: StateIdle, ChangedAt: base.Add(-20 * time.Minute),
+		},
+		{
+			Name: "dropbrain-app", Dir: "/home/u/code/dropbrain-app",
 			Title: "Migrane iOS 27.1 migration ✳ follow-ups",
-			State: StateDone, ChangedAt: base.Add(-3 * time.Minute)},
-		{Name: "thismoon", Dir: "/home/u/code/thismoon",
+			State: StateDone, ChangedAt: base.Add(-3 * time.Minute),
+		},
+		{
+			Name: "thismoon", Dir: "/home/u/code/thismoon",
 			Title: "Mods overview and integration plan",
-			State: StateInput, ChangedAt: base.Add(-time.Minute)},
-		{Name: "code-search-local", Dir: "/home/u/code/code-search-local",
+			State: StateInput, ChangedAt: base.Add(-time.Minute),
+		},
+		{
+			Name: "code-search-local", Dir: "/home/u/code/code-search-local",
 			Title: "Reindex 日本語 テスト after sparse checkout",
-			State: StateWorking, ChangedAt: base.Add(-10 * time.Second)},
-		{Name: "dotfiles", Dir: "/home/u/code/dotfiles", State: StateStopped,
-			ChangedAt: base.Add(-2 * time.Hour)},
+			State: StateWorking, ChangedAt: base.Add(-10 * time.Second),
+		},
+		{
+			Name: "dotfiles", Dir: "/home/u/code/dotfiles", State: StateStopped,
+			ChangedAt: base.Add(-2 * time.Hour),
+		},
 	}
 }
 

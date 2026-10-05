@@ -24,12 +24,12 @@ const (
 
 // Layout constants, in terminal cells and lines.
 const (
-	frameCells    = 2 // left and right border
-	frameLines    = 2 // top and bottom border
-	rowHeight     = 2 // name line plus title line
-	rowIndent     = 3 // marker, dot, space before the name; title aligns under the name
-	edgePad       = 1 // blank cell between content and the right border
-	bodyStart     = 2 // content lines above the rows: header and filter line
+	frameCells    = 2             // left and right border
+	frameLines    = 2             // top and bottom border
+	rowHeight     = 2             // name line plus title line
+	rowIndent     = 3             // marker, dot, space before the name; title aligns under the name
+	edgePad       = 1             // blank cell between content and the right border
+	bodyStart     = 2             // content lines above the rows: header and filter line
 	listChrome    = bodyStart + 2 // plus the status line and footer below them
 	defaultHeight = 24
 	inputLimit    = 128
@@ -87,7 +87,6 @@ type model struct {
 	trashed  []string
 	trashIdx int
 	follow   string // agent to put the cursor on after the next List
-
 
 	status    string // transient line above the footer; cleared on the next key
 	statusErr bool

@@ -52,7 +52,10 @@ func TestViewGeometryAcrossModes(t *testing.T) {
 			for _, e := range entries {
 				t.Run(e.name, func(t *testing.T) {
 					fb.fail = errFake // force the name prompt after the picker
-					m := newModel(Options{Width: width, Backend: fb, Session: "kitty-session"}, "/home/u")
+					m := newModel(
+						Options{Width: width, Backend: fb, Session: "kitty-session"},
+						"/home/u",
+					)
 					m = update(t, m, tea.WindowSizeMsg{Width: testCols, Height: height})
 					m = load(t, m)
 					m, _ = press(t, m, e.keys...)

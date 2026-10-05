@@ -196,7 +196,8 @@ func TestPickerCreatesFromRepoAndTmp(t *testing.T) {
 		t.Fatalf("n should open a loading picker: mode %v loading %v", m.mode, m.picker.loading)
 	}
 	m = update(t, m, reposMsg{repos: fb.repos})
-	if got := m.picker.items; len(got) != 3 || got[0].name != tmpLabel || got[1].name != "mad01/kitty-session" {
+	if got := m.picker.items; len(got) != 3 || got[0].name != tmpLabel ||
+		got[1].name != "mad01/kitty-session" {
 		t.Fatalf("picker items = %+v", got)
 	}
 	m, _ = press(t, m, "kitty", "enter")
@@ -220,7 +221,12 @@ func TestPickerFallsBackToNamePromptOnError(t *testing.T) {
 	m = update(t, m, reposMsg{repos: fb.repos})
 	m, _ = press(t, m, "zeta", "enter")
 	if m.mode != modeName || m.input.Value() != "sug-zeta" || !m.statusErr {
-		t.Fatalf("want name prompt with error: mode %v value %q status %q", m.mode, m.input.Value(), m.status)
+		t.Fatalf(
+			"want name prompt with error: mode %v value %q status %q",
+			m.mode,
+			m.input.Value(),
+			m.status,
+		)
 	}
 	fb.fail = nil
 	fb.calls = nil
@@ -268,7 +274,7 @@ func TestMouseFooterAndRows(t *testing.T) {
 func TestApplyAgentsKeepsCursorOnSameAgent(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
-	m, _ = press(t, m, "j", "j") // code-search-local
+	m, _ = press(t, m, "j", "j")      // code-search-local
 	fb.agents[4].State = StateStopped // it drops to the bottom
 	m = load(t, m)
 	if got := m.cursorName(); got != "code-search-local" {

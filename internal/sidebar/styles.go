@@ -56,13 +56,19 @@ var (
 	errorStyle  = lipgloss.NewStyle().Foreground(colorDanger)
 
 	popupItemStyle     = lipgloss.NewStyle().Foreground(colorTextPri)
-	popupSelectedStyle = lipgloss.NewStyle().Foreground(colorTextPri).Bold(true).Background(colorPickBG)
-	popupTitleStyle    = lipgloss.NewStyle().Foreground(colorDanger).Bold(true)
-	popupHintStyle     = lipgloss.NewStyle().Foreground(colorMuted)
+	popupSelectedStyle = lipgloss.NewStyle().
+				Foreground(colorTextPri).
+				Bold(true).
+				Background(colorPickBG)
+	popupTitleStyle = lipgloss.NewStyle().Foreground(colorDanger).Bold(true)
+	popupHintStyle  = lipgloss.NewStyle().Foreground(colorMuted)
 
 	pickerNameStyle     = lipgloss.NewStyle().Foreground(colorTextSec)
-	pickerSelectedStyle = lipgloss.NewStyle().Foreground(colorTextPri).Bold(true).Background(colorPickBG)
-	pickerTmpStyle      = lipgloss.NewStyle().Foreground(colorAccent)
+	pickerSelectedStyle = lipgloss.NewStyle().
+				Foreground(colorTextPri).
+				Bold(true).
+				Background(colorPickBG)
+	pickerTmpStyle = lipgloss.NewStyle().Foreground(colorAccent)
 )
 
 // Glyphs.

@@ -113,12 +113,18 @@ func (m model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) pickerLines(inner int) []string {
 	n := m.innerHeight()
 	lines := make([]string, 0, n)
-	lines = append(lines, spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render("repos")))
+	lines = append(
+		lines,
+		spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render("repos")),
+	)
 	lines = append(lines, fitWidth(" "+m.picker.input.View(), inner))
 	body := n - listChrome
 	lines = append(lines, m.pickerRows(inner, body)...)
 	lines = append(lines, m.pickerStatus(inner))
-	lines = append(lines, spread(inner, footerHintStyle.Render("esc back"), footerHintStyle.Render("enter open")))
+	lines = append(
+		lines,
+		spread(inner, footerHintStyle.Render("esc back"), footerHintStyle.Render("enter open")),
+	)
 	return lines
 }
 
@@ -156,7 +162,10 @@ func (m model) pickerStatus(inner int) string {
 	case m.picker.loading:
 		return fitWidth(statusStyle.Render(" scanning repos"+ellipsis), inner)
 	case m.picker.err != nil:
-		return fitWidth(errorStyle.Render(" "+truncate(m.picker.err.Error(), inner-edgePad-1)), inner)
+		return fitWidth(
+			errorStyle.Render(" "+truncate(m.picker.err.Error(), inner-edgePad-1)),
+			inner,
+		)
 	default:
 		return blank(inner)
 	}
@@ -166,7 +175,10 @@ func (m model) pickerStatus(inner int) string {
 func (m model) nameLines(inner int) []string {
 	n := m.innerHeight()
 	lines := make([]string, 0, n)
-	lines = append(lines, spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render("name")))
+	lines = append(
+		lines,
+		spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render("name")),
+	)
 	lines = append(lines, blank(inner))
 	dir := truncate(m.shortenDir(m.newDir), inner-edgePad-1)
 	lines = append(lines, fitWidth(titleStyle.Render(" "+dir), inner))
@@ -175,6 +187,9 @@ func (m model) nameLines(inner int) []string {
 		lines = append(lines, blank(inner))
 	}
 	lines = append(lines, m.statusLine(inner))
-	lines = append(lines, spread(inner, footerHintStyle.Render("esc back"), footerHintStyle.Render("enter create")))
+	lines = append(
+		lines,
+		spread(inner, footerHintStyle.Render("esc back"), footerHintStyle.Render("enter create")),
+	)
 	return lines
 }
