@@ -12,6 +12,7 @@ package sidebar
 import (
 	"errors"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -22,8 +23,9 @@ const DefaultWidth = 36
 
 // Options configures a sidebar.
 type Options struct {
-	// Session is the name of the session this sidebar sits next to. Its row
-	// gets the active-row background and the l/tab/q keys focus its agent.
+	// Session is the name of the session this sidebar sits next to, for the
+	// host's use. The row highlight comes from Agent.Own, which the backend
+	// sets; the model does not compare names.
 	Session string
 	// Width is the frame width in columns; zero means DefaultWidth.
 	Width int
@@ -53,4 +55,19 @@ func Run(opts Options) error {
 	p := tea.NewProgram(New(opts), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
+}
+
+// ShortenHome replaces home, when it is dir itself or one of its ancestors,
+// with ~. A sibling such as /home/user2 for home /home/user is left alone.
+func ShortenHome(dir, home string) string {
+	if home == "" {
+		return dir
+	}
+	if dir == home {
+		return "~"
+	}
+	if strings.HasPrefix(dir, home+"/") {
+		return "~" + dir[len(home):]
+	}
+	return dir
 }

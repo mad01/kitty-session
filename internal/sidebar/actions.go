@@ -1,10 +1,72 @@
 package sidebar
 
 import (
+	"errors"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// errNameRequired is shown when the name prompt is submitted empty.
+var errNameRequired = errors.New("name required")
+
+// tmpNameLayout is the time part of a generated tmp session name, as ks tmp formats it.
+const tmpNameLayout = "0102-1504"
+
+// doneMsg is the outcome of a backend action run off the update loop.
+type doneMsg struct {
+	err     error
+	status  string      // shown on success
+	follow  string      // agent to put the cursor on after the refresh
+	refresh bool        // reload the list on success
+	quit    bool        // exit the program on success
+	retry   *newAttempt // on failure, reopen the name prompt for this attempt
+}
+
+// newAttempt is a pending "new agent": the name, plus either the directory
+// or the request for a fresh scratch directory.
+type newAttempt struct {
+	name string
+	dir  string
+	tmp  bool
+}
+
+// act runs call off the update loop and reports ok when it succeeds.
+func act(call func() error, ok doneMsg) tea.Cmd {
+	return func() tea.Msg {
+		if err := call(); err != nil {
+			return doneMsg{err: err}
+		}
+		return ok
+	}
+}
+
+// applyDone folds an action's outcome into the model.
+func (m model) applyDone(msg doneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		if msg.retry != nil {
+			next, cmd := m.askName(*msg.retry)
+			next.setError(msg.err)
+			return next, cmd
+		}
+		m.setError(msg.err)
+		return m, nil
+	}
+	if msg.quit {
+		return m, tea.Quit
+	}
+	if msg.status != "" {
+		m.setStatus(msg.status)
+	}
+	if msg.follow != "" {
+		m.follow = msg.follow
+	}
+	if msg.refresh {
+		return m, m.listCmd()
+	}
+	return m, nil
+}
 
 // focusCursor focuses the agent under the cursor.
 func (m model) focusCursor() (tea.Model, tea.Cmd) {
@@ -12,19 +74,13 @@ func (m model) focusCursor() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if err := m.backend.Focus(a.Name); err != nil {
-		m.setError(err)
-		return m, nil
-	}
-	return m, m.listCmd()
+	backend := m.backend
+	return m, act(func() error { return backend.Focus(a.Name) }, doneMsg{refresh: true})
 }
 
 // focusAgentWindow hands the keyboard to this tab's claude window.
 func (m model) focusAgentWindow() (tea.Model, tea.Cmd) {
-	if err := m.backend.FocusAgentWindow(); err != nil {
-		m.setError(err)
-	}
-	return m, nil
+	return m, act(m.backend.FocusAgentWindow, doneMsg{})
 }
 
 func (m model) startRename() (tea.Model, tea.Cmd) {
@@ -45,13 +101,11 @@ func (m model) finishRename() (tea.Model, tea.Cmd) {
 	if newName == "" || newName == m.target {
 		return m, nil
 	}
-	if err := m.backend.Rename(m.target, newName); err != nil {
-		m.setError(err)
-		return m, nil
-	}
-	m.follow = newName
-	m.setStatus("renamed to " + newName)
-	return m, m.listCmd()
+	backend, oldName := m.backend, m.target
+	return m, act(
+		func() error { return backend.Rename(oldName, newName) },
+		doneMsg{status: "renamed to " + newName, follow: newName, refresh: true},
+	)
 }
 
 func (m model) startConfirm(action confirmAction) (tea.Model, tea.Cmd) {
@@ -69,16 +123,15 @@ func (m model) startConfirm(action confirmAction) (tea.Model, tea.Cmd) {
 func (m model) runConfirm() (tea.Model, tea.Cmd) {
 	m.mode = modeList
 	keep := m.confirm == actionClose
-	if err := m.backend.Close(m.target, keep); err != nil {
-		m.setError(err)
-		return m, nil
-	}
+	verb := "deleted "
 	if keep {
-		m.setStatus("closed " + m.target)
-	} else {
-		m.setStatus("deleted " + m.target)
+		verb = "closed "
 	}
-	return m, m.listCmd()
+	backend, name := m.backend, m.target
+	return m, act(
+		func() error { return backend.Close(name, keep) },
+		doneMsg{status: verb + name, refresh: true},
+	)
 }
 
 func (m model) openRestore() (tea.Model, tea.Cmd) {
@@ -102,14 +155,11 @@ func (m model) finishRestore() (tea.Model, tea.Cmd) {
 	if m.trashIdx < 0 || m.trashIdx >= len(m.trashed) {
 		return m, nil
 	}
-	name := m.trashed[m.trashIdx]
-	if err := m.backend.Restore(name); err != nil {
-		m.setError(err)
-		return m, nil
-	}
-	m.follow = name
-	m.setStatus("restored " + name)
-	return m, m.listCmd()
+	backend, name := m.backend, m.trashed[m.trashIdx]
+	return m, act(
+		func() error { return backend.Restore(name) },
+		doneMsg{status: "restored " + name, follow: name, refresh: true},
+	)
 }
 
 // openPicker shows the repo picker and starts the repo scan.
@@ -120,74 +170,82 @@ func (m model) openPicker() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.picker.input.Focus(), m.reposCmd())
 }
 
-// pickDir resolves the chosen picker entry to a directory and creates the
-// agent, or asks for a name when the backend has no suggestion.
+// pickDir turns the chosen picker entry into a new-agent attempt. A tmp
+// entry gets a time-stamped name like ks tmp; a repo without a suggested
+// name goes to the name prompt.
 func (m model) pickDir() (tea.Model, tea.Cmd) {
 	item, ok := m.picker.selected()
 	if !ok {
 		return m, nil
 	}
-	dir := item.path
 	if item.tmp {
-		var err error
-		if dir, err = m.backend.TmpDir(); err != nil {
-			m.setError(err)
-			return m, nil
-		}
+		return m.createAgent(newAttempt{name: "tmp-" + m.now().Format(tmpNameLayout), tmp: true})
 	}
-	name := m.backend.SuggestName(dir)
+	name := m.backend.SuggestName(item.path)
 	if name == "" {
-		return m.askName("", dir)
+		return m.askName(newAttempt{dir: item.path})
 	}
-	return m.createAgent(name, dir)
+	return m.createAgent(newAttempt{name: name, dir: item.path})
 }
 
-// askName opens the name prompt for a new agent rooted at dir.
-func (m model) askName(name, dir string) (model, tea.Cmd) {
+// askName opens the name prompt for a pending attempt.
+func (m model) askName(a newAttempt) (model, tea.Cmd) {
 	m.mode = modeName
-	m.newDir = dir
+	m.pending = a
+	m.picker.input.Blur()
 	m.input.Width = m.inputWidth()
-	return m, activate(&m.input, name)
+	return m, activate(&m.input, a.name)
 }
 
-// createAgent asks the backend for a new session; on failure it falls back
-// to the name prompt with the error shown so the user can pick another name.
-func (m model) createAgent(name, dir string) (tea.Model, tea.Cmd) {
-	name = strings.TrimSpace(name)
-	if err := m.backend.New(name, dir); err != nil {
-		next, cmd := m.askName(name, dir)
-		next.setError(err)
-		return next, cmd
+// createAgent validates the name, then creates the session off the update
+// loop. A failure reopens the name prompt with the error shown.
+func (m model) createAgent(a newAttempt) (tea.Model, tea.Cmd) {
+	a.name = strings.TrimSpace(a.name)
+	if a.name == "" {
+		m.setError(errNameRequired)
+		return m, nil
 	}
 	m.mode = modeList
 	m.input.Blur()
-	m.follow = name
-	m.setStatus("created " + name)
-	return m, m.listCmd()
+	m.picker.input.Blur()
+	m.setStatus("creating " + a.name + ellipsis)
+	return m, newCmd(m.backend, a)
+}
+
+// newCmd creates the session. The scratch directory for a tmp attempt is
+// made right before New and removed again when New fails.
+func newCmd(backend Backend, a newAttempt) tea.Cmd {
+	return func() tea.Msg {
+		dir := a.dir
+		if a.tmp {
+			var err error
+			if dir, err = backend.TmpDir(); err != nil {
+				return doneMsg{err: err, retry: &a}
+			}
+		}
+		if err := backend.New(a.name, dir); err != nil {
+			if a.tmp && dir != "" {
+				_ = os.RemoveAll(dir)
+			}
+			return doneMsg{err: err, retry: &a}
+		}
+		return doneMsg{status: "created " + a.name, follow: a.name, refresh: true}
+	}
 }
 
 func (m model) shellSplit() (tea.Model, tea.Cmd) {
-	if err := m.backend.ShellSplit(); err != nil {
-		m.setError(err)
-	}
-	return m, nil
+	return m, act(m.backend.ShellSplit, doneMsg{})
 }
 
 func (m model) hooksStatus() (tea.Model, tea.Cmd) {
-	s, err := m.backend.HooksStatus()
-	if err != nil {
-		m.setError(err)
-		return m, nil
+	backend := m.backend
+	return m, func() tea.Msg {
+		s, err := backend.HooksStatus()
+		return doneMsg{status: s, err: err}
 	}
-	m.setStatus(s)
-	return m, nil
 }
 
 // quit asks the backend to tear ks down and exits only once that succeeded.
 func (m model) quit() (tea.Model, tea.Cmd) {
-	if err := m.backend.Quit(); err != nil {
-		m.setError(err)
-		return m, nil
-	}
-	return m, tea.Quit
+	return m, act(m.backend.Quit, doneMsg{quit: true})
 }

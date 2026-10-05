@@ -65,3 +65,21 @@ func TestStateString(t *testing.T) {
 		}
 	}
 }
+
+func TestShortenHome(t *testing.T) {
+	tests := []struct {
+		dir, home, want string
+	}{
+		{"/home/u/code/x", "/home/u", "~/code/x"},
+		{"/home/u", "/home/u", "~"},
+		{"/home/user2/code/x", "/home/u", "/home/user2/code/x"},
+		{"/home/u2", "/home/u", "/home/u2"},
+		{"/opt/x", "/home/u", "/opt/x"},
+		{"/home/u/code", "", "/home/u/code"},
+	}
+	for _, tt := range tests {
+		if got := ShortenHome(tt.dir, tt.home); got != tt.want {
+			t.Errorf("ShortenHome(%q, %q) = %q, want %q", tt.dir, tt.home, got, tt.want)
+		}
+	}
+}

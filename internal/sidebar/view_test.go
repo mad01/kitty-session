@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -31,32 +33,44 @@ func assertGeometry(t *testing.T, m model, width, height int) {
 	}
 }
 
+// contains reports whether any line holds s.
+func contains(ls []string, s string) bool {
+	for _, l := range ls {
+		if strings.Contains(l, s) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestViewGeometryAcrossModes(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents(), trashed: []string{"old", "older"}}
 	fb.repos = []Repo{{Name: "mad01/a-very-long-repository-name-that-overflows", Path: "/r/a"}}
 	entries := []struct {
-		name string
-		keys []string
+		name  string
+		keys  []string
+		async bool // run the last key's command: the mode is reached through a result
 	}{
-		{"list", nil},
-		{"filter", []string{"/", "k"}},
-		{"menu", []string{"m"}},
-		{"confirm", []string{"d"}},
-		{"restore", []string{"u"}},
-		{"rename", []string{"r"}},
-		{"picker", []string{"n"}},
-		{"name", []string{"n", "enter"}},
+		{"list", nil, false},
+		{"filter", []string{"/", "k"}, false},
+		{"menu", []string{"m"}, false},
+		{"confirm", []string{"d"}, false},
+		{"restore", []string{"u"}, false},
+		{"rename", []string{"r"}, false},
+		{"picker", []string{"n"}, false},
+		{"name", []string{"n", "enter"}, true},
 	}
 	for _, width := range []int{12, 20, 36, 60} {
 		for _, height := range []int{6, 12, 24} {
 			for _, e := range entries {
-				t.Run(e.name, func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s-w%d-h%d", e.name, width, height), func(t *testing.T) {
 					fb.fail = errFake // force the name prompt after the picker
-					m := newModel(Options{Width: width, Backend: fb, Session: "kitty-session"}, "/home/u")
-					m = update(t, m, tea.WindowSizeMsg{Width: testCols, Height: height})
-					m = load(t, m)
-					m, _ = press(t, m, e.keys...)
+					m := newSizedModel(t, fb, "kitty-session", width, height)
 					m = update(t, m, reposMsg{repos: fb.repos})
+					m, cmd := press(t, m, e.keys...)
+					if e.async {
+						m, _ = feed(t, m, cmd)
+					}
 					assertGeometry(t, m, width, height)
 				})
 			}
@@ -103,6 +117,18 @@ func TestViewMockup(t *testing.T) {
 	}
 }
 
+func TestOwnRowComesFromBackendOnly(t *testing.T) {
+	fb := &fakeBackend{agents: mockupAgents()}
+	m := newTestModel(t, fb, "thismoon") // Options.Session must not move the marker
+	got := lines(m)
+	if !strings.HasPrefix(got[11], "│▌○ kitty-session") {
+		t.Errorf("own marker missing on the Own agent: %q", got[11])
+	}
+	if !strings.HasPrefix(got[3], "│ ● thismoon") {
+		t.Errorf("Options.Session must not mark a row: %q", got[3])
+	}
+}
+
 func TestViewEmptyList(t *testing.T) {
 	m := newTestModel(t, &fakeBackend{}, "")
 	got := lines(m)
@@ -138,6 +164,58 @@ func TestViewMenuPopup(t *testing.T) {
 	}
 }
 
+func TestViewMenuAtWidth20(t *testing.T) {
+	m := newSizedModel(t, &fakeBackend{agents: mockupAgents()}, "", 20, testLines)
+	m, _ = press(t, m, "m")
+	got := lines(m)
+	assertGeometry(t, m, 20, testLines)
+	for _, e := range menuEntries {
+		if !contains(got, e.label) {
+			t.Errorf("menu entry %q not drawn at width 20", e.label)
+		}
+	}
+}
+
+func TestViewConfirmWithLongName(t *testing.T) {
+	long := strings.Repeat("abcdefgh", 4) // 32 cells, wider than the popup can be
+	fb := &fakeBackend{agents: []Agent{{Name: long, State: StateIdle}}}
+	m := newTestModel(t, fb, "")
+	m, _ = press(t, m, "d")
+	got := lines(m)
+	assertGeometry(t, m, DefaultWidth, testLines)
+	if !contains(got, "delete agent?") || !contains(got, "y confirm") {
+		t.Errorf("confirm popup not drawn:\n%s", strings.Join(got, "\n"))
+	}
+	if !contains(got, long[:20]+"…") {
+		t.Errorf("long name not truncated inside the popup:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+func TestViewRestoreScrollsToCursor(t *testing.T) {
+	trashed := make([]string, 30)
+	for i := range trashed {
+		trashed[i] = fmt.Sprintf("trashed-%02d", i)
+	}
+	m := newTestModel(t, &fakeBackend{agents: mockupAgents(), trashed: trashed}, "")
+	keys := []string{"u"}
+	for range 25 {
+		keys = append(keys, "j")
+	}
+	m, _ = press(t, m, keys...)
+	got := lines(m)
+	assertGeometry(t, m, DefaultWidth, testLines)
+	if !contains(got, "trashed-25") {
+		t.Errorf("highlighted trashed entry scrolled out of view:\n%s", strings.Join(got, "\n"))
+	}
+	if contains(got, "trashed-00") {
+		t.Errorf("first entry should have scrolled away")
+	}
+	m, _ = run(t, m, "enter")
+	if m.follow != "trashed-25" {
+		t.Errorf("restored %q, want trashed-25", m.follow)
+	}
+}
+
 func TestViewFilterAndStatus(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents(), fail: errFake}
 	m := newTestModel(t, fb, "")
@@ -146,13 +224,32 @@ func TestViewFilterAndStatus(t *testing.T) {
 	if !strings.Contains(got[2], "/ kit") {
 		t.Errorf("filter line = %q", got[2])
 	}
-	if !strings.HasPrefix(got[3], "│ ○ kitty-session") || strings.Contains(got[5], "●") {
+	if !strings.HasPrefix(got[3], "│▌○ kitty-session") || strings.Contains(got[5], "●") {
 		t.Errorf("filter did not narrow rows: %q / %q", got[3], got[5])
 	}
-	m, _ = press(t, m, "enter") // Focus fails -> error on the status line
+	m, _ = run(t, m, "enter") // Focus fails -> error on the status line
 	got = lines(m)
 	if !strings.Contains(got[testLines-3], errFake.Error()) {
 		t.Errorf("status line = %q", got[testLines-3])
+	}
+}
+
+func TestViewLongFilterKeepsWidth(t *testing.T) {
+	m := newTestModel(t, &fakeBackend{agents: mockupAgents()}, "")
+	m, _ = press(t, m, "/", strings.Repeat("x", 30))
+	assertGeometry(t, m, DefaultWidth, testLines)
+	m, _ = press(t, m, strings.Repeat("y", 20))
+	assertGeometry(t, m, DefaultWidth, testLines)
+}
+
+func TestViewMultiLineErrorKeepsHeight(t *testing.T) {
+	fb := &fakeBackend{agents: mockupAgents()}
+	fb.fail = errors.New("first line of a long error\nsecond line\nthird line")
+	m := newTestModel(t, fb, "")
+	m, _ = run(t, m, "enter")
+	assertGeometry(t, m, DefaultWidth, testLines)
+	if m.status != "first line of a long error" || !m.statusErr {
+		t.Errorf("status = %q", m.status)
 	}
 }
 
