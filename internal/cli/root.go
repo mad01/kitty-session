@@ -14,22 +14,21 @@ var rootCmd = &cobra.Command{
 	Use:   "ks",
 	Short: "Kitty Claude Session Manager",
 	Long: `Kitty Claude Session Manager — keep Claude Code sessions as tabs in a kitty
-instance that ks owns. Each tab pairs a sidebar (the ks TUI) with claude.
+instance that ks owns. Each tab pairs the ks sidebar with claude.
 
 Run with no arguments to attach: start the instance if it is not running,
 resume every active session whose claude window is gone, and focus the
 session you used last. Use the subcommands for scripting and automation.
 
-Sidebar keybindings (press ? in the sidebar for full help):
-  j/k         Navigate sessions
-  o / enter   Open or focus session
-  n           Create new session
-  r           Rename session
-  c           Close tab (keep session)
-  d           Delete session
-  /           Fuzzy search
-  ?           Toggle help
-  q           Quit the sidebar`,
+Sidebar keys (m opens the menu with the rest):
+  j/k, 1-9    Move the cursor, jump to a row
+  enter       Focus the agent under the cursor, reopening its tab if gone
+  l / tab / q Hand the keyboard to this tab's claude window
+  n           New agent (repo picker)
+  r  c  d  u  Rename, close (keep), delete, restore
+  /           Filter by name
+  ctrl+b>s    From claude, jump to the sidebar (kitty chord)
+  ctrl+b>a    From the sidebar, jump back to the agent`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          runAttach,

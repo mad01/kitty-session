@@ -1,23 +1,11 @@
 package claude
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
-
-type sessionsIndex struct {
-	Entries []entry `json:"entries"`
-}
-
-type entry struct {
-	FirstPrompt string    `json:"firstPrompt"`
-	Modified    time.Time `json:"modified"`
-	IsSidechain bool      `json:"isSidechain"`
-}
 
 // encodePath converts a directory path to the name Claude Code gives its
 // projects directory: every character outside [A-Za-z0-9] becomes "-", so
@@ -62,54 +50,4 @@ func HasTranscripts(dir string) bool {
 	}
 	matches, err := filepath.Glob(filepath.Join(project, "*.jsonl"))
 	return err == nil && len(matches) > 0
-}
-
-// LatestPrompt returns the firstPrompt from the most recently modified
-// non-sidechain session for the given working directory. Returns "" on any error.
-func LatestPrompt(dir string) string {
-	project, err := projectDir(dir)
-	if err != nil {
-		return ""
-	}
-	return latestPromptFromFile(filepath.Join(project, "sessions-index.json"))
-}
-
-// latestPromptFromFile reads a sessions-index.json file and returns the
-// firstPrompt from the most recently modified non-sidechain entry.
-func latestPromptFromFile(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return latestPromptFromJSON(data)
-}
-
-// latestPromptFromJSON parses sessions-index JSON and returns the firstPrompt
-// from the most recently modified non-sidechain entry, truncated to 60 chars.
-func latestPromptFromJSON(data []byte) string {
-	var idx sessionsIndex
-	if err := json.Unmarshal(data, &idx); err != nil {
-		return ""
-	}
-
-	var latest entry
-	var found bool
-	for _, e := range idx.Entries {
-		if e.IsSidechain {
-			continue
-		}
-		if !found || e.Modified.After(latest.Modified) {
-			latest = e
-			found = true
-		}
-	}
-	if !found {
-		return ""
-	}
-
-	prompt := latest.FirstPrompt
-	if len(prompt) > 60 {
-		prompt = prompt[:60] + "\u2026"
-	}
-	return prompt
 }
