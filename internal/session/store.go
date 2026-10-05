@@ -83,6 +83,24 @@ func (s *Store) Load(name string) (*Session, error) {
 	return &sess, nil
 }
 
+// FindByID returns the record whose ID is id. It scans every session file,
+// so a renamed session is still found.
+func (s *Store) FindByID(id string) (*Session, error) {
+	if id == "" {
+		return nil, fmt.Errorf("session: empty id")
+	}
+	sessions, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	for _, sess := range sessions {
+		if sess.ID == id {
+			return sess, nil
+		}
+	}
+	return nil, fmt.Errorf("session with id %q not found", id)
+}
+
 func (s *Store) List() ([]*Session, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {

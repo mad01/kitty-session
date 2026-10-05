@@ -29,11 +29,13 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		{
 			name: "stopped session keeps status and claude id",
 			sess: &Session{
-				Name:            "stopped",
-				Dir:             "/tmp/stopped",
-				KittyTabID:      3,
-				Status:          StatusStopped,
-				ClaudeSessionID: "0b5c1d2e-aaaa-bbbb-cccc-000000000001",
+				ID:                   "feedface00000000feedface00000000",
+				Name:                 "stopped",
+				Dir:                  "/tmp/stopped",
+				KittyTabID:           3,
+				Status:               StatusStopped,
+				ClaudeSessionID:      "0b5c1d2e-aaaa-bbbb-cccc-000000000001",
+				ClaudeTranscriptPath: "/tmp/stopped.jsonl",
 			},
 		},
 	}
@@ -60,7 +62,54 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			if got.KittyTabID != tc.sess.KittyTabID {
 				t.Errorf("KittyTabID = %d, want %d", got.KittyTabID, tc.sess.KittyTabID)
 			}
+			if got.ID != tc.sess.ID {
+				t.Errorf("ID = %q, want %q", got.ID, tc.sess.ID)
+			}
+			if got.ClaudeTranscriptPath != tc.sess.ClaudeTranscriptPath {
+				t.Errorf(
+					"ClaudeTranscriptPath = %q, want %q",
+					got.ClaudeTranscriptPath,
+					tc.sess.ClaudeTranscriptPath,
+				)
+			}
 		})
+	}
+}
+
+func TestNewAssignsUniqueID(t *testing.T) {
+	a, b := New("a", "/tmp/a", 0, 0), New("b", "/tmp/b", 0, 0)
+	if len(a.ID) != 2*idBytes {
+		t.Errorf("len(ID) = %d, want %d hex chars", len(a.ID), 2*idBytes)
+	}
+	if a.ID == b.ID {
+		t.Errorf("two New calls share ID %q", a.ID)
+	}
+}
+
+func TestFindByID(t *testing.T) {
+	store := newTestStore(t)
+	want := New("findme", "/tmp/findme", 1, 2)
+	for _, sess := range []*Session{want, New("other", "/tmp/other", 3, 4)} {
+		if err := store.Save(sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A rename changes the file name but not the ID.
+	if _, err := store.Rename("findme", "renamed"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.FindByID(want.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.Name != "renamed" {
+		t.Errorf("Name = %q, want renamed", got.Name)
+	}
+	for _, id := range []string{"", "no-such-id"} {
+		if _, err := store.FindByID(id); err == nil {
+			t.Errorf("FindByID(%q) = nil error, want not found", id)
+		}
 	}
 }
 
