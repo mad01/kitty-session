@@ -371,11 +371,26 @@ func TestWindowSizePinsWidthAndReportsErrors(t *testing.T) {
 		t.Fatalf("pinned = %d, statusErr %v", fb.pinned, m.statusErr)
 	}
 
+	fb.pinned = 0
+	if _, cmd = m.Update(tea.WindowSizeMsg{Width: 42, Height: 30}); cmd != nil {
+		t.Fatal("same width again must not pin again")
+	}
+
 	fb.pinErr = errors.New("pin failed\nsecond line")
 	next, cmd = m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
 	m, _ = feed(t, asModel(t, next), cmd)
 	if !m.statusErr || m.status != "pin failed" {
 		t.Fatalf("PinWidth error not shown: statusErr %v status %q", m.statusErr, m.status)
+	}
+	if m.pinned != 42 {
+		t.Fatalf("a failed pin must not count: pinned %d", m.pinned)
+	}
+	fb.pinErr = nil
+	fb.pinned = 0
+	next, cmd = m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	m, _ = feed(t, asModel(t, next), cmd)
+	if fb.pinned != 50 || m.pinned != 50 {
+		t.Fatalf("width whose pin failed must be retried: backend %d model %d", fb.pinned, m.pinned)
 	}
 }
 

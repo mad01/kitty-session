@@ -384,17 +384,25 @@ func (b *SidebarBackend) Repos() ([]sidebar.Repo, error) {
 
 // PinWidth resizes the own sidebar window back to the configured width when
 // a terminal resize left it at another one. cols is the width the sidebar
-// sees; when it already matches nothing is asked of kitty. The home tab and
-// a record without a known sidebar window are left alone.
+// sees; when it already matches nothing is asked of kitty. From one instance
+// snapshot it finds the own sidebar by tag and leaves it alone when it is
+// gone, when it is the only window in its tab (a tab close can leave the
+// sidebar alone in a layout kitty refuses to resize), or when it already has
+// the configured width. The home tab never pins.
 func (b *SidebarBackend) PinWidth(cols int) error {
 	if b.ownID == "" || cols == b.l.sidebarWidth {
 		return nil
 	}
-	_, lv, err := b.ownWindows()
+	sess, err := b.l.store.FindByID(b.ownID)
 	if err != nil {
 		return err
 	}
-	if lv.sidebar == nil {
+	all, err := b.l.kitty.Windows()
+	if err != nil {
+		return fmt.Errorf("cannot list kitty windows: %w", err)
+	}
+	lv := findLive(all, sess)
+	if lv.sidebar == nil || tabWindows(all, lv.sidebar.TabID) < 2 {
 		return nil
 	}
 	delta := b.l.sidebarWidth - lv.sidebar.Columns
@@ -402,4 +410,15 @@ func (b *SidebarBackend) PinWidth(cols int) error {
 		return nil
 	}
 	return b.l.kitty.ResizeWindow(lv.sidebar.ID, kitty.AxisHorizontal, delta)
+}
+
+// tabWindows counts the windows of one tab in a snapshot.
+func tabWindows(all []kitty.Window, tabID int) int {
+	n := 0
+	for _, w := range all {
+		if w.TabID == tabID {
+			n++
+		}
+	}
+	return n
 }

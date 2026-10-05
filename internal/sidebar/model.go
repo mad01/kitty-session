@@ -52,7 +52,8 @@ type (
 		err    error
 	}
 	pinMsg struct {
-		err error
+		cols int // width that was pinned
+		err  error
 	}
 	reposMsg struct {
 		repos []Repo
@@ -79,6 +80,7 @@ type model struct {
 	cursor  int     // index into visible()
 	width   int     // terminal size from the last WindowSizeMsg; zero before it
 	height  int
+	pinned  int // width of the last successful PinWidth; zero before one
 	mode    mode
 	frame   int // animation frame for pulsing dots
 
@@ -162,7 +164,7 @@ func (m model) reposCmd() tea.Cmd {
 func (m model) pinCmd(cols int) tea.Cmd {
 	backend := m.backend
 	return func() tea.Msg {
-		return pinMsg{err: backend.PinWidth(cols)}
+		return pinMsg{cols: cols, err: backend.PinWidth(cols)}
 	}
 }
 

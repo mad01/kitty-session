@@ -12,11 +12,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker.input.Width = m.inputWidth()
 		m.filter.Width = m.inputWidth()
 		m.clampCursor()
+		if msg.Width == m.pinned {
+			return m, nil // already pinned at this width
+		}
 		return m, m.pinCmd(msg.Width)
 	case pinMsg:
 		if msg.err != nil {
 			m.setError(msg.err)
+			return m, nil
 		}
+		m.pinned = msg.cols
 		return m, nil
 	case doneMsg:
 		return m.applyDone(msg)

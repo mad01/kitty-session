@@ -383,33 +383,90 @@ func TestListStampsViewedAtAndDropsDoneToIdle(t *testing.T) {
 }
 
 func TestPinWidth(t *testing.T) {
-	b, f, _ := newTestBackend(t)
-	own := session.New("own", "/work/own", 0, 0)
-	b.ownID = own.ID
-	f.addTab(own, true)
-	if err := b.l.store.Save(own); err != nil {
-		t.Fatal(err)
+	const sidebarCols = 40 // what the sidebar reports after a terminal resize
+	tests := []struct {
+		name       string
+		withClaude bool
+		setup      func(f *fakeKitty, own *session.Session)
+		wantResize bool
+	}{
+		{
+			name:       "sidebar window gone",
+			withClaude: true,
+			setup: func(f *fakeKitty, own *session.Session) {
+				f.windows = slices.DeleteFunc(f.windows, func(w kitty.Window) bool {
+					return w.ID == own.KittySidebarWindowID
+				})
+			},
+		},
+		{
+			name:       "sidebar alone in its tab",
+			withClaude: false,
+			setup: func(f *fakeKitty, own *session.Session) {
+				f.find(own.KittySidebarWindowID).Columns = sidebarCols
+			},
+		},
+		{
+			name:       "already the configured width",
+			withClaude: true,
+			setup: func(f *fakeKitty, own *session.Session) {
+				f.find(own.KittySidebarWindowID).Columns = 36
+			},
+		},
+		{
+			name:       "resizes by the delta",
+			withClaude: true,
+			setup: func(f *fakeKitty, own *session.Session) {
+				f.find(own.KittySidebarWindowID).Columns = sidebarCols
+			},
+			wantResize: true,
+		},
 	}
-	f.find(own.KittySidebarWindowID).Columns = 40
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, f, _ := newTestBackend(t)
+			own := session.New("own", "/work/own", 0, 0)
+			b.ownID = own.ID
+			f.addTab(own, tt.withClaude)
+			if err := b.l.store.Save(own); err != nil {
+				t.Fatal(err)
+			}
+			tt.setup(f, own)
+			f.calls = nil
 
-	if err := b.PinWidth(36); err != nil {
-		t.Fatal(err)
-	}
-	if slices.ContainsFunc(f.calls, func(c string) bool { return c != "" && c[0] == 'R' }) {
-		t.Errorf("resized although the sidebar reports the configured width: %v", f.calls)
-	}
-	if err := b.PinWidth(40); err != nil {
-		t.Fatal(err)
-	}
-	want := "ResizeWindow(" + itoa(own.KittySidebarWindowID) + ",horizontal,-4)"
-	if !slices.Contains(f.calls, want) {
-		t.Errorf("calls = %v, want %s", f.calls, want)
+			if err := b.PinWidth(sidebarCols); err != nil {
+				t.Fatal(err)
+			}
+			if n := countCalls(f, "Windows"); n != 1 {
+				t.Errorf("took %d snapshots, want 1", n)
+			}
+			resize := "ResizeWindow(" + itoa(own.KittySidebarWindowID) + ",horizontal,-4)"
+			if got := slices.Contains(f.calls, resize); got != tt.wantResize {
+				t.Errorf("resize called %v, want %v: calls %v", got, tt.wantResize, f.calls)
+			}
+		})
 	}
 
-	home, fh, _ := newTestBackend(t)
-	if err := home.PinWidth(80); err != nil || len(fh.calls) != 0 {
-		t.Errorf("home tab: err %v, calls %v; want nothing", err, fh.calls)
-	}
+	t.Run("reported width equals the configured one", func(t *testing.T) {
+		b, f, _ := newTestBackend(t)
+		own := session.New("own", "/work/own", 0, 0)
+		b.ownID = own.ID
+		f.addTab(own, true)
+		if err := b.l.store.Save(own); err != nil {
+			t.Fatal(err)
+		}
+		f.calls = nil
+		if err := b.PinWidth(36); err != nil || len(f.calls) != 0 {
+			t.Errorf("err %v, calls %v; want nothing", err, f.calls)
+		}
+	})
+
+	t.Run("home tab", func(t *testing.T) {
+		home, fh, _ := newTestBackend(t)
+		if err := home.PinWidth(80); err != nil || len(fh.calls) != 0 {
+			t.Errorf("err %v, calls %v; want nothing", err, fh.calls)
+		}
+	})
 }
 
 func TestShellSplitAndFocusAgentWindow(t *testing.T) {
