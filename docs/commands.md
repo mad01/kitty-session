@@ -172,6 +172,51 @@ Find a git repository under the `dirs` configured in `~/.config/ks/config.yaml`.
 
 When invoked in a non-TTY context (for example piped into `read`) the interactive mode still runs if stdin is a TTY. Use one of the flag modes for clean scripting. See [Repo finder](repo-finder.md) for the shell function and output format examples.
 
+## `ks import`
+
+```
+Usage: ks import [--dry-run] [--from <session.json>] [--no-open]
+```
+
+Bring the claude agents that [herdr](https://github.com/herdrdev/herdr) runs into ks. herdr is another session manager; it keeps its layout in `~/.config/herdr/session.json` (or `$XDG_CONFIG_HOME/herdr/session.json`), one entry per pane with the agent's Claude session id. `ks import` reads that file and writes one active ks record per claude pane, so the next `ks` resumes each conversation with `claude --resume <id>`. herdr's file is never modified.
+
+Only herdr's default session file is read. herdr can run named sessions, which keep their own `session.json` under `~/.config/herdr/sessions/<name>/`; point `--from` at one of those to import it.
+
+For each pane:
+
+- A pane without an agent is a shell and is skipped. Panes running another agent (codex, pi) are skipped: ks only hosts claude. A claude pane herdr knows by transcript path rather than id is skipped too.
+- A claude pane whose Claude session id a ks record already carries is reported as `exists` and left alone, so rerunning the command is safe.
+- Otherwise a record is written. Its name is the herdr workspace name, else the tab name, sanitized the way `ks new` would. With neither it is the directory's base name plus git branch, the same name the sidebar's repo picker suggests. A taken name gets `-2`, `-3`, and so on, the lowest free suffix.
+- The transcript path is derived from the directory and id. When the file is gone the record is still written, with a `warning: <name>: transcript missing, will start fresh` line, since the launcher then falls back to `--continue` or a bare `claude`.
+
+Output is one aligned line per pane, the skipped ones last, then a summary:
+
+```
+imported  migraine-me-main  ~/code/src/github.com/mad01/migraine-me  b75ee90c
+exists    dropbrain-app     ~/code/src/github.com/mad01/dropbrain-app  211b8c21
+skipped                     ~/code/src/github.com/mad01/thismoon       shell, no agent
+ks: 1 imported, 1 already present, 1 skipped
+```
+
+**herdr still running.** After writing, `ks import` checks whether a herdr daemon answers on `herdr.sock` beside the session file. If it does, nothing is opened: starting claude on a transcript herdr's own claude is still writing to would run two sessions on one conversation. Instead stderr says:
+
+```
+ks: herdr is still running these agents; not opening them.
+    Stop it with: herdr session stop default   then run: ks
+```
+
+When herdr is not running and something was imported, the command attaches the same way bare `ks` does and prints its `ks: N resumed, ...` line. When nothing was imported the instance is not started.
+
+A missing session file is an error naming the path and `--from`. A file of another format version than 3 is rejected with the version found. A file with no panes at all prints `ks: no agents found` and exits 0.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Print the plan with `import` in place of `imported`, write nothing, start nothing. |
+| `--from <path>` | Read this herdr session file instead of the default session's. |
+| `--no-open` | Write the records, do not start the instance; the next `ks` brings them up. |
+
 ## `ks version`
 
 ```

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mad01/kitty-session/internal/instance"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/spf13/cobra"
 )
 
@@ -54,13 +55,19 @@ func runAttach(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	printAttachResult(cmd, res)
+	return nil
+}
+
+// printAttachResult reports one attach the way bare ks does: warnings and
+// early exits on stderr, the counts on stdout. ks import shares it.
+func printAttachResult(cmd *cobra.Command, res *launcher.AttachResult) {
 	printWarnings(cmd, res.Warnings)
 	for _, name := range res.Exited {
 		fmt.Fprintf(cmd.ErrOrStderr(), "ks: %s exited right after launch\n", name)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "ks: %d resumed, %d already running, %d stopped\n",
 		res.Resumed, res.Running, res.Stopped)
-	return nil
 }
 
 // noteAgentOnRunningInstance tells the user when --agent cannot take effect

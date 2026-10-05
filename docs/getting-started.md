@@ -73,6 +73,10 @@ ks
 
 Bare `ks` attaches. It starts the instance if it is not running and brings back every active session whose claude window is gone, with `claude --resume` when the conversation's transcript is still there and `--continue` otherwise. Then it focuses the one you used last. `ks quit` closes the whole instance; the records stay, so the next `ks` restores them. `ks list` shows every session and its state from any terminal.
 
+## Coming from herdr
+
+If your Claude sessions live in [herdr](https://github.com/herdrdev/herdr), move them over with `ks import`. It reads herdr's default session file (`~/.config/herdr/session.json`), writes an active ks record for every claude pane, keyed by its Claude session id, and skips shells and other agents. Run `ks import --dry-run` first to see the names it would pick. Stop herdr before letting ks open the sessions, since a conversation can only have one claude attached. While herdr's daemon is still up, `ks import` writes the records but opens nothing and tells you to run `herdr session stop default` first. Details in the [command reference](commands.md#ks-import).
+
 ## Install Claude Code hooks (optional, recommended)
 
 The sidebar shows a live state for each session: `input`, `done`, `working`, `idle` or `stopped`. The most accurate source for that state is Claude Code's own hook events, written by a hidden `ks _hook` handler. Wire them up once with:

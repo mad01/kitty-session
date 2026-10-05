@@ -8,9 +8,10 @@ Go module `github.com/mad01/kitty-session`, builds to a single `ks` binary. Need
 
 ```
 cmd/ks/main.go              entry point — calls internal/cli
-internal/cli/               cobra subcommands (attach = bare ks, new, open, close, list, rename, quit, sidebar, tmp, repo, hooks, _hook, _sidebar-demo, version)
+internal/cli/               cobra subcommands (attach = bare ks, new, open, close, list, rename, quit, sidebar, tmp, repo, import, hooks, _hook, _sidebar-demo, version)
 internal/sidebar/           Bubble Tea agent list, run as `ks sidebar`; every side effect behind sidebar.Backend
 internal/hooks/             the ks matcher groups in ~/.claude/settings.json (install, uninstall, installed)
+internal/herdr/             reader for herdr's session.json (Load, Agents, Running); `ks import` is its only caller
 internal/instance/          the ks kitty instance: Ensure (ping or start), Connect, Client, Shutdown
 internal/launcher/          Launcher: Open/Close/Rename/Attach/Alive; tab topology behind a backend interface
 internal/kitty/client.go    the ONLY place that runs `kitty`: Client (every `kitty @ --to <socket>` call) and Start

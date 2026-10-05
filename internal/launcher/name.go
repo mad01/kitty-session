@@ -18,8 +18,8 @@ func SuggestName(dir string) string {
 	if dir == "" {
 		return ""
 	}
-	name := sanitizeName(filepath.Base(dir))
-	if branch := sanitizeName(gitBranch(dir)); branch != "" {
+	name := SanitizeName(filepath.Base(dir))
+	if branch := SanitizeName(gitBranch(dir)); branch != "" {
 		name += "-" + branch
 	}
 	return name
@@ -36,9 +36,9 @@ func gitBranch(dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// sanitizeName lower-cases s, turns every run of characters outside [a-z0-9-]
+// SanitizeName lower-cases s, turns every run of characters outside [a-z0-9-]
 // into one hyphen, and trims hyphens from both ends.
-func sanitizeName(s string) string {
+func SanitizeName(s string) string {
 	s = nonNameRunes.ReplaceAllString(strings.ToLower(s), "-")
 	for strings.Contains(s, "--") {
 		s = strings.ReplaceAll(s, "--", "-")

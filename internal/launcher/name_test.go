@@ -21,8 +21,8 @@ func TestSanitizeName(t *testing.T) {
 		"  spaces  all over ": "spaces-all-over",
 	}
 	for in, want := range tests {
-		if got := sanitizeName(in); got != want {
-			t.Errorf("sanitizeName(%q) = %q, want %q", in, got, want)
+		if got := SanitizeName(in); got != want {
+			t.Errorf("SanitizeName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
