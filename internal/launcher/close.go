@@ -31,9 +31,9 @@ func (l *Launcher) Close(sess *session.Session, keep bool) ([]error, error) {
 	}
 	state.Clean(sess.Name)
 
-	lv, err := l.liveWindows(sess)
+	all, lv, err := l.snapshot(sess)
 	if err != nil {
 		return []error{fmt.Errorf("tabs left as they are: %w", err)}, nil
 	}
-	return l.closeTabs(lv), nil
+	return l.closeTabs(all, lv), nil
 }

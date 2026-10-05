@@ -96,7 +96,8 @@ func newLauncher(store *session.Store, b backend, sidebarWidth int, exe string) 
 }
 
 // Open creates a new session or focuses/reopens a stored one, then saves the
-// record.
+// record. Either way the home tab is retired afterwards: a session tab now
+// exists to hold the instance up.
 func (l *Launcher) Open(req Request) (*Result, error) {
 	sess, err := l.target(req)
 	if err != nil {
@@ -107,16 +108,16 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 		sidebar  *kitty.Window // the stored session's surviving sidebar, if any
 	)
 	if req.Resume == ResumeStored {
-		lv, err := l.liveWindows(sess)
+		all, lv, err := l.snapshot(sess)
 		if err != nil {
 			return nil, fmt.Errorf("cannot list kitty windows: %w", err)
 		}
 		if lv.claude != nil {
-			return l.focus(sess, lv.claude.ID)
+			return l.focus(sess, lv.claude.ID, l.retireHomeIn(all))
 		}
 		sidebar = lv.sidebar
 		if sidebar == nil {
-			warnings = l.closeTabs(lv)
+			warnings = l.closeTabs(all, lv)
 		}
 	}
 
@@ -126,13 +127,7 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 	if err := l.store.Save(sess); err != nil {
 		return nil, fmt.Errorf("cannot save session: %w", err)
 	}
-	p := l.plan(sess, req.Resume)
-	var w windows
-	if sidebar != nil {
-		w, err = l.relaunchClaude(p, *sidebar)
-	} else {
-		w, err = l.launchTopology(p)
-	}
+	w, err := l.launch(sess, req.Resume, sidebar)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +135,23 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Result{Session: saved, Warnings: append(warnings, w.warnings...)}, nil
+	warnings = append(warnings, w.warnings...)
+	warnings = append(warnings, l.retireHome()...)
+	return &Result{Session: saved, Warnings: warnings}, nil
+}
+
+// launch lays the session out: claude beside a surviving sidebar, or a
+// whole new tab.
+func (l *Launcher) launch(
+	sess *session.Session,
+	mode ResumeMode,
+	sidebar *kitty.Window,
+) (windows, error) {
+	p := l.plan(sess, mode)
+	if sidebar != nil {
+		return l.relaunchClaude(p, *sidebar)
+	}
+	return l.launchTopology(p)
 }
 
 // target returns the record to launch: a new one for ResumeNone (ErrExists
@@ -178,8 +189,13 @@ func (l *Launcher) aliveIn(all []kitty.Window, sess *session.Session) bool {
 	return findLive(all, sess).claude != nil
 }
 
-// focus brings a live session to the front and stamps FocusedAt.
-func (l *Launcher) focus(sess *session.Session, claudeWindow int) (*Result, error) {
+// focus brings a live session to the front and stamps FocusedAt, carrying
+// the caller's warnings into the result.
+func (l *Launcher) focus(
+	sess *session.Session,
+	claudeWindow int,
+	warnings []error,
+) (*Result, error) {
 	if err := l.kitty.FocusWindow(claudeWindow); err != nil {
 		return nil, fmt.Errorf("cannot focus window: %w", err)
 	}
@@ -187,7 +203,7 @@ func (l *Launcher) focus(sess *session.Session, claudeWindow int) (*Result, erro
 	if err != nil {
 		return nil, err
 	}
-	return &Result{Session: saved, Focused: true}, nil
+	return &Result{Session: saved, Focused: true, Warnings: warnings}, nil
 }
 
 // stampFocus reloads the record and sets FocusedAt, so a hook update made in

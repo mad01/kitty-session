@@ -27,6 +27,11 @@ const pingTimeout = 2 * time.Second
 // this tag, not the id, says which session a window belongs to.
 const SessionVar = "KS_SESSION_ID"
 
+// HomeAgentVar marks the home tab's sidebar window when it runs the --agent
+// state monitor. The launcher retires the home tab once a session tab
+// exists, except one carrying this tag, which would take the agent with it.
+const HomeAgentVar = "KS_HOME_AGENT"
+
 // Layout names ks sets on its tabs.
 const (
 	// LayoutSplits is the kitty layout that honours --location=vsplit.
@@ -247,6 +252,8 @@ type Window struct {
 	// SessionID is the SessionVar user variable: the owning ks session's ID,
 	// empty for windows ks did not launch.
 	SessionID string
+	// HomeAgent is true when the window carries HomeAgentVar.
+	HomeAgent bool
 }
 
 // ls JSON shapes, limited to the fields ks reads.
@@ -296,6 +303,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					Title:     w.Title,
 					Columns:   w.Columns,
 					SessionID: w.UserVars[SessionVar],
+					HomeAgent: w.UserVars[HomeAgentVar] != "",
 				})
 			}
 		}
@@ -419,6 +427,13 @@ func (c *Client) FocusWindow(windowID int) error {
 // selected with window_id: (see GotoLayout).
 func (c *Client) SetTabTitleForWindow(title string, windowID int) error {
 	_, err := c.at("set-tab-title", matchWindowID(windowID), title)
+	return err
+}
+
+// SetUserVars sets KEY=VALUE user variables on the window.
+func (c *Client) SetUserVars(windowID int, vars ...string) error {
+	args := append([]string{"set-user-vars", matchID(windowID)}, vars...)
+	_, err := c.at(args...)
 	return err
 }
 

@@ -185,8 +185,9 @@ func checkAttachFocus(t *testing.T, f *fakeKitty, store *session.Store, focused 
 	t.Helper()
 	last := f.calls[len(f.calls)-1]
 	if home {
-		if last != "FocusWindow(1)" {
-			t.Errorf("last call = %s, want the home window focused", last)
+		// The home tab when it is still there, else the instance's first window.
+		if want := fmt.Sprintf("FocusWindow(%d)", f.windows[0].ID); last != want {
+			t.Errorf("last call = %s, want %s", last, want)
 		}
 		return
 	}

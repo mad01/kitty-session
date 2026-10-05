@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/mad01/kitty-session/internal/kitty"
@@ -37,6 +38,9 @@ const (
 	pinPasses = 2
 	// sidebarEdge is where the sidebar sits in the tab.
 	sidebarEdge = "left"
+	// homeTitle is the tab title of the home tab: kitty's first tab, and the
+	// one closeTabs recreates before the last session tab goes.
+	homeTitle = "ks"
 )
 
 // plan is everything launchTopology needs to lay out one session.
@@ -89,11 +93,19 @@ func ClaudeWindow(all []kitty.Window, sess *session.Session) (kitty.Window, bool
 
 // liveWindows takes a snapshot and picks out the session's windows.
 func (l *Launcher) liveWindows(sess *session.Session) (live, error) {
+	_, lv, err := l.snapshot(sess)
+	return lv, err
+}
+
+// snapshot takes one Windows() snapshot and returns it along with the
+// session's windows picked out of it, for callers that also need to look at
+// the rest of the instance.
+func (l *Launcher) snapshot(sess *session.Session) ([]kitty.Window, live, error) {
 	all, err := l.kitty.Windows()
 	if err != nil {
-		return live{}, err
+		return nil, live{}, err
 	}
-	return findLive(all, sess), nil
+	return all, findLive(all, sess), nil
 }
 
 // findLive matches windows to sess by the SessionVar tag, never by id alone:
@@ -253,14 +265,110 @@ func (l *Launcher) pinSidebar(sidebarID int) []error {
 	return nil
 }
 
-// closeTabs closes every tab holding a window the session owns. A tab that
-// will not close is a warning, since the session is being torn down
-// regardless.
-func (l *Launcher) closeTabs(lv live) []error {
+// closeTabs closes every tab holding a window the session owns. When those
+// are the last session tabs and there is no home tab, the home tab is
+// created first: the instance quits with its last window. A tab that will
+// not close is a warning, since the session is being torn down regardless.
+func (l *Launcher) closeTabs(all []kitty.Window, lv live) []error {
 	var warnings []error
+	if len(lv.tabs) > 0 && !sessionTabsOutside(all, lv.tabs) && len(homeTabs(all)) == 0 {
+		if err := l.openHome(all); err != nil {
+			warnings = append(warnings, fmt.Errorf("could not recreate the home tab: %w", err))
+		}
+	}
 	for _, tab := range lv.tabs {
 		if err := l.kitty.CloseTab(tab); err != nil {
 			warnings = append(warnings, fmt.Errorf("could not close tab %d: %w", tab, err))
+		}
+	}
+	return warnings
+}
+
+// homeTabs returns the tabs holding no session-tagged window, in instance
+// order: the home tab, whether kitty's first tab or one openHome made. ks
+// tags every window it launches for a session, so an untagged tab is not a
+// session's.
+func homeTabs(all []kitty.Window) []int {
+	var order []int
+	tagged := map[int]bool{}
+	for _, w := range all {
+		if !slices.Contains(order, w.TabID) {
+			order = append(order, w.TabID)
+		}
+		if w.SessionID != "" {
+			tagged[w.TabID] = true
+		}
+	}
+	var home []int
+	for _, tab := range order {
+		if !tagged[tab] {
+			home = append(home, tab)
+		}
+	}
+	return home
+}
+
+// agentHome reports whether a window of the tab carries the --agent tag.
+func agentHome(all []kitty.Window, tab int) bool {
+	return slices.ContainsFunc(all, func(w kitty.Window) bool {
+		return w.TabID == tab && w.HomeAgent
+	})
+}
+
+// sessionTabsOutside reports whether a session-tagged window lives in a tab
+// other than those in closing. With closing nil it asks whether any session
+// tab exists at all.
+func sessionTabsOutside(all []kitty.Window, closing []int) bool {
+	return slices.ContainsFunc(all, func(w kitty.Window) bool {
+		return w.SessionID != "" && !slices.Contains(closing, w.TabID)
+	})
+}
+
+// openHome creates the home tab: `ks sidebar` with no session, titled
+// homeTitle, anchored on any window of the snapshot.
+func (l *Launcher) openHome(all []kitty.Window) error {
+	if len(all) == 0 {
+		return fmt.Errorf("instance has no windows: %w", kitty.ErrNotFound)
+	}
+	id, err := l.kitty.LaunchTab(kitty.Launch{
+		Match:   all[0].ID,
+		Env:     []string{"PATH=" + os.Getenv("PATH")},
+		Command: []string{l.exe, "sidebar"},
+	})
+	if err != nil {
+		return fmt.Errorf("cannot create the home tab: %w", err)
+	}
+	if err := l.kitty.SetTabTitleForWindow(homeTitle, id); err != nil {
+		return fmt.Errorf("cannot title the home tab: %w", err)
+	}
+	return nil
+}
+
+// retireHome takes a snapshot and closes the home tab if a session tab
+// exists; see retireHomeIn.
+func (l *Launcher) retireHome() []error {
+	all, err := l.kitty.Windows()
+	if err != nil {
+		return []error{fmt.Errorf("home tab left as it is: %w", err)}
+	}
+	return l.retireHomeIn(all)
+}
+
+// retireHomeIn closes every home tab in the snapshot once a session tab
+// exists, except one whose sidebar runs the --agent monitor. The home tab is
+// only there so the instance has a window while no session does; with the
+// tab bar hidden, a goto_tab key would otherwise land on its blank right half.
+func (l *Launcher) retireHomeIn(all []kitty.Window) []error {
+	if !sessionTabsOutside(all, nil) {
+		return nil
+	}
+	var warnings []error
+	for _, tab := range homeTabs(all) {
+		if agentHome(all, tab) {
+			continue
+		}
+		if err := l.kitty.CloseTab(tab); err != nil {
+			warnings = append(warnings, fmt.Errorf("could not close the home tab: %w", err))
 		}
 	}
 	return warnings

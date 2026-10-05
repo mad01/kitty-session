@@ -11,6 +11,8 @@ ks sidebar --agent    # same, plus the background Haiku state monitor
 ks _sidebar-demo      # the sidebar on fake agents; no kitty needed
 ```
 
+The home tab exists only while no session tab does: the first session tab closes it (unless its sidebar runs `--agent`, which would take the state monitor with it), and closing the last session tab brings it back so the instance stays up. With the tab bar hidden, a kitty `goto_tab 1` therefore lands on a session rather than on the home tab's blank right half. In the home tab the sidebar shows `no agent in this tab · enter to focus · n for new` under its header.
+
 Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instance not running` otherwise. `--agent` is a fallback for when the Claude Code hooks are not installed; see [Hooks and state detection](hooks-and-state.md). `_sidebar-demo` is hidden and takes `--width` and `--session` to tune the preview.
 
 ## Rows

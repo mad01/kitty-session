@@ -141,7 +141,8 @@ func TestOpenNewSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if want := newTabLaunch(2, 3, "demo"); !slices.Equal(f.calls, want) {
+	want := append(newTabLaunch(2, 3, "demo"), "Windows", "CloseTab(1)") // the home tab retires
+	if !slices.Equal(f.calls, want) {
 		t.Errorf("calls =\n%v\nwant\n%v", f.calls, want)
 	}
 	if len(res.Warnings) != 0 || res.Focused {
@@ -265,6 +266,12 @@ func TestOpenSavesBeforeLaunch(t *testing.T) {
 	}
 }
 
+// withHomeRetired appends the home tab's retirement, which ends every Open
+// that launched windows while the home tab was still there.
+func withHomeRetired(calls []string) []string {
+	return append(calls, "Windows", "CloseTab(1)")
+}
+
 // relaunchCalls is the sequence that puts claude back beside a surviving
 // sidebar spanning the tab.
 func relaunchCalls(sidebar, claude int) []string {
@@ -298,7 +305,7 @@ func TestOpenStoredSession(t *testing.T) {
 			name:        "live claude window is focused, nothing launched",
 			arrange:     func(f *fakeKitty, s *session.Session) { f.addTab(s, true) },
 			wantFocused: true,
-			wantCalls:   []string{"Windows", "FocusWindow(3)"},
+			wantCalls:   []string{"Windows", "CloseTab(1)", "FocusWindow(3)"}, // home retires first
 			wantIDs:     [3]int{2, 2, 3},
 		},
 		{
@@ -315,8 +322,8 @@ func TestOpenStoredSession(t *testing.T) {
 				f.addTab(other, true) // windows 2 and 3, tagged with other's id
 				s.KittyTabID, s.KittySidebarWindowID, s.KittyWindowID = 2, 2, 3
 			},
-			// No CloseTab: the tab is not ours. A new tab gets windows 4 and 5.
-			wantCalls: append([]string{"Windows"}, newTabLaunch(4, 5, "demo")...),
+			// No CloseTab(2): the tab is not ours. A new tab gets windows 4 and 5.
+			wantCalls: withHomeRetired(append([]string{"Windows"}, newTabLaunch(4, 5, "demo")...)),
 			wantIDs:   [3]int{3, 4, 5},
 		},
 		{
@@ -326,7 +333,7 @@ func TestOpenStoredSession(t *testing.T) {
 				s.KittyWindowID = 9 // the claude window that exited
 			},
 			transcripts: true,
-			wantCalls:   relaunchCalls(2, 3),
+			wantCalls:   withHomeRetired(relaunchCalls(2, 3)),
 			wantResume:  []string{"--continue"},
 			wantIDs:     [3]int{2, 2, 3},
 		},
@@ -336,8 +343,10 @@ func TestOpenStoredSession(t *testing.T) {
 				f.addTab(s, true)
 				s.KittySidebarWindowID, s.KittyWindowID = 8, 9 // record out of sync
 			},
-			wantCalls: append([]string{"Windows", "CloseTab(2)"}, newTabLaunch(4, 5, "demo")...),
-			wantIDs:   [3]int{3, 4, 5},
+			wantCalls: withHomeRetired(
+				append([]string{"Windows", "CloseTab(2)"}, newTabLaunch(4, 5, "demo")...),
+			),
+			wantIDs: [3]int{3, 4, 5},
 		},
 		{
 			name: "tab that will not close is a warning, not a failure",
@@ -355,7 +364,7 @@ func TestOpenStoredSession(t *testing.T) {
 				KittyTabID: 3, Status: session.StatusStopped, ClaudeSessionID: "uuid-1",
 				ClaudeTranscriptPath: "TRANSCRIPT",
 			},
-			wantCalls:  append([]string{"Windows"}, newTabLaunch(2, 3, "demo")...),
+			wantCalls:  withHomeRetired(append([]string{"Windows"}, newTabLaunch(2, 3, "demo")...)),
 			wantResume: []string{"--resume", "uuid-1"},
 			wantIDs:    [3]int{2, 2, 3},
 		},
@@ -402,7 +411,7 @@ func TestOpenStoredSession(t *testing.T) {
 			if err := store.Save(&sess); err != nil {
 				t.Fatal(err)
 			}
-			f.errs["CloseTab"] = tc.closeErr
+			f.errs["CloseTab(2)"] = tc.closeErr // the stray tab; the home tab still closes
 			f.calls, f.launches = nil, nil
 
 			res, err := l.Open(Request{Name: "demo", Resume: ResumeStored})

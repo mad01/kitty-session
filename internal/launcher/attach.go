@@ -125,7 +125,8 @@ func (l *Launcher) settle(launched []string, res *AttachResult) []string {
 	return exited
 }
 
-// focusHome focuses the instance's first window, the home tab's sidebar.
+// focusHome focuses the instance's first window: the home tab's sidebar
+// while no session tab exists, otherwise the first session's sidebar.
 func (l *Launcher) focusHome(res *AttachResult) {
 	anchor, err := l.anyWindow()
 	if err == nil {

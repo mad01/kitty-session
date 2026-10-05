@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/mad01/kitty-session/internal/instance"
 	"github.com/mad01/kitty-session/internal/kitty"
@@ -13,10 +14,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// listenOnEnv is the variable kitty exports into every window with the
-// address it listens on; set to the ks socket it marks a window inside the
-// ks instance.
-const listenOnEnv = "KITTY_LISTEN_ON"
+// Variables kitty exports into every window: the address it listens on
+// (set to the ks socket, it marks a window inside the ks instance) and the
+// id of the window the process runs in.
+const (
+	listenOnEnv = "KITTY_LISTEN_ON"
+	windowIDEnv = "KITTY_WINDOW_ID"
+)
 
 var (
 	sidebarSession   string
@@ -52,15 +56,18 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	ownID, ownName := sidebarIdentity(store)
 	if agentFlag {
 		if agent, err := startAgent(c.Socket()); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: agent failed to start: %v\n", err)
 		} else {
 			defer stopAgent(agent)
 			stopAgentOnSignal(agent)
+			if ownID == "" {
+				markAgentHome(cmd, c)
+			}
 		}
 	}
-	ownID, ownName := sidebarIdentity(store)
 	b, err := launcher.NewSidebarBackend(store, c, cfg, ownID)
 	if err != nil {
 		return err
@@ -90,6 +97,19 @@ func sidebarIdentity(store *session.Store) (id, name string) {
 		return "", sidebarSession
 	}
 	return "", ""
+}
+
+// markAgentHome tags this window as the home sidebar running the agent, so
+// the launcher keeps the home tab, and the agent with it, once session tabs
+// exist. Outside kitty there is no window to tag.
+func markAgentHome(cmd *cobra.Command, c *kitty.Client) {
+	id, err := strconv.Atoi(os.Getenv(windowIDEnv))
+	if err != nil {
+		return
+	}
+	if err := c.SetUserVars(id, kitty.HomeAgentVar+"=1"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot mark the agent home tab: %v\n", err)
+	}
 }
 
 // connectSidebar returns a client for the running instance. Inside the

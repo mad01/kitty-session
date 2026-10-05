@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -62,12 +63,37 @@ func (m model) listLines(inner int) []string {
 	return overlay(lines, popup, m.popupTop(len(popup)), inner)
 }
 
-// filterLine shows the `/` filter while it is being edited or has text.
+// The hint under the header in the home tab's sidebar, whose right half
+// holds no agent; the short form is for frames the full one does not fit.
+const (
+	homeHint      = "no agent in this tab · enter to focus · n for new"
+	homeHintShort = "no agent here · enter · n new"
+)
+
+// filterLine shows the `/` filter while it is being edited or has text; in
+// the home tab it otherwise shows homeHint.
 func (m model) filterLine(inner int) string {
-	if m.mode != modeFilter && m.filter.Value() == "" {
-		return blank(inner)
+	if m.mode == modeFilter || m.filter.Value() != "" {
+		return fitWidth(" "+filterPromptStyle.Render("/ ")+m.filter.View(), inner)
 	}
-	return fitWidth(" "+filterPromptStyle.Render("/ ")+m.filter.View(), inner)
+	if m.isHome() {
+		avail := inner - edgePad - 1
+		hint := homeHint
+		if ansi.StringWidth(hint) > avail {
+			hint = homeHintShort
+		}
+		return fitWidth(titleStyle.Render(" "+truncate(hint, avail)), inner)
+	}
+	return blank(inner)
+}
+
+// isHome reports whether this sidebar sits in the home tab: it belongs to no
+// session and no agent is marked Own.
+func (m model) isHome() bool {
+	if m.opts.Session != "" {
+		return false
+	}
+	return !slices.ContainsFunc(m.agents, func(a Agent) bool { return a.Own })
 }
 
 // statusLine shows the transient status or error above the footer.

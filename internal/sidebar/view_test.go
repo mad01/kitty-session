@@ -130,7 +130,7 @@ func TestOwnRowComesFromBackendOnly(t *testing.T) {
 }
 
 func TestViewEmptyList(t *testing.T) {
-	m := newTestModel(t, &fakeBackend{}, "")
+	m := newTestModel(t, &fakeBackend{}, "demo") // a session tab, not the home tab
 	got := lines(m)
 	if !strings.Contains(got[1], "agents") || !strings.Contains(got[1], "priority") {
 		t.Errorf("header missing: %q", got[1])
@@ -273,4 +273,43 @@ func TestTruncateAndFit(t *testing.T) {
 			t.Errorf("fitWidth(%q, %d) is %d cells", tt.s, tt.w, w)
 		}
 	}
+}
+
+func TestViewHomeHint(t *testing.T) {
+	t.Run("home tab shows the hint under the header", func(t *testing.T) {
+		want := map[int]string{
+			20: "no agent here",                 // truncated short form
+			36: "no agent here · enter · n new", // the short form fits whole
+			60: homeHint,                        // the full hint fits
+		}
+		for width, text := range want {
+			fb := &fakeBackend{agents: withoutOwn(mockupAgents())}
+			m := newSizedModel(t, fb, "", width, testLines)
+			assertGeometry(t, m, width, testLines)
+			if got := lines(m); !strings.Contains(got[2], text) {
+				t.Errorf("width %d: hint line %q lacks %q", width, got[2], text)
+			}
+		}
+		m := newTestModel(t, &fakeBackend{}, "")
+		if got := lines(m); !strings.Contains(got[2], "n new") {
+			t.Errorf("empty home sidebar should still hint: %q", got[2])
+		}
+	})
+	t.Run("a session tab shows no hint", func(t *testing.T) {
+		own := newTestModel(t, &fakeBackend{agents: mockupAgents()}, "")
+		named := newTestModel(t, &fakeBackend{agents: withoutOwn(mockupAgents())}, "x")
+		for _, m := range []model{own, named} {
+			if got := lines(m); strings.TrimSpace(strings.Trim(got[2], "│")) != "" {
+				t.Errorf("hint shown in a session tab: %q", got[2])
+			}
+		}
+	})
+	t.Run("the filter takes the line over", func(t *testing.T) {
+		m := newTestModel(t, &fakeBackend{agents: withoutOwn(mockupAgents())}, "")
+		m, _ = press(t, m, "/", "k")
+		got := lines(m)
+		if !strings.Contains(got[2], "/ k") || strings.Contains(got[2], "no agent") {
+			t.Errorf("filter line = %q", got[2])
+		}
+	})
 }

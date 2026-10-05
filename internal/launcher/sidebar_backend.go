@@ -290,7 +290,7 @@ func (b *SidebarBackend) FocusAgentWindow() error {
 	if lv.claude == nil {
 		return fmt.Errorf("%s has no claude window", sess.Name)
 	}
-	_, err = b.l.focus(sess, lv.claude.ID)
+	_, err = b.l.focus(sess, lv.claude.ID, nil)
 	return err
 }
 
