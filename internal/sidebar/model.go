@@ -80,7 +80,7 @@ type model struct {
 	home    string
 	now     func() time.Time
 
-	agents  []Agent // sorted by priority
+	agents  []Agent // in tab order
 	listGen int     // generation of the latest List issued
 	cursor  int     // index into visible()
 	width   int     // terminal size from the last WindowSizeMsg; zero before it

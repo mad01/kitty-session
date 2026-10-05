@@ -68,7 +68,7 @@ func TestAttach(t *testing.T) {
 			wantSettle:   true,
 		},
 		{
-			name: "never focused: the first active by name is focused",
+			name: "never focused: the oldest active is focused",
 			sessions: []attachSpec{
 				{name: "bravo"},
 				{name: "alpha"},
@@ -76,7 +76,7 @@ func TestAttach(t *testing.T) {
 			},
 			wantResumed:  2,
 			wantStopped:  1,
-			wantFocused:  "alpha",
+			wantFocused:  "bravo",
 			wantLaunches: 2,
 			wantSleeps:   1,
 			wantSettle:   true,
@@ -113,8 +113,10 @@ func TestAttach(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			l, f, store := newTestLauncher(t)
-			for _, spec := range tc.sessions {
+			for i, spec := range tc.sessions {
 				sess := session.New(spec.name, "/work/"+spec.name, 70, 71)
+				// Listed order is creation order, so the fallback focus is deterministic.
+				sess.CreatedAt = t0.Add(time.Duration(i) * time.Minute).Format(time.RFC3339Nano)
 				sess.KittySidebarWindowID = 72 // stale ids: nothing in the instance
 				if spec.stopped {
 					sess.Status = session.StatusStopped

@@ -31,9 +31,11 @@ type Session struct {
 	// ID identifies the record across renames. The launcher exports it as
 	// KS_SESSION_ID so the hook finds the record whatever its current name.
 	// Records from before the field have none until the next reopen.
-	ID                   string `json:"id,omitempty"`
-	Name                 string `json:"name"`
-	Dir                  string `json:"dir"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+	// CreatedAt is RFC 3339 UTC with nanoseconds, so records made in the same
+	// second still order; records from older versions have whole seconds.
 	CreatedAt            string `json:"created_at"`
 	KittyTabID           int    `json:"kitty_tab_id"`
 	KittyWindowID        int    `json:"kitty_window_id,omitempty"`
@@ -65,7 +67,7 @@ func New(name, dir string, tabID, windowID int) *Session {
 		ID:            NewID(),
 		Name:          name,
 		Dir:           dir,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		KittyTabID:    tabID,
 		KittyWindowID: windowID,
 		Status:        StatusActive,

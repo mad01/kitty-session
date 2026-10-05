@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/mad01/kitty-session/internal/session"
@@ -38,8 +39,8 @@ type AttachResult struct {
 
 // Attach brings the instance back to where the user left it: every active
 // session whose claude window is gone is resumed, stopped records are left
-// alone, and the most recently focused session (first active by name when
-// none was ever focused) ends up in front. With no active session, or when
+// alone, and the most recently focused session (the oldest active one when
+// none was ever focused, which is the first tab) ends up in front. With no active session, or when
 // that session failed to come back, the home tab is focused.
 func (l *Launcher) Attach() (*AttachResult, error) {
 	sessions, err := l.store.List()
@@ -55,6 +56,7 @@ func (l *Launcher) Attach() (*AttachResult, error) {
 		}
 		active = append(active, s)
 	}
+	sortByCreation(active)
 	target := focusTarget(active)
 	skip := l.resume(active, res)
 	if target == nil || skip[target.Name] {
@@ -147,4 +149,24 @@ func focusTarget(active []*session.Session) *session.Session {
 		}
 	}
 	return best
+}
+
+// sortByCreation orders sessions oldest first, by name when stamps tie, so
+// attach opens tabs in the order the sessions were made and the sidebar's
+// tab order survives a restart.
+func sortByCreation(sessions []*session.Session) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		a, b := createdAt(sessions[i]), createdAt(sessions[j])
+		if !a.Equal(b) {
+			return a.Before(b)
+		}
+		return sessions[i].Name < sessions[j].Name
+	})
+}
+
+// createdAt parses the record's creation stamp; one that does not parse
+// sorts first.
+func createdAt(s *session.Session) time.Time {
+	t, _ := time.Parse(time.RFC3339Nano, s.CreatedAt)
+	return t
 }

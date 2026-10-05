@@ -93,7 +93,7 @@ func TestViewMockup(t *testing.T) {
 
 	want := map[int]string{
 		0:  "╭──────────────────────────────────╮",
-		1:  "│ agents                  priority │",
+		1:  "│ agents                 tab order │",
 		2:  "│                                  │",
 		3:  "│ ● thismoon                       │",
 		4:  "│   Mods overview and integration… │",
@@ -132,7 +132,7 @@ func TestOwnRowComesFromBackendOnly(t *testing.T) {
 func TestViewEmptyList(t *testing.T) {
 	m := newTestModel(t, &fakeBackend{}, "demo") // a session tab, not the home tab
 	got := lines(m)
-	if !strings.Contains(got[1], "agents") || !strings.Contains(got[1], "priority") {
+	if !strings.Contains(got[1], "agents") || !strings.Contains(got[1], "tab order") {
 		t.Errorf("header missing: %q", got[1])
 	}
 	if !strings.Contains(got[testLines-2], "new") || !strings.Contains(got[testLines-2], "menu") {

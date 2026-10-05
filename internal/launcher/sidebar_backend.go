@@ -94,6 +94,7 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot list kitty windows: %w", err)
 	}
+	pos := tabPositions(all)
 	agents := make([]sidebar.Agent, 0, len(sessions))
 	for _, sess := range sessions {
 		lv := findLive(all, sess)
@@ -103,7 +104,7 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 				return nil, err
 			}
 		}
-		agents = append(agents, b.agent(sess, lv.claude, own))
+		agents = append(agents, b.agent(sess, lv, own, pos[lv.tabID()]))
 	}
 	return agents, nil
 }
@@ -130,9 +131,10 @@ func (b *SidebarBackend) markViewed(sess *session.Session) (*session.Session, er
 	return fresh, nil
 }
 
-// agent builds the sidebar row for sess, whose claude window is w (nil when
-// gone). CreatedAt is the record's creation stamp, zero when it does not parse.
-func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window, own bool) sidebar.Agent {
+// agent builds the sidebar row for sess from its live windows; tab is the
+// position of the session's tab in kitty's order, zero without one.
+func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int) sidebar.Agent {
+	w := lv.claude
 	in := stateInput{active: sess.IsActive(), viewedAt: sess.ViewedAt}
 	if w != nil {
 		in.hasWindow, in.title = true, w.Title
@@ -141,12 +143,12 @@ func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window, own bool)
 		in.fileState, in.fileAt = s, at
 	}
 	return sidebar.Agent{
-		Name:      sess.Name,
-		Dir:       sess.Dir,
-		Title:     b.title(in, sess.Dir),
-		State:     resolveState(in),
-		CreatedAt: createdAt(sess),
-		Own:       own,
+		Name:  sess.Name,
+		Dir:   sess.Dir,
+		Title: b.title(in, sess.Dir),
+		State: resolveState(in),
+		Tab:   tab,
+		Own:   own,
 	}
 }
 
@@ -453,12 +455,15 @@ func tabWindows(all []kitty.Window, tabID int) int {
 	return n
 }
 
-// createdAt parses the record's RFC3339 creation stamp. A record that does
-// not parse sorts first among its state, which keeps it visible.
-func createdAt(sess *session.Session) time.Time {
-	t, err := time.Parse(time.RFC3339, sess.CreatedAt)
-	if err != nil {
-		return time.Time{}
+// tabPositions maps each tab id in the snapshot to its 1-based position in
+// kitty's order, which is the N of goto_tab N (cmd+N). Stopped sessions have
+// no tab and get no entry.
+func tabPositions(all []kitty.Window) map[int]int {
+	pos := map[int]int{}
+	for _, w := range all {
+		if _, seen := pos[w.TabID]; !seen {
+			pos[w.TabID] = len(pos) + 1
+		}
 	}
-	return t
+	return pos
 }

@@ -241,7 +241,6 @@ func TestListMatchesWindowsByTagAndFillsRows(t *testing.T) {
 	// alone must not make this session alive.
 	stale := session.New("stale", "/work/stale", live.KittyTabID, live.KittyWindowID)
 	stale.KittySidebarWindowID = live.KittySidebarWindowID
-	stale.CreatedAt = "not a stamp" // unparseable: zero CreatedAt, sorts first
 
 	stopped := session.New("stopped", "/work/stopped", 0, 0)
 	stopped.Status = session.StatusStopped
@@ -271,15 +270,14 @@ func TestListMatchesWindowsByTagAndFillsRows(t *testing.T) {
 	if len(byName) != 4 {
 		t.Fatalf("got %d agents, want 4: %+v", len(byName), agents)
 	}
-	wantCreated, _ := time.Parse(time.RFC3339, live.CreatedAt)
 	if a := byName["live"]; a.State != sidebar.StateDone || a.Title != "Plan the merge" ||
-		!a.CreatedAt.Equal(wantCreated) || a.Dir != "/work/live" {
+		a.Tab != 2 || a.Dir != "/work/live" {
 		t.Errorf("live = %+v", a)
 	}
-	if a := byName["stale"]; a.State != sidebar.StateStopped || !a.CreatedAt.IsZero() {
-		t.Errorf("stale = %+v, want stopped with zero CreatedAt", a)
+	if a := byName["stale"]; a.State != sidebar.StateStopped || a.Tab != 0 {
+		t.Errorf("stale = %+v, want stopped with no tab", a)
 	}
-	if a := byName["stopped"]; a.State != sidebar.StateStopped {
+	if a := byName["stopped"]; a.State != sidebar.StateStopped || a.Tab != 3 {
 		t.Errorf("stopped = %+v", a)
 	}
 	if a := byName["inhome"]; a.Title != "~/code/x" || a.State != sidebar.StateIdle {

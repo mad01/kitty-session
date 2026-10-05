@@ -17,7 +17,7 @@ Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instanc
 
 ## Rows
 
-The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Its border is light green while the sidebar window has the keyboard and muted gray otherwise, so the frame tells you which side of the tab has focus. Under the `agents … priority` header each agent takes two lines:
+The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Its border is light green while the sidebar window has the keyboard and muted gray otherwise, so the frame tells you which side of the tab has focus. Under the `agents … tab order` header each agent takes two lines:
 
 - A dot for the state, then the name. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background.
 - Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one.
@@ -47,7 +47,7 @@ Each row's state comes from one `kitty @ ls` snapshot plus the session's state f
 
 ### Sort
 
-Rows are ordered by state in the order of the table above, then by creation time with the oldest first, so agents in the same state keep the order you created them in, then by name. The cursor stays on the same agent across refreshes.
+Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks` opens tabs in the order the sessions were created, so the numbering survives a restart. The cursor stays on the same agent across refreshes.
 
 ## Keys
 

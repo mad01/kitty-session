@@ -90,7 +90,7 @@ func TestResortKeepsCursorOnOwnUnlessNavigated(t *testing.T) {
 		if m.cursor != 4 {
 			t.Fatalf("own row at %d, want 4", m.cursor)
 		}
-		fb.agents[0].State = StateInput // kitty-session jumps to the top
+		fb.agents[0].Tab, fb.agents[3].Tab = 1, 5 // kitty-session takes thismoon's tab: top row
 		m = load(t, m)
 		if m.cursor != 0 || m.cursorName() != "kitty-session" {
 			t.Fatalf("cursor %d on %q, want 0 on kitty-session", m.cursor, m.cursorName())
@@ -100,8 +100,8 @@ func TestResortKeepsCursorOnOwnUnlessNavigated(t *testing.T) {
 	t.Run("navigated: cursor follows the agent the user picked", func(t *testing.T) {
 		fb := &fakeBackend{agents: mockupAgents()}
 		m := newTestModel(t, fb, "")
-		m, _ = press(t, m, "k") // migraine-me
-		fb.agents[1].State = StateDone
+		m, _ = press(t, m, "k")                   // migraine-me
+		fb.agents[1].Tab, fb.agents[2].Tab = 2, 4 // migraine-me swaps tabs with dropbrain-app
 		m = load(t, m)
 		if m.cursor != 1 || m.cursorName() != "migraine-me" {
 			t.Fatalf("cursor %d on %q, want 1 on migraine-me", m.cursor, m.cursorName())
@@ -129,8 +129,7 @@ func TestResortKeepsCursorOnOwnUnlessNavigated(t *testing.T) {
 		if m.cursorName() != "thismoon-2" {
 			t.Fatalf("cursor on %q after rename, want thismoon-2", m.cursorName())
 		}
-		fb.agents[3].State = StateIdle   // drops below the own row
-		fb.agents[3].CreatedAt = testNow // newest idle row, sorts last
+		fb.agents[3].Tab = 6 // moves to the last tab, below the own row
 		m = load(t, m)
 		if m.cursorName() != "thismoon-2" {
 			t.Fatalf("cursor on %q after re-sort, want thismoon-2", m.cursorName())

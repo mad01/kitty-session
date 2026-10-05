@@ -83,30 +83,29 @@ func mockupAgents() []Agent {
 	return []Agent{
 		{
 			Name: "kitty-session", Dir: "/home/u/code/kitty-session", Title: "Claude Code",
-			State: StateIdle, CreatedAt: testNow.Add(-20 * time.Minute), Own: true,
+			State: StateIdle, Tab: 5, Own: true,
 		},
 		{
 			Name: "migraine-me", Dir: "/home/u/code/migraine-me", Title: "Migrane iOS 27.1 update",
-			State: StateIdle, CreatedAt: testNow.Add(-25 * time.Minute),
+			State: StateIdle, Tab: 4,
 		},
 		{
 			Name: "dropbrain-app", Dir: "/home/u/code/dropbrain-app",
 			Title: "Migrane iOS 27.1 migration ✳ follow-ups",
-			State: StateDone, CreatedAt: testNow.Add(-3 * time.Minute),
+			State: StateDone, Tab: 2,
 		},
 		{
 			Name: "thismoon", Dir: "/home/u/code/thismoon",
 			Title: "Mods overview and integration plan",
-			State: StateInput, CreatedAt: testNow.Add(-time.Minute),
+			State: StateInput, Tab: 1,
 		},
 		{
 			Name: "code-search-local", Dir: "/home/u/code/code-search-local",
 			Title: "Reindex 日本語 テスト after sparse checkout",
-			State: StateWorking, CreatedAt: testNow.Add(-10 * time.Second),
+			State: StateWorking, Tab: 3,
 		},
 		{
 			Name: "dotfiles", Dir: "/home/u/code/dotfiles", State: StateStopped,
-			CreatedAt: testNow.Add(-2 * time.Hour),
 		},
 	}
 }

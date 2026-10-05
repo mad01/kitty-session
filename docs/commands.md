@@ -12,7 +12,7 @@ Every subcommand exposed by the `ks` CLI, with flags and exit behavior.
 Usage: ks [--agent]
 ```
 
-Attach. Starts the instance if its socket does not answer. Resumes every active session whose claude window is gone, 100 ms apart, and leaves stopped sessions alone. Then focuses the session you used last: the newest `focused_at`, the first active one by name if none was ever focused, the home tab when there is no active session. Prints one line:
+Attach. Starts the instance if its socket does not answer. Resumes every active session whose claude window is gone, 100 ms apart, and leaves stopped sessions alone. Then focuses the session you used last: the newest `focused_at`, the oldest active one, which is tab 1, if none was ever focused, the home tab when there is no active session. Prints one line:
 
 ```
 ks: 2 resumed, 1 already running, 1 stopped

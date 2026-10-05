@@ -69,6 +69,14 @@ type live struct {
 	tabs    []int         // every tab holding a window the session owns
 }
 
+// tabID is the tab holding the session's windows, zero when it has none.
+func (lv live) tabID() int {
+	if len(lv.tabs) == 0 {
+		return 0
+	}
+	return lv.tabs[0]
+}
+
 // tabActive reports whether the session's tab is the one its OS window shows.
 func (lv live) tabActive() bool {
 	for _, w := range []*kitty.Window{lv.sidebar, lv.claude} {

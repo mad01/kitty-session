@@ -22,7 +22,6 @@ type DemoBackend struct {
 
 // NewDemoBackend returns a DemoBackend with the mockup's agents.
 func NewDemoBackend() *DemoBackend {
-	now := time.Now()
 	home, _ := os.UserHomeDir()
 	src := filepath.Join(home, "code", "src", "github.com", "mad01")
 	return &DemoBackend{
@@ -30,31 +29,31 @@ func NewDemoBackend() *DemoBackend {
 			{
 				Name: "thismoon", Dir: filepath.Join(src, "thismoon"),
 				Title: "Mods overview and integration plan for the events service",
-				State: StateInput, CreatedAt: now.Add(-1 * time.Minute),
+				State: StateInput, Tab: 1,
 			},
 			{
 				Name: "dropbrain-app", Dir: filepath.Join(src, "dropbrain-app"),
 				Title: "Migrane iOS 27.1 migration ✳ follow-ups",
-				State: StateDone, CreatedAt: now.Add(-3 * time.Minute),
+				State: StateDone, Tab: 2,
 			},
 			{
 				Name: "code-search-local", Dir: filepath.Join(src, "code-search-local"),
 				Title: "Reindex after sparse checkout 日本語 テスト",
-				State: StateWorking, CreatedAt: now.Add(-10 * time.Second),
+				State: StateWorking, Tab: 3,
 			},
 			{
 				Name: "migraine-me", Dir: filepath.Join(src, "migraine-me"),
 				Title: "Migrane iOS 27.1 update",
-				State: StateIdle, CreatedAt: now.Add(-25 * time.Minute),
+				State: StateIdle, Tab: 4,
 			},
 			{
 				Name: "kitty-session", Dir: filepath.Join(src, "kitty-session"),
 				Title: "Claude Code",
-				State: StateIdle, CreatedAt: now.Add(-20 * time.Minute),
+				State: StateIdle, Tab: 5,
 			},
 			{
 				Name: "dotfiles", Dir: filepath.Join(src, "dotfiles"),
-				State: StateStopped, CreatedAt: now.Add(-2 * time.Hour),
+				State: StateStopped,
 			},
 		},
 		trashed: []string{"old-experiment", "spike-2026-09"},
@@ -112,7 +111,7 @@ func (d *DemoBackend) New(name, dir string) error {
 		return fmt.Errorf("demo: session %q already exists", name)
 	}
 	d.agents = append(d.agents, Agent{
-		Name: name, Dir: dir, Title: "Claude Code", State: StateIdle, CreatedAt: time.Now(),
+		Name: name, Dir: dir, Title: "Claude Code", State: StateIdle, Tab: d.nextTab(),
 	})
 	return nil
 }
@@ -137,6 +136,7 @@ func (d *DemoBackend) Close(name string, keep bool) error {
 	}
 	if keep {
 		d.agents[i].State = StateStopped
+		d.agents[i].Tab = 0
 		return nil
 	}
 	d.agents = append(d.agents[:i], d.agents[i+1:]...)
@@ -152,7 +152,7 @@ func (d *DemoBackend) Restore(name string) error {
 		if t == name {
 			d.trashed = append(d.trashed[:i], d.trashed[i+1:]...)
 			d.agents = append(d.agents, Agent{
-				Name: name, Title: "restored", State: StateStopped, CreatedAt: time.Now(),
+				Name: name, Title: "restored", State: StateStopped,
 			})
 			return nil
 		}
@@ -228,4 +228,13 @@ func (d *DemoBackend) index(name string) int {
 		}
 	}
 	return -1
+}
+
+// nextTab is the position a new tab takes: after the last one.
+func (d *DemoBackend) nextTab() int {
+	n := 0
+	for _, a := range d.agents {
+		n = max(n, a.Tab)
+	}
+	return n + 1
 }

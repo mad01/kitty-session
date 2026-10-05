@@ -3,42 +3,37 @@ package sidebar
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestSortAgents(t *testing.T) {
-	t0 := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	at := func(d time.Duration) time.Time { return t0.Add(d) }
 	tests := []struct {
 		name string
 		in   []Agent
 		want string
 	}{
 		{
-			name: "state priority wins over creation order",
+			name: "tab order wins over state",
 			in: []Agent{
-				{Name: "stopped", State: StateStopped, CreatedAt: at(0)},
-				{Name: "idle", State: StateIdle, CreatedAt: at(-time.Minute)},
-				{Name: "working", State: StateWorking, CreatedAt: at(-2 * time.Minute)},
-				{Name: "done", State: StateDone, CreatedAt: at(-3 * time.Minute)},
-				{Name: "input", State: StateInput, CreatedAt: at(-4 * time.Minute)},
+				{Name: "idle", State: StateIdle, Tab: 3},
+				{Name: "input", State: StateInput, Tab: 2},
+				{Name: "working", State: StateWorking, Tab: 1},
 			},
-			want: "input,done,working,idle,stopped",
+			want: "working,input,idle",
 		},
 		{
-			name: "ties by creation order, oldest first",
+			name: "no tab sorts last, by name",
 			in: []Agent{
-				{Name: "old", State: StateIdle, CreatedAt: at(-time.Hour)},
-				{Name: "new", State: StateIdle, CreatedAt: at(0)},
-				{Name: "mid", State: StateIdle, CreatedAt: at(-time.Minute)},
+				{Name: "b-stopped", State: StateStopped},
+				{Name: "tabbed", State: StateIdle, Tab: 1},
+				{Name: "a-gone", State: StateStopped},
 			},
-			want: "old,mid,new",
+			want: "tabbed,a-gone,b-stopped",
 		},
 		{
-			name: "same state and time falls back to name",
+			name: "same tab falls back to name",
 			in: []Agent{
-				{Name: "b", State: StateWorking, CreatedAt: at(0)},
-				{Name: "a", State: StateWorking, CreatedAt: at(0)},
+				{Name: "b", State: StateWorking, Tab: 1},
+				{Name: "a", State: StateWorking, Tab: 1},
 			},
 			want: "a,b",
 		},

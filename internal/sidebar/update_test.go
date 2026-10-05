@@ -422,14 +422,14 @@ func TestMouseFooterAndRows(t *testing.T) {
 func TestApplyAgentsKeepsCursorOnSameAgent(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
-	m, _ = press(t, m, "k", "k")      // code-search-local
-	fb.agents[4].State = StateStopped // it drops below the older stopped row
+	m, _ = press(t, m, "k", "k")                           // code-search-local
+	fb.agents[4].State, fb.agents[4].Tab = StateStopped, 0 // no tab: sorts last, by name
 	m = load(t, m)
 	if got := m.cursorName(); got != "code-search-local" {
 		t.Fatalf("cursor on %q, want code-search-local", got)
 	}
-	if m.cursor != 5 {
-		t.Fatalf("cursor index = %d, want 5", m.cursor)
+	if m.cursor != 4 {
+		t.Fatalf("cursor index = %d, want 4", m.cursor)
 	}
 }
 

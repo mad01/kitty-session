@@ -1,13 +1,9 @@
 package sidebar
 
-import (
-	"sort"
-	"time"
-)
+import "sort"
 
-// State is an agent's state as the sidebar shows it. The constants are in
-// priority order: sorting agents by State ascending yields the "priority"
-// order the header advertises.
+// State is an agent's state as the sidebar shows it. The constants run from
+// the state that needs the user most to the one that needs them least.
 type State int
 
 const (
@@ -47,8 +43,10 @@ type Agent struct {
 	Dir   string
 	Title string // Claude's tab title, already stripped of its state glyph; empty falls back to Dir
 	State State
-	// CreatedAt is when the session was created; agents in the same state keep creation order.
-	CreatedAt time.Time
+	// Tab is the 1-based position of the agent's tab in the ks instance, the N
+	// of kitty's goto_tab N (cmd+N on macOS). Zero means no tab: the session
+	// is stopped or its tab is gone.
+	Tab int
 	// Own marks the session this sidebar belongs to. The model also treats
 	// an agent whose Name equals Options.Session as own.
 	Own bool
@@ -98,16 +96,17 @@ type Backend interface {
 	Focused() (bool, error)
 }
 
-// sortAgents orders agents for the "priority" sort: by State ascending, then
-// oldest CreatedAt first, then by Name so the order is deterministic.
+// sortAgents puts agents in tab order, so the top row is cmd+1, the next
+// cmd+2, and so on, whatever their states. Agents without a tab come last,
+// by name, so the order is deterministic.
 func sortAgents(agents []Agent) {
 	sort.SliceStable(agents, func(i, j int) bool {
 		a, b := agents[i], agents[j]
-		if a.State != b.State {
-			return a.State < b.State
+		if (a.Tab == 0) != (b.Tab == 0) {
+			return a.Tab != 0
 		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt)
+		if a.Tab != b.Tab {
+			return a.Tab < b.Tab
 		}
 		return a.Name < b.Name
 	})
