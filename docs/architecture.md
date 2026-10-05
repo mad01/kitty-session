@@ -179,8 +179,8 @@ SidebarBackend.List():
 | `Ping()` | `ls`, 2 s timeout |
 | `Windows()` | `ls`, parsed into `Window{ID, TabID, TabTitle, TabActive, Title, Columns, SessionID}` |
 | `AnyWindow`, `TabExists`, `WindowExists`, `FindTabForWindow`, `WindowColumns`, `WindowTitle` | Walk one `Windows()` snapshot |
-| `LaunchTab(Launch)` | `launch --type=tab --match=id:<win> --cwd=<dir> --env <marker>... --env K=V... --var K=V... -- <command>` (a bare `--env NAME` unsets) |
-| `LaunchVSplit(Launch)` | `launch --type=window --location=vsplit --bias=<n> --match=id:<win> --cwd=<dir> --env ... --var ... -- <command>` |
+| `LaunchTab(Launch)` | `launch --type=tab --match=id:<win> [--keep-focus] --cwd=<dir> --env <marker>... --env K=V... --var K=V... -- <command>` (a bare `--env NAME` unsets) |
+| `LaunchVSplit(Launch)` | `launch --type=window --location=vsplit --bias=<n> --match=id:<win> [--keep-focus] --cwd=<dir> --env ... --var ... -- <command>` |
 | `LaunchHSplit(Launch)` | `launch --type=window --location=hsplit --bias=<n> --match=id:<win> --next-to=id:<win> --cwd=<dir> ...`; `--next-to` names the window to split (kitty otherwise splits the tab's active window, the sidebar), `--match` picks the tab (without it kitty ignores `--next-to`) |
 | `GotoLayout(win, layout)` | `goto-layout --match=id:<win> <layout>` |
 | `ResizeWindow(win, axis, n)` | `resize-window --match=id:<win> --axis=<axis> --increment=<n>` |
