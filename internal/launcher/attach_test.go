@@ -214,3 +214,38 @@ func checkAttachFocus(t *testing.T, f *fakeKitty, store *session.Store, focused 
 		t.Errorf("newest FocusedAt is %s, want %s", newest.Name, focused)
 	}
 }
+
+// TestResumeLaunchesOldestFirstWithoutFocus covers the cold-start path of
+// new, open and tmp: every active session comes back in creation order,
+// hidden, and nothing is focused.
+func TestResumeLaunchesOldestFirstWithoutFocus(t *testing.T) {
+	l, f, store := newTestLauncher(t)
+	t0 := time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)
+	for i, name := range []string{"zulu", "alpha"} { // zulu is the older one
+		sess := session.New(name, "/work/"+name, 70, 71)
+		sess.CreatedAt = t0.Add(time.Duration(i) * time.Minute).Format(time.RFC3339Nano)
+		if err := store.Save(sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := l.Resume()
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if res.Resumed != 2 || res.Focused != "" {
+		t.Errorf("result = %+v, want 2 resumed and nothing focused", res)
+	}
+	var titles []string
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "FocusWindow(") {
+			t.Errorf("Resume focused a window: %v", f.calls)
+		}
+		if strings.HasPrefix(c, "SetTabTitle(") {
+			titles = append(titles, c)
+		}
+	}
+	if len(titles) != 2 || !strings.HasSuffix(titles[0], ",zulu)") ||
+		!strings.HasSuffix(titles[1], ",alpha)") {
+		t.Errorf("tab order = %v, want zulu then alpha", titles)
+	}
+}

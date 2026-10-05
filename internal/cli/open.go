@@ -26,6 +26,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	resumeOnFreshStart(cmd, w)
 	if !w.store.Exists(name) {
 		return fmt.Errorf("session %q not found", name)
 	}

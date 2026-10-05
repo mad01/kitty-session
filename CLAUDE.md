@@ -27,7 +27,7 @@ internal/repo/finder/       concurrent BFS repo walker + remote-URL parser
 
 **`internal/kitty` is the one exec boundary.** `kitty.New(socket)` returns a `Client`; each method wraps one `kitty @` subcommand and always passes `--to <socket>`. `Client.Start` is the only call that runs the kitty binary itself (`kitty --detach --listen-on ...` plus the `-o` overrides the topology depends on). Nothing else in the tree calls `exec.Command("kitty", ...)`. If you need a new kitty interaction, add a method to `client.go`. The repo finder also avoids subprocesses: it parses `.git/config` directly, never running `git`.
 
-**Which wiring to use in a command.** `ensureWiring` (in `internal/cli/wiring.go`) starts the instance when it is down; `new`, `open`, `tmp` and attach use it. `offlineWiring` never starts it; `close`, `rename` and `list` use it so they work while the instance is down. Both hand back the store, the config (nil when the file is absent) and a `Launcher`.
+**Which wiring to use in a command.** `ensureWiring` (in `internal/cli/wiring.go`) starts the instance when it is down; `new`, `open`, `tmp` and attach use it. It also reports whether it had to start it (`wiring.started`); `new`, `open` and `tmp` then call `Launcher.Resume` first, so the tabs keep creation order and their own tab comes last. `offlineWiring` never starts it; `close`, `rename` and `list` use it so they work while the instance is down. Both hand back the store, the config (nil when the file is absent) and a `Launcher`.
 
 ## On-disk model
 

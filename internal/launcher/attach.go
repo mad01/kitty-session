@@ -40,12 +40,43 @@ type AttachResult struct {
 // Attach brings the instance back to where the user left it: every active
 // session whose claude window is gone is resumed, stopped records are left
 // alone, and the most recently focused session (the oldest active one when
-// none was ever focused, which is the first tab) ends up in front. With no active session, or when
-// that session failed to come back, the home tab is focused.
+// none was ever focused, which is the first tab) ends up in front. With no
+// active session, or when that session failed to come back, the home tab is
+// focused.
 func (l *Launcher) Attach() (*AttachResult, error) {
-	sessions, err := l.store.List()
+	res, active, skip, err := l.resumeAll()
 	if err != nil {
 		return nil, err
+	}
+	target := focusTarget(active)
+	if target == nil || skip[target.Name] {
+		l.focusHome(res)
+		return res, nil
+	}
+	if _, err := l.Open(Request{Name: target.Name, Resume: ResumeStored}); err != nil {
+		res.Warnings = append(res.Warnings, fmt.Errorf("could not focus %s: %w", target.Name, err))
+		return res, nil
+	}
+	res.Focused = target.Name
+	return res, nil
+}
+
+// Resume brings back every active session whose claude window is gone,
+// oldest first and out of sight, without focusing anything. A command that
+// had to start the instance calls it before adding its own tab, so the tabs
+// keep creation order and the new one comes last.
+func (l *Launcher) Resume() (*AttachResult, error) {
+	res, _, _, err := l.resumeAll()
+	return res, err
+}
+
+// resumeAll lists the store, resumes the active sessions oldest first and
+// returns the result, the active sessions in that order, and the names that
+// must not be focused because their relaunch failed or exited.
+func (l *Launcher) resumeAll() (*AttachResult, []*session.Session, map[string]bool, error) {
+	sessions, err := l.store.List()
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	res := &AttachResult{}
 	var active []*session.Session
@@ -57,18 +88,8 @@ func (l *Launcher) Attach() (*AttachResult, error) {
 		active = append(active, s)
 	}
 	sortByCreation(active)
-	target := focusTarget(active)
 	skip := l.resume(active, res)
-	if target == nil || skip[target.Name] {
-		l.focusHome(res)
-		return res, nil
-	}
-	if _, err := l.Open(Request{Name: target.Name, Resume: ResumeStored}); err != nil {
-		res.Warnings = append(res.Warnings, fmt.Errorf("could not focus %s: %w", target.Name, err))
-		return res, nil
-	}
-	res.Focused = target.Name
-	return res, nil
+	return res, active, skip, nil
 }
 
 // resume relaunches every active session without a live claude window,

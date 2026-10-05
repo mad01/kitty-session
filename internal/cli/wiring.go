@@ -20,6 +20,9 @@ type wiring struct {
 	cfg      *config.Config
 	kitty    *kitty.Client
 	launcher *launcher.Launcher
+	// started is true when ensureWiring had to start the instance. new, open
+	// and tmp then bring the active sessions back before adding their own tab.
+	started bool
 }
 
 // loadConfig reads config.yaml, treating a missing file as no config and any
@@ -42,7 +45,7 @@ func ensureWiring(agent bool) (wiring, error) {
 	if err != nil {
 		return wiring{}, err
 	}
-	c, err := instance.Ensure(cfg, instance.Options{Agent: agent})
+	c, started, err := instance.Ensure(cfg, instance.Options{Agent: agent})
 	if err != nil {
 		return wiring{}, err
 	}
@@ -50,7 +53,7 @@ func ensureWiring(agent bool) (wiring, error) {
 	if err != nil {
 		return wiring{}, err
 	}
-	return wiring{store: store, cfg: cfg, kitty: c, launcher: l}, nil
+	return wiring{store: store, cfg: cfg, kitty: c, launcher: l, started: started}, nil
 }
 
 // offlineWiring never starts the instance. Commands that must work while it

@@ -107,16 +107,17 @@ func Await(cfg *config.Config) (*kitty.Client, error) {
 }
 
 // Ensure returns a client for the instance, starting it when it is not
-// running. A new instance opens with the home tab running `ks sidebar` and is
-// ready once its socket answers.
-func Ensure(cfg *config.Config, opts Options) (*kitty.Client, error) {
+// running, and reports whether it did start one, so the caller can bring the
+// sessions back before adding its own. A new instance opens with the home tab
+// running `ks sidebar` and is ready once its socket answers.
+func Ensure(cfg *config.Config, opts Options) (*kitty.Client, bool, error) {
 	c, err := Client(cfg)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("cannot locate the ks binary: %w", err)
+		return nil, false, fmt.Errorf("cannot locate the ks binary: %w", err)
 	}
 	command := []string{exe, sidebarCommand}
 	if opts.Agent {
@@ -133,34 +134,41 @@ func Ensure(cfg *config.Config, opts Options) (*kitty.Client, error) {
 		timeout: startTimeout,
 		stale:   staleSocket,
 	}
-	if err := withInstanceLock(b.socketPath, func() error { return ensure(c, b) }); err != nil {
-		return nil, err
+	var started bool
+	err = withInstanceLock(b.socketPath, func() error {
+		var err error
+		started, err = ensure(c, b)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
 	}
-	return c, nil
+	return c, started, nil
 }
 
-func ensure(k kittyInstance, b boot) error {
+// ensure pings, starts kitty when nothing answers, and reports whether it did.
+func ensure(k kittyInstance, b boot) (bool, error) {
 	if k.Ping() == nil {
-		return nil
+		return false, nil
 	}
 	if b.stale == nil || b.stale(b.socketPath) {
 		if err := os.Remove(b.socketPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("cannot remove stale socket %s: %w", b.socketPath, err)
+			return false, fmt.Errorf("cannot remove stale socket %s: %w", b.socketPath, err)
 		}
 		// A concurrent ks may have finished starting the instance while we held
 		// the lock; one more ping before we spend a kitty launch.
 		if k.Ping() == nil {
-			return nil
+			return false, nil
 		}
 	}
 	if err := k.Start(b.start); err != nil {
-		return fmt.Errorf("cannot start ks instance: %w", err)
+		return false, fmt.Errorf("cannot start ks instance: %w", err)
 	}
 	if err := awaitPing(k, b.sleep, b.timeout); err != nil {
-		return fmt.Errorf("ks instance did not answer on %s within %s: %w",
+		return false, fmt.Errorf("ks instance did not answer on %s within %s: %w",
 			b.socketPath, b.timeout, err)
 	}
-	return nil
+	return true, nil
 }
 
 // staleSocket reports whether the socket file is safe to remove: it is gone

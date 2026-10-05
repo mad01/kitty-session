@@ -47,6 +47,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	resumeOnFreshStart(cmd, w)
 	res, err := w.launcher.Open(launcher.Request{Name: newName, Dir: dir})
 	if err != nil {
 		return withExistsHint(err, newName)

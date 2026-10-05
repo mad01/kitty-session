@@ -84,3 +84,21 @@ func noteAgentOnRunningInstance(cmd *cobra.Command) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", err)
 	}
 }
+
+// resumeOnFreshStart brings every active session back when the command had
+// to start the instance, before the command adds its own tab: the tabs then
+// keep creation order and the new session comes last. Problems are reported
+// as warnings; the command's own work goes on.
+func resumeOnFreshStart(cmd *cobra.Command, w wiring) {
+	if !w.started {
+		return
+	}
+	res, err := w.launcher.Resume()
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not resume sessions: %v\n", err)
+		return
+	}
+	if res.Resumed+res.Running+len(res.Exited) > 0 {
+		printAttachResult(cmd, res)
+	}
+}

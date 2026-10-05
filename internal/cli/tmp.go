@@ -31,6 +31,7 @@ func runTmp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	resumeOnFreshStart(cmd, w)
 
 	tmpDir, err := launcher.ScratchDir(w.cfg.EffectiveTmpDir())
 	if err != nil {

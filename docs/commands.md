@@ -46,11 +46,11 @@ Create a new session. Fails if a session with the same name already exists.
 Behavior:
 
 1. Reads `~/.config/ks/config.yaml` (a missing file is fine).
-2. Starts the instance if needed.
+2. Starts the instance if needed. A fresh instance first brings every active session back, oldest first and out of sight, so the new session becomes the last tab, the same order bare `ks` produces.
 3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
 4. Creates a tab in the instance running `ks sidebar --session-id <id>`, switches it to the `splits` layout and titles it `<name>`.
-5. Splits claude in beside the sidebar, moves the sidebar to the left edge and resizes it to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
-6. Focuses the claude window.
+5. Splits claude in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
+6. Shows the tab by focusing the claude window.
 7. Writes the kitty IDs and `focused_at` back to the session file.
 
 Claude Code asks whether you trust the files in a folder it has not seen before. The first thing a session in a new directory shows is that dialog; answer it once.
@@ -61,7 +61,7 @@ Claude Code asks whether you trust the files in a folder it has not seen before.
 Usage: ks tmp [-n <name>]
 ```
 
-Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, under `tmpdir` from the config or the OS temp dir. The name defaults to `tmp-<MMDD-HHMM>`, with a random suffix when that is taken. Every scratch directory is new to Claude Code, so each `ks tmp` session opens with the folder-trust dialog.
+Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, under `tmpdir` from the config or the OS temp dir. The name defaults to `tmp-<MMDD-HHMM>`, with a random suffix when that is taken. Every scratch directory is new to Claude Code, so each `ks tmp` session opens with the folder-trust dialog. Like `ks new`, a `ks tmp` that has to start the instance brings the active sessions back first.
 
 ## `ks open <name>`
 
@@ -69,7 +69,7 @@ Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, u
 Usage: ks open <name>
 ```
 
-Focus or recreate the named session. Starts the instance if needed.
+Focus or recreate the named session. Starts the instance if needed; a fresh instance first brings every active session back, oldest first, before this one is opened.
 
 - If the claude window is alive, focus it.
 - If only the sidebar is left (claude exited or was closed), relaunch claude beside it in the same tab.

@@ -58,8 +58,12 @@ func TestEnsureLeavesARunningInstanceAlone(t *testing.T) {
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensure(running, b); err != nil {
+	started, err := ensure(running, b)
+	if err != nil {
 		t.Fatalf("ensure: %v", err)
+	}
+	if started {
+		t.Error("ensure reported a start for a running instance")
 	}
 	if running.started != 0 {
 		t.Errorf("Start called %d times for a running instance", running.started)
@@ -83,8 +87,12 @@ func TestEnsureStartsAndWaitsForTheSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ensure(f, b); err != nil {
+	started, err := ensure(f, b)
+	if err != nil {
 		t.Fatalf("ensure: %v", err)
+	}
+	if !started {
+		t.Error("ensure did not report the start")
 	}
 	if len(f.started) != 1 {
 		t.Fatalf("Start called %d times, want 1", len(f.started))
@@ -112,7 +120,7 @@ func TestEnsureKeepsAWedgedSocket(t *testing.T) {
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensure(f, b); err != nil {
+	if _, err := ensure(f, b); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
 	if _, err := os.Stat(sock); err != nil {
@@ -127,7 +135,7 @@ func TestEnsureGivesUpAfterTheTimeout(t *testing.T) {
 	f := &fakeKitty{untilUp: 1 << 20} // never answers
 	b, _ := newBoot(t, f, 10*startPoll)
 
-	err := ensure(f, b)
+	_, err := ensure(f, b)
 	if err == nil || !strings.Contains(err.Error(), "did not answer") {
 		t.Fatalf("err = %v, want a timeout", err)
 	}
@@ -140,7 +148,7 @@ func TestEnsureReportsAStartFailure(t *testing.T) {
 	f := &fakeKitty{startErr: errors.New("kitty: command not found")}
 	b, _ := newBoot(t, f, time.Second)
 
-	err := ensure(f, b)
+	_, err := ensure(f, b)
 	if err == nil || !strings.Contains(err.Error(), "cannot start ks instance") ||
 		!strings.Contains(err.Error(), "command not found") {
 		t.Fatalf("err = %v, want the start failure wrapped", err)
