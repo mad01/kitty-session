@@ -245,6 +245,9 @@ func TestStart(t *testing.T) {
 		"-o", "macos_quit_when_last_window_closed=yes",
 		"-o", "map ctrl+b>s neighboring_window left",
 		"-o", "map ctrl+b>a neighboring_window right",
+		"-o", "map ctrl+w>w next_window",
+		"-o", "map ctrl+w>h neighboring_window left",
+		"-o", "map ctrl+w>l neighboring_window right",
 		"-o", "font_size=13",
 		"--title", "ks",
 		"--", "/bin/ks", "sidebar",
@@ -253,7 +256,7 @@ func TestStart(t *testing.T) {
 		t.Errorf("Start args = %q, want %q", got, want)
 	}
 	// The package-level lists must not grow with a caller's extras.
-	if len(instanceOverrides) != 6 || len(instanceMaps) != 2 {
+	if len(instanceOverrides) != 6 || len(instanceMaps) != 5 {
 		t.Errorf("instance settings mutated: %v %v", instanceOverrides, instanceMaps)
 	}
 }

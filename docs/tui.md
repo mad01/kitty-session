@@ -68,7 +68,7 @@ Rows are ordered by state in the order of the table above, then by the state fil
 
 ### Between the sidebar and claude
 
-`l`, `tab` or `q` move the keyboard to the claude window of the tab you are in. From claude, the kitty chord `ctrl+b` then `s` moves it back to the sidebar, and `ctrl+b` then `a` returns to the agent. The chords are plain kitty mappings (`neighboring_window left` / `right`) the instance starts with, so they work in every tab. Claude Code also uses `ctrl+b` on its own, to move a running task to the background; inside the instance kitty takes the key first.
+`l`, `tab` or `q` move the keyboard to the claude window of the tab you are in. From claude, the kitty chord `ctrl+b` then `s` moves it back to the sidebar, and `ctrl+b` then `a` returns to the agent. The vim-style chords work too: `ctrl+w` then `w` cycles to the next window, `ctrl+w` then `h` or `l` moves left or right. The chords are plain kitty mappings (`neighboring_window left` / `right`, `next_window`) the instance starts with, so they work in every tab. Claude Code also uses `ctrl+b` on its own, to move a running task to the background, and `ctrl+w` deletes a word in its prompt and in a shell; inside the instance kitty takes both keys first.
 
 ## Mouse
 

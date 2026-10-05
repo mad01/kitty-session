@@ -52,7 +52,9 @@ func TestKeysPopupFitsWidth36(t *testing.T) {
 			t.Errorf("keys row %q missing or cut:\n%s", row, strings.Join(got, "\n"))
 		}
 	}
-	if !contains(got, "ctrl+b s  sidebar") || !contains(got, "ctrl+b a  agent") {
-		t.Errorf("kitty chords missing:\n%s", strings.Join(got, "\n"))
+	for _, chord := range []string{"ctrl+b s", "ctrl+b a", "ctrl+w w", "ctrl+w h/l"} {
+		if !contains(got, chord+" ") {
+			t.Errorf("kitty chord %q missing:\n%s", chord, strings.Join(got, "\n"))
+		}
 	}
 }

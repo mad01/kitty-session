@@ -8,7 +8,7 @@ type keyHelp struct {
 	action string
 }
 
-// keyHelps is the keys popup, top to bottom. The last two rows are the
+// keyHelps is the keys popup, top to bottom. The last four rows are the
 // kitty chords that move the keyboard between the sidebar and claude.
 var keyHelps = []keyHelp{
 	{"j/k ↑↓", "move"},
@@ -25,10 +25,13 @@ var keyHelps = []keyHelp{
 	{"?", "keys"},
 	{"ctrl+b s", "sidebar"},
 	{"ctrl+b a", "agent"},
+	{"ctrl+w w", "next window"},
+	{"ctrl+w h/l", "left/right"},
 }
 
-// keyColumn is the width of the key column in the keys popup.
-const keyColumn = 10
+// keyColumn is the width of the key column in the keys popup: the widest
+// key plus two cells.
+const keyColumn = 12
 
 // keysLines renders the two-column table the keys popup shows.
 func keysLines() []string {
