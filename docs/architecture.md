@@ -21,6 +21,7 @@ cmd/ks
         │     ├── internal/kitty
         │     └── internal/repo/config
         ├── internal/hooks          ks hook groups in ~/.claude/settings.json
+        ├── internal/herdr          herdr's session.json: parse, flatten to claude agents, daemon check
         ├── internal/procinfo       process parent/comm lookup (hook's nested-claude guard)
         ├── internal/kitty
         ├── internal/session
@@ -38,6 +39,7 @@ cmd/ks
 | `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Attach()`, `Alive(sess)`. `SuggestName(dir)` (base name plus git branch) and `ScratchDir(base)`. `SidebarBackend` maps the sidebar's actions onto all of that and resolves each row's state (below). Layout and teardown sit behind a small backend interface so tests run without kitty. |
 | `internal/sidebar` | The agent list: model, view, key and mouse handling, menu, picker, demo backend. `Run(Options{Session, Width, Backend})`. Polls `Backend.List` every 3 s. |
 | `internal/hooks` | `Install`, `Uninstall` and `Installed` for the five ks matcher groups in `~/.claude/settings.json`; other tools' entries are kept. |
+| `internal/herdr` | `Load(path)` parses herdr's `session.json` (format version 3 only), `Agents()` flattens workspaces, tabs and panes into the claude panes ks can import plus the skipped ones with a reason, `Running(dir)` dials `herdr.sock` to tell whether herdr still owns them. Stdlib only; `ks import` does the wiring. |
 | `internal/procinfo` | `ParentOf(pid)` and `CommOf(pid)` via the darwin `kern.proc.pid` sysctl; `ErrUnsupported` elsewhere. Used by the hook to tell the Claude kitty launched from one nested inside the session. |
 | `internal/kitty` | `Client`: every `kitty @` call against one `--to` socket; `Start` runs the kitty binary itself. Parses `@ ls` JSON into `Window` values. No knowledge of sessions beyond `SessionVar`, the user variable that tags ks windows. |
 | `internal/session` | `Session` struct and `Store` (save/load/list/delete/rename/restore) backed by `~/.config/ks/sessions/`. |
