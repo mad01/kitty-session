@@ -18,7 +18,7 @@ Attach. Starts the instance if its socket does not answer. Resumes every active 
 ks: 2 resumed, 1 already running, 1 stopped
 ```
 
-Sessions that fail to resume are reported as warnings on stderr; the attach continues past them. Running `ks` while everything is already up is a no-op apart from the focus.
+Sessions that fail to resume are reported as warnings on stderr; the attach continues past them. Two seconds after the last launch every relaunched claude window is checked again; one that is gone is not counted as resumed and gets its own line, `ks: <name> exited right after launch`. Running `ks` while everything is already up is a no-op apart from the focus.
 
 ### Flags
 
@@ -49,9 +49,19 @@ Behavior:
 2. Starts the instance if needed.
 3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
 4. Creates a tab in the instance running `ks sidebar --session <name>`, switches it to the `splits` layout and titles it `<name>`.
-5. Splits claude in beside the sidebar, moves the sidebar to the left edge and resizes it to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`.
+5. Splits claude in beside the sidebar, moves the sidebar to the left edge and resizes it to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
 6. Focuses the claude window.
 7. Writes the kitty IDs and `focused_at` back to the session file.
+
+Claude Code asks whether you trust the files in a folder it has not seen before. The first thing a session in a new directory shows is that dialog; answer it once.
+
+## `ks tmp`
+
+```
+Usage: ks tmp [-n <name>]
+```
+
+Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, under `tmpdir` from the config or the OS temp dir. The name defaults to `tmp-<MMDD-HHMM>`, with a random suffix when that is taken. Every scratch directory is new to Claude Code, so each `ks tmp` session opens with the folder-trust dialog.
 
 ## `ks open <name>`
 
@@ -63,7 +73,7 @@ Focus or recreate the named session. Starts the instance if needed.
 
 - If the claude window is alive, focus it.
 - If only the sidebar is left (claude exited or was closed), relaunch claude beside it in the same tab.
-- Otherwise close whatever tab the session still owns and create the tab again. Claude starts with `--resume <id>` when the record has a `claude_session_id` whose transcript still exists, else with `--continue`. The new kitty IDs are written back to the session file.
+- Otherwise close whatever tab the session still owns and create the tab again. Claude starts with `--resume <id>` when the record has a `claude_session_id` whose transcript still exists, with `--continue` when the directory has any Claude transcript, and bare otherwise. A `--continue` with nothing to continue makes claude exit at once. The new kitty IDs are written back to the session file.
 
 ## `ks close <name>`
 

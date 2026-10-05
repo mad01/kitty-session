@@ -38,7 +38,7 @@ cmd/ks
 | Package | Responsibility |
 |---|---|
 | `internal/instance` | `Ensure(cfg, opts)` pings the configured socket. When nothing answers it removes the stale socket file, runs `kitty --detach --listen-on <socket> -o ...` with `ks sidebar` as the first window, and polls until the socket answers (100 ms, up to 10 s). `Connect` for commands that must not start it; `Client` for commands that must work while it is down; `Shutdown` closes every window. |
-| `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude`, `claude --resume <id>`, or `claude --continue`), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Attach()`, `Alive(sess)`. Layout and teardown sit behind a small backend interface so tests run without kitty. |
+| `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Attach()`, `Alive(sess)`. Layout and teardown sit behind a small backend interface so tests run without kitty. |
 | `internal/procinfo` | `ParentOf(pid)` and `CommOf(pid)` via the darwin `kern.proc.pid` sysctl; `ErrUnsupported` elsewhere. Used by the hook to tell the Claude kitty launched from one nested inside the session. |
 | `internal/kitty` | `Client`: every `kitty @` call against one `--to` socket; `Start` runs the kitty binary itself. Parses `@ ls` JSON into `Window` values. No knowledge of sessions beyond `SessionVar`, the user variable that tags ks windows. |
 | `internal/session` | `Session` struct and `Store` (save/load/list/delete/rename/restore) backed by `~/.config/ks/sessions/`. |
@@ -112,14 +112,14 @@ cli.runNew / cli.runTmp / cli.runOpen / tui createSession / tui openSession
           │     ├── SetTabTitleForWindow(name, sidebar)
           │     ├── measure the sidebar: it spans the tab, so its columns are the tab width
           │     ├── LaunchVSplit(sidebar, bias)       bias = (width - sidebar_width) / width
-          │     │     -- claude [--resume <id> if its transcript exists | --continue]
-          │     ├── LayoutAction(sidebar, move_to_screen_edge left)     (failure = warning)
+          │     │     -- claude [--resume <id> if its transcript exists | --continue if the dir has any transcript | bare]
+          │     ├── FocusWindow(sidebar); LayoutAction(move_to_screen_edge left)   acts on the active window (failure = warning)
           │     ├── pin: ResizeWindow(sidebar, horizontal, sidebar_width - columns), twice at most
           │     └── FocusWindow(claude)                                (failure = warning)
           └── store.Load(name), copy the kitty IDs and focused_at, store.Save
 ```
 
-The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the TUI drops them.
+The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. Every launch also passes `--env NAME` without a value for the agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`), which unsets them in the child; `Client.Start` already drops every `CLAUDE*`, `KS_*` and `KITTY_*` variable except `KITTY_CONFIG_DIRECTORY` from the instance's own environment. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the TUI drops them.
 
 Closing is the mirror image. `ks close` and the TUI close/delete actions call `Launcher.Close(sess, keep)`. It removes the state file, closes every tab holding a window tagged with the session id, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`. An instance that cannot be reached is a warning; the record is handled regardless.
 
@@ -136,6 +136,7 @@ cli.runAttach
           ├── target = the active record with the newest focused_at (first by name if none)
           ├── for each active record: Alive? → counted as running
           │                           else  → Open(ResumeStored), 100 ms apart
+          ├── wait 2 s, re-check every launched claude window: gone again → Exited, else Resumed
           ├── Open(target, ResumeStored)     now alive, so this focuses and stamps focused_at
           │   (no active record → focus the home tab's sidebar)
           └── print `ks: N resumed, N already running, N stopped`
@@ -169,14 +170,14 @@ detectSessionState(sess):
 
 | Method | Wraps |
 |---|---|
-| `Start(opts)` | `kitty --detach --listen-on <socket> -o allow_remote_control=yes -o tab_bar_style=hidden -o window_border_width=0 -o window_margin_width=0 -o window_padding_width=3 -o macos_quit_when_last_window_closed=yes [-o <override>...] --title ks -- <command>` |
+| `Start(opts)` | `kitty --detach --listen-on <socket> -o allow_remote_control=yes -o tab_bar_style=hidden -o window_border_width=0 -o window_margin_width=0 -o window_padding_width=3 -o macos_quit_when_last_window_closed=yes [-o <override>...] --title ks -- <command>`, with the caller's environment minus `CLAUDE*`, `KS_*`, `KITTY_*` (keeping `KITTY_CONFIG_DIRECTORY`) |
 | `Ping()` | `ls`, 2 s timeout |
 | `Windows()` | `ls`, parsed into `Window{ID, TabID, TabTitle, Title, Columns, SessionID}` |
 | `AnyWindow`, `TabExists`, `WindowExists`, `FindTabForWindow`, `WindowColumns`, `WindowTitle` | Walk one `Windows()` snapshot |
-| `LaunchTab(Launch)` | `launch --type=tab --match=id:<win> --cwd=<dir> --env K=V... --var K=V... -- <command>` |
+| `LaunchTab(Launch)` | `launch --type=tab --match=id:<win> --cwd=<dir> --env <marker>... --env K=V... --var K=V... -- <command>` (a bare `--env NAME` unsets) |
 | `LaunchVSplit(Launch)` | `launch --type=window --location=vsplit --bias=<n> --match=id:<win> --cwd=<dir> --env ... --var ... -- <command>` |
 | `GotoLayout(win, layout)` | `goto-layout --match=id:<win> <layout>` |
-| `LayoutAction(win, args...)` | `action --match=id:<win> layout_action <args...>` |
+| `LayoutAction(win, args...)` | `action --match=id:<win> layout_action <args...>`; kitty applies it to the tab's active window, so focus first |
 | `ResizeWindow(win, axis, n)` | `resize-window --match=id:<win> --axis=<axis> --increment=<n>` |
 | `FocusWindow(win)` | `focus-window --match=id:<win>` |
 | `SetTabTitleForWindow(title, win)` | `set-tab-title --match=id:<win> <title>` |

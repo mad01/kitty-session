@@ -45,7 +45,7 @@ Tildes are expanded. See [Configuration](configuration.md) for `tmpdir`, `kitty_
 ks new -n demo -d ~/code/src/github.com/you/demo
 ```
 
-A kitty window titled `ks` appears: that is the instance. It holds a home tab and a `demo` tab. The tab is split in two: the sidebar on the left (the `ks` TUI, 36 cells wide) and Claude Code on the right, started in the chosen directory. There is no tab bar; the sidebar is the tab list.
+A kitty window titled `ks` appears: that is the instance. It holds a home tab and a `demo` tab. The tab is split in two: the sidebar on the left (the `ks` TUI, 36 cells wide) and Claude Code on the right, started in the chosen directory. There is no tab bar; the sidebar is the tab list. The first time Claude Code runs in a directory it asks whether you trust the folder; answer once.
 
 You can also start from the TUI. Run `ks`, and in the home tab's sidebar:
 

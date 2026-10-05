@@ -27,11 +27,9 @@ Fix: install [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
 
 Symptom: the tab comes back with the sidebar only; `ks list` says `stopped`.
 
-Cause: the session had no conversation to continue. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists. Otherwise it starts `claude --continue`. With nothing to continue Claude prints `No conversation found` and exits, and kitty closes the window. Sessions that never received a message, or whose transcript Claude Code purged (30 days by default), behave like this.
+Bare `ks` reports this as `ks: <name> exited right after launch`. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists, `claude --continue` when the directory has any transcript, and a bare `claude` otherwise. A missing conversation is not the cause. Look at what Claude printed before the window closed: `ks open <name>` again puts a fresh claude beside the surviving sidebar, and the message is visible for a moment. Usual causes are a `claude` that is not on the `PATH` of the shell you ran `ks` from, or a transcript Claude Code purged between the `ls` check and the start.
 
-Fix: `ks open <name>` again puts a fresh claude beside the surviving sidebar. Type something before you `ks quit` next time.
-
-A second cause: the instance was started from inside a Claude Code session and inherited its `CLAUDE_CODE_*` variables, which turns every claude in it into a child session with transcript saving off. `ks quit`, then start the instance from a plain shell.
+Older `ks` builds passed the environment of a Claude Code session straight into the instance. That turned every claude in it into a child session with transcript saving off, and the footer said so. Current builds scrub those variables; if you still see that footer, `ks quit` and start the instance with the new binary.
 
 ## Session shows `stopped` but its tab is still open
 

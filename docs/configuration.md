@@ -33,7 +33,7 @@ Base directory used by `ks tmp` and the `tmp` entry at the top of the repo picke
 
 When unset, the OS temp directory is used (`/tmp` on Linux, `/var/folders/...` on macOS). Those paths get cleaned up periodically. Setting `tmpdir: ~/.config/ks/claude-session-workspaces` keeps your scratch workspaces in a predictable, persistent location.
 
-The directory is created if it doesn't exist.
+The directory is created if it doesn't exist. Claude Code shows its folder-trust dialog the first time it runs in a directory, so every scratch session opens with that prompt.
 
 ### `kitty_socket`
 
