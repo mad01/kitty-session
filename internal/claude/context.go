@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,22 +19,47 @@ type entry struct {
 	IsSidechain bool      `json:"isSidechain"`
 }
 
-// encodePath converts an absolute directory path to the encoding Claude uses
-// for its projects directory: replace / with - and trim the leading -.
+// encodePath converts a directory path to the name Claude Code gives its
+// projects directory: every character outside [A-Za-z0-9] becomes "-", so
+// /Users/u/.config/x is -Users-u--config-x. The leading dash is kept.
 func encodePath(dir string) string {
-	return strings.TrimLeft(strings.ReplaceAll(dir, "/", "-"), "-")
+	return strings.Map(func(r rune) rune {
+		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
+			return r
+		}
+		return '-'
+	}, dir)
+}
+
+// projectDir returns the directory under ~/.claude/projects that Claude Code
+// keeps for sessions started in dir.
+func projectDir(dir string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude", "projects", encodePath(dir)), nil
+}
+
+// TranscriptPath returns where Claude Code stores the transcript of session
+// sessionID started in dir. Claude Code deletes transcripts after its cleanup
+// period, so the file's presence tells whether claude --resume can still work.
+func TranscriptPath(dir, sessionID string) (string, error) {
+	project, err := projectDir(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(project, sessionID+".jsonl"), nil
 }
 
 // LatestPrompt returns the firstPrompt from the most recently modified
 // non-sidechain session for the given working directory. Returns "" on any error.
 func LatestPrompt(dir string) string {
-	home, err := os.UserHomeDir()
+	project, err := projectDir(dir)
 	if err != nil {
 		return ""
 	}
-
-	indexPath := filepath.Join(home, ".claude", "projects", encodePath(dir), "sessions-index.json")
-	return latestPromptFromFile(indexPath)
+	return latestPromptFromFile(filepath.Join(project, "sessions-index.json"))
 }
 
 // latestPromptFromFile reads a sessions-index.json file and returns the
