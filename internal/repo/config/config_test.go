@@ -3,23 +3,32 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoadFrom(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - /tmp/repos\n  - /tmp/other\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
+// writeConfig writes body as a config.yaml in a temp dir and returns its path.
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
 
-	cfg, err := LoadFrom(cfgPath)
+// load parses body and fails the test on error.
+func load(t *testing.T, body string) *Config {
+	t.Helper()
+	cfg, err := LoadFrom(writeConfig(t, body))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("LoadFrom: %v", err)
 	}
+	return cfg
+}
 
+func TestLoadFrom(t *testing.T) {
+	cfg := load(t, "dirs:\n  - /tmp/repos\n  - /tmp/other\n")
 	if len(cfg.Dirs) != 2 {
 		t.Fatalf("expected 2 dirs, got %d", len(cfg.Dirs))
 	}
@@ -32,19 +41,7 @@ func TestLoadFrom(t *testing.T) {
 }
 
 func TestLoadFromTildeExpansion(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - ~/code/repos\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	cfg := load(t, "dirs:\n  - ~/code/repos\n")
 	home, _ := os.UserHomeDir()
 	expected := filepath.Join(home, "code/repos")
 	if cfg.Dirs[0] != expected {
@@ -60,167 +57,121 @@ func TestLoadFromMissingFile(t *testing.T) {
 }
 
 func TestLoadFromInvalidYAML(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("not: [valid: yaml: {{{\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := LoadFrom(cfgPath)
+	_, err := LoadFrom(writeConfig(t, "not: [valid: yaml: {{{\n"))
 	if err == nil {
 		t.Error("expected error for invalid YAML")
 	}
 }
 
-func TestEffectiveLayoutDefault(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - /tmp/repos\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got := cfg.EffectiveLayout(); got != LayoutSplit {
-		t.Errorf("expected %q, got %q", LayoutSplit, got)
+// TestLoadFromLegacyKeys: layout and summary no longer do anything, but a
+// config written for an older ks must still load.
+func TestLoadFromLegacyKeys(t *testing.T) {
+	cfg := load(t, "dirs:\n  - /tmp/repos\nlayout: tab\nsummary: true\n")
+	if cfg.Layout != "tab" || !cfg.Summary {
+		t.Errorf("legacy keys not parsed: layout %q summary %v", cfg.Layout, cfg.Summary)
 	}
 }
 
-func TestEffectiveLayoutTab(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
+func TestSocket(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	defaultSock := "unix:" + filepath.Join(home, ".config", "ks", "kitty.sock")
 
-	content := []byte("dirs:\n  - /tmp/repos\nlayout: tab\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got := cfg.EffectiveLayout(); got != LayoutTab {
-		t.Errorf("expected %q, got %q", LayoutTab, got)
-	}
-}
-
-func TestEffectiveLayoutInvalid(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - /tmp/repos\nlayout: invalid\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got := cfg.EffectiveLayout(); got != LayoutSplit {
-		t.Errorf("expected %q for invalid layout, got %q", LayoutSplit, got)
-	}
-}
-
-func TestEffectiveLayoutNilConfig(t *testing.T) {
-	var cfg *Config
-	if got := cfg.EffectiveLayout(); got != LayoutSplit {
-		t.Errorf("expected %q for nil config, got %q", LayoutSplit, got)
-	}
-}
-
-func TestSummaryEnabled(t *testing.T) {
 	tests := []struct {
-		name     string
-		yaml     string
-		expected bool
+		name string
+		cfg  *Config // nil means "no config file"
+		yaml string
+		want string
 	}{
-		{"default (no summary)", "dirs:\n  - /tmp\n", false},
-		{"summary false", "dirs:\n  - /tmp\nsummary: false\n", false},
-		{"summary true split layout", "dirs:\n  - /tmp\nsummary: true\n", false},
-		{"summary true tab layout", "dirs:\n  - /tmp\nlayout: tab\nsummary: true\n", true},
-		{"summary false tab layout", "dirs:\n  - /tmp\nlayout: tab\nsummary: false\n", false},
+		{"nil config uses the default", nil, "", defaultSock},
+		{"unset uses the default", nil, "dirs:\n  - /tmp\n", defaultSock},
+		{"absolute path is prefixed", nil, "kitty_socket: /run/ks.sock\n", "unix:/run/ks.sock"},
+		{
+			"tilde is expanded",
+			nil,
+			"kitty_socket: ~/.cache/ks.sock\n",
+			"unix:" + filepath.Join(home, ".cache", "ks.sock"),
+		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmp := t.TempDir()
-			cfgPath := filepath.Join(tmp, "config.yaml")
-			if err := os.WriteFile(cfgPath, []byte(tt.yaml), 0o644); err != nil {
-				t.Fatal(err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tc.cfg
+			if tc.yaml != "" {
+				cfg = load(t, tc.yaml)
 			}
-			cfg, err := LoadFrom(cfgPath)
+			got, err := cfg.Socket()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("Socket: %v", err)
 			}
-			if got := cfg.SummaryEnabled(); got != tt.expected {
-				t.Errorf("SummaryEnabled() = %v, want %v", got, tt.expected)
+			if got != tc.want {
+				t.Errorf("Socket() = %q, want %q", got, tc.want)
+			}
+			if SocketPath(got) != strings.TrimPrefix(tc.want, "unix:") {
+				t.Errorf("SocketPath(%q) = %q", got, SocketPath(got))
 			}
 		})
 	}
 }
 
+func TestEffectiveSidebarWidth(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string // "" means nil config
+		want int
+	}{
+		{"nil config", "", DefaultSidebarWidth},
+		{"unset", "dirs:\n  - /tmp\n", DefaultSidebarWidth},
+		{"configured", "sidebar_width: 48\n", 48},
+		{"below the minimum is raised", "sidebar_width: 5\n", MinSidebarWidth},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg *Config
+			if tc.yaml != "" {
+				cfg = load(t, tc.yaml)
+			}
+			if got := cfg.EffectiveSidebarWidth(); got != tc.want {
+				t.Errorf("EffectiveSidebarWidth() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOverrides(t *testing.T) {
+	var nilCfg *Config
+	if got := nilCfg.Overrides(); got != nil {
+		t.Errorf("nil config Overrides() = %v, want nil", got)
+	}
+	cfg := load(t, "kitty_overrides:\n  - font_size=13\n  - background_opacity=0.9\n")
+	want := []string{"font_size=13", "background_opacity=0.9"}
+	if got := cfg.Overrides(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Overrides() = %v, want %v", got, want)
+	}
+}
+
+func TestOverridesRejectNonAssignment(t *testing.T) {
+	_, err := LoadFrom(writeConfig(t, "kitty_overrides:\n  - font_size\n"))
+	if err == nil || !strings.Contains(err.Error(), "key=value") {
+		t.Fatalf("err = %v, want a key=value complaint", err)
+	}
+}
+
 func TestEffectiveTmpDirDefault(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - /tmp/repos\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	cfg := load(t, "dirs:\n  - /tmp/repos\n")
 	if got := cfg.EffectiveTmpDir(); got != "" {
 		t.Errorf("expected empty string for default tmpdir, got %q", got)
 	}
 }
 
 func TestEffectiveTmpDirCustom(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - /tmp/repos\ntmpdir: /custom/workspaces\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	cfg := load(t, "dirs:\n  - /tmp/repos\ntmpdir: /custom/workspaces\n")
 	if got := cfg.EffectiveTmpDir(); got != "/custom/workspaces" {
 		t.Errorf("expected /custom/workspaces, got %q", got)
 	}
 }
 
 func TestEffectiveTmpDirTilde(t *testing.T) {
-	tmp := t.TempDir()
-	cfgPath := filepath.Join(tmp, "config.yaml")
-
-	content := []byte("dirs:\n  - /tmp/repos\ntmpdir: ~/.config/ks/workspaces\n")
-	if err := os.WriteFile(cfgPath, content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadFrom(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	cfg := load(t, "dirs:\n  - /tmp/repos\ntmpdir: ~/.config/ks/workspaces\n")
 	home, _ := os.UserHomeDir()
 	expected := filepath.Join(home, ".config/ks/workspaces")
 	if got := cfg.EffectiveTmpDir(); got != expected {
@@ -232,13 +183,6 @@ func TestEffectiveTmpDirNilConfig(t *testing.T) {
 	var cfg *Config
 	if got := cfg.EffectiveTmpDir(); got != "" {
 		t.Errorf("expected empty string for nil config, got %q", got)
-	}
-}
-
-func TestSummaryEnabledNilConfig(t *testing.T) {
-	var cfg *Config
-	if cfg.SummaryEnabled() {
-		t.Error("expected SummaryEnabled() = false for nil config")
 	}
 }
 
