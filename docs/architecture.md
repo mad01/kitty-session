@@ -109,16 +109,15 @@ cli.runNew / cli.runTmp / cli.runOpen / SidebarBackend.New / SidebarBackend.Focu
           ├── env for both windows: PATH, KS_SESSION_NAME, KS_SESSION_ID; var KS_SESSION_ID
           ├── launchTopology
           │     ├── anchor = first window in the instance
-          │     ├── LaunchTab(anchor, dir, `ks sidebar --session-id <id>`)  → sidebar window
+          │     ├── LaunchTab(anchor, dir, `ks sidebar --session-id <id>`)  → sidebar window, keep-focus: the tab stays hidden
           │     ├── GotoLayout(sidebar, splits)       a new tab opens in `fat`, which ignores vsplit
           │     ├── SetTabTitleForWindow(name, sidebar)
           │     ├── measure the sidebar: it spans the tab, so its columns are the tab width
-          │     ├── LaunchVSplit(sidebar, bias)       bias = (width - sidebar_width) / width
+          │     ├── LaunchVSplit(sidebar, bias)       bias = (width - sidebar_width) / width; keep-focus, claude lands on the right
           │     │     -- claude [--resume <id> if its transcript exists | --continue if the dir has any transcript | bare]
-          │     ├── FocusWindow(sidebar); LayoutAction(move_to_screen_edge left)   acts on the active window (failure = warning)
-          │     ├── pin: ResizeWindow(sidebar, horizontal, sidebar_width - columns), twice at most
-          │     └── FocusWindow(claude)                                (failure = warning)
-          └── store.Load(name), copy the kitty IDs and focused_at, store.Save
+          │     └── pin: ResizeWindow(sidebar, horizontal, sidebar_width - columns), twice at most
+          ├── store.Load(name), copy the kitty IDs and focused_at, store.Save
+          └── FocusWindow(claude)   the one visible switch (failure = warning); skipped for Request.Background, which attach uses
 ```
 
 The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. Every launch also passes `--env NAME` without a value for the agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`), which unsets them in the child; `Client.Start` already drops the Claude Code session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_EFFORT`) and every `KS_*` and `KITTY_*` variable except `KITTY_CONFIG_DIRECTORY` from the instance's own environment, leaving the user's `CLAUDE_CONFIG_DIR`, Bedrock and Vertex flags and auth tokens in place. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the sidebar backend drops them, since the UI has one status line and the action itself succeeded.
@@ -184,7 +183,6 @@ SidebarBackend.List():
 | `LaunchVSplit(Launch)` | `launch --type=window --location=vsplit --bias=<n> --match=id:<win> --cwd=<dir> --env ... --var ... -- <command>` |
 | `LaunchHSplit(Launch)` | `launch --type=window --location=hsplit --bias=<n> --match=id:<win> --next-to=id:<win> --cwd=<dir> ...`; `--next-to` names the window to split (kitty otherwise splits the tab's active window, the sidebar), `--match` picks the tab (without it kitty ignores `--next-to`) |
 | `GotoLayout(win, layout)` | `goto-layout --match=id:<win> <layout>` |
-| `LayoutAction(win, args...)` | `action --match=id:<win> layout_action <args...>`; kitty applies it to the tab's active window, so focus first |
 | `ResizeWindow(win, axis, n)` | `resize-window --match=id:<win> --axis=<axis> --increment=<n>` |
 | `FocusWindow(win)` | `focus-window --match=id:<win>` |
 | `SetTabTitleForWindow(title, win)` | `set-tab-title --match=id:<win> <title>` |
@@ -193,7 +191,7 @@ SidebarBackend.List():
 | `CloseAll()` | `close-window --match=all` |
 | `GetText(win)` | `get-text --match=id:<win>` |
 
-The launcher only needs `Windows`, the three launches, `GotoLayout`, `LayoutAction`, `ResizeWindow`, `SetTabTitleForWindow`, `FocusWindow` and `CloseTab`; that is its backend interface, and the test fake implements it with an in-memory window table.
+The launcher only needs `Windows`, the three launches, `GotoLayout`, `ResizeWindow`, `SetTabTitleForWindow`, `FocusWindow` and `CloseTab`; that is its backend interface, and the test fake implements it with an in-memory window table.
 
 ## Adding a subcommand
 

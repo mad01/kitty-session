@@ -51,6 +51,9 @@ type Request struct {
 	Dir string
 	// Resume selects how claude starts.
 	Resume ResumeMode
+	// Background leaves a newly built tab hidden instead of showing it.
+	// Attach uses it to bring every session back and then focus one.
+	Background bool
 }
 
 // Result reports what Open did.
@@ -96,8 +99,9 @@ func newLauncher(store *session.Store, b backend, sidebarWidth int, exe string) 
 }
 
 // Open creates a new session or focuses/reopens a stored one, then saves the
-// record. Either way the home tab is retired afterwards: a session tab now
-// exists to hold the instance up.
+// record. A tab is built hidden and shown with one focus switch at the end,
+// which req.Background skips. Either way the home tab is retired afterwards:
+// a session tab now exists to hold the instance up.
 func (l *Launcher) Open(req Request) (*Result, error) {
 	sess, err := l.target(req)
 	if err != nil {
@@ -136,8 +140,20 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 		return nil, err
 	}
 	warnings = append(warnings, w.warnings...)
+	if !req.Background {
+		warnings = append(warnings, l.show(w.claudeID)...)
+	}
 	warnings = append(warnings, l.retireHome()...)
 	return &Result{Session: saved, Warnings: warnings}, nil
+}
+
+// show brings a freshly built tab to the front by focusing its claude window:
+// the one switch the user sees, after the layout has settled out of sight.
+func (l *Launcher) show(claudeID int) []error {
+	if err := l.kitty.FocusWindow(claudeID); err != nil {
+		return []error{fmt.Errorf("could not focus claude window: %w", err)}
+	}
+	return nil
 }
 
 // launch lays the session out: claude beside a surviving sidebar, or a

@@ -91,7 +91,7 @@ func (l *Launcher) resume(active []*session.Session, res *AttachResult) map[stri
 			l.sleep(attachStagger)
 		}
 		attempts++
-		r, err := l.Open(Request{Name: s.Name, Resume: ResumeStored})
+		r, err := l.Open(Request{Name: s.Name, Resume: ResumeStored, Background: true})
 		if err != nil {
 			skip[s.Name] = true
 			res.Warnings = append(res.Warnings, fmt.Errorf("could not resume %s: %w", s.Name, err))

@@ -17,7 +17,6 @@ type backend interface {
 	LaunchVSplit(kitty.Launch) (int, error)
 	LaunchHSplit(kitty.Launch) (int, error)
 	GotoLayout(windowID int, layout string) error
-	LayoutAction(windowID int, args ...string) error
 	ResizeWindow(windowID int, axis string, increment int) error
 	SetTabTitleForWindow(title string, windowID int) error
 	FocusWindow(windowID int) error
@@ -36,8 +35,6 @@ const (
 	// width. Splits are fractions and kitty rounds a resize, so the first
 	// pass can leave a cell; the second corrects it.
 	pinPasses = 2
-	// sidebarEdge is where the sidebar sits in the tab.
-	sidebarEdge = "left"
 	// homeTitle is the tab title of the home tab: kitty's first tab, and the
 	// one closeTabs recreates before the last session tab goes.
 	homeTitle = "ks"
@@ -171,8 +168,10 @@ func (l *Launcher) anyWindow() (int, error) {
 
 // launchTopology lays out one session as a tab in the instance: a sidebar
 // window running `ks sidebar` on the left and claude on the right. The tab
-// is created in the first enabled layout, so it is switched to splits before
-// the vertical split, otherwise kitty ignores the location.
+// is built behind the current one (every launch keeps the keyboard where it
+// is) so the user sees it only once it has settled; Open shows it. A new tab
+// opens in the first enabled layout, so it is switched to splits before the
+// vertical split, otherwise kitty ignores the location.
 func (l *Launcher) launchTopology(p plan) (windows, error) {
 	var w windows
 	anchor, err := l.anyWindow()
@@ -181,6 +180,7 @@ func (l *Launcher) launchTopology(p plan) (windows, error) {
 	}
 	w.sidebarID, err = l.kitty.LaunchTab(kitty.Launch{
 		Match: anchor, Dir: p.dir, Env: p.env, Vars: p.vars, Command: p.sidebarCmd,
+		KeepFocus: true,
 	})
 	if err != nil {
 		return w, fmt.Errorf("cannot create tab: %w", err)
@@ -212,37 +212,22 @@ func (l *Launcher) relaunchClaude(p plan, sidebar kitty.Window) (windows, error)
 	return w, err
 }
 
-// splitClaude launches claude beside the sidebar and settles the geometry:
-// sidebar on the left edge at its configured width, focus on claude. The
+// splitClaude launches claude beside the sidebar and pins the sidebar's
+// width, both out of sight: the launch keeps the keyboard where it is, and
+// kitty lays out and resizes hidden tabs all the same. From the sidebar,
+// --location=vsplit puts claude on the right, so no layout action is needed;
+// one aimed at a hidden tab would act on the visible tab instead. The
 // sidebar spans the tab when this runs, so its width is the tab's width.
-// Geometry and focus failures are warnings; the session works without them.
+// Geometry failures are warnings; the session works without them.
 func (l *Launcher) splitClaude(p plan, sidebar kitty.Window) (int, []error, error) {
 	claudeID, err := l.kitty.LaunchVSplit(kitty.Launch{
 		Match: sidebar.ID, Dir: p.dir, Bias: l.claudeBias(sidebar.Columns),
-		Env: p.env, Vars: p.vars, Command: p.claudeCmd,
+		Env: p.env, Vars: p.vars, Command: p.claudeCmd, KeepFocus: true,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("cannot create claude window: %w", err)
 	}
-	warnings := l.moveSidebarLeft(sidebar.ID)
-	warnings = append(warnings, l.pinSidebar(sidebar.ID)...)
-	if err := l.kitty.FocusWindow(claudeID); err != nil {
-		warnings = append(warnings, fmt.Errorf("could not focus claude window: %w", err))
-	}
-	return claudeID, warnings, nil
-}
-
-// moveSidebarLeft puts the sidebar on the tab's left edge. Kitty applies a
-// layout_action to the tab's active window, which right after the split is
-// claude, so the sidebar is focused first; splitClaude hands focus back.
-func (l *Launcher) moveSidebarLeft(sidebarID int) []error {
-	if err := l.kitty.FocusWindow(sidebarID); err != nil {
-		return []error{fmt.Errorf("could not focus sidebar to move it: %w", err)}
-	}
-	if err := l.kitty.LayoutAction(sidebarID, "move_to_screen_edge", sidebarEdge); err != nil {
-		return []error{fmt.Errorf("could not move sidebar to the left: %w", err)}
-	}
-	return nil
+	return claudeID, l.pinSidebar(sidebar.ID), nil
 }
 
 // claudeBias returns claude's share of a tab totalColumns wide, in percent,

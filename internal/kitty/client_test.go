@@ -76,11 +76,6 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 			[]string{"goto-layout", "--match=window_id:2", "splits"},
 		},
 		{
-			"LayoutAction",
-			func(c *Client) error { return c.LayoutAction(2, "move_to_screen_edge", "left") },
-			[]string{"action", "--match=id:2", "layout_action", "move_to_screen_edge", "left"},
-		},
-		{
 			"ResizeWindow shrinks",
 			func(c *Client) error { return c.ResizeWindow(2, AxisHorizontal, -9) },
 			[]string{"resize-window", "--match=id:2", "--axis=horizontal", "--increment=-9"},
@@ -116,11 +111,12 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 				_, err := c.LaunchTab(Launch{
 					Match: 1, Dir: "/work", Env: []string{"A=1", "B=2"},
 					Vars: []string{"KS_SESSION_ID=abc"}, Command: []string{"ks", "sidebar"},
+					KeepFocus: true,
 				})
 				return err
 			},
 			slices.Concat(
-				[]string{"launch", "--type=tab", "--match=id:1", "--cwd=/work"},
+				[]string{"launch", "--type=tab", "--match=id:1", "--keep-focus", "--cwd=/work"},
 				unsetArgs,
 				[]string{
 					"--env", "A=1", "--env", "B=2", "--var", "KS_SESSION_ID=abc",

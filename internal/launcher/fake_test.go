@@ -156,10 +156,6 @@ func (f *fakeKitty) GotoLayout(id int, layout string) error {
 	return f.record("GotoLayout(%d,%s)", id, layout)
 }
 
-func (f *fakeKitty) LayoutAction(id int, args ...string) error {
-	return f.record("LayoutAction(%d,%s)", id, strings.Join(args, " "))
-}
-
 func (f *fakeKitty) ResizeWindow(id int, axis string, increment int) error {
 	if err := f.record("ResizeWindow(%d,%s,%d)", id, axis, increment); err != nil {
 		return err
@@ -232,6 +228,7 @@ func newTestStore(t *testing.T) *session.Store {
 
 // newTabLaunch is the call sequence that lays out a fresh session tab in an
 // instance whose tabs are fakeTabColumns wide: sidebar window 2, claude 3.
+// Both launches keep focus; the tab is shown by the final FocusWindow.
 // The split leaves the sidebar at 37 cells, so the pin shrinks it by one and
 // the second pass finds nothing to do.
 func newTabLaunch(sidebar, claude int, name string) []string {
@@ -242,8 +239,6 @@ func newTabLaunch(sidebar, claude int, name string) []string {
 		fmt.Sprintf("SetTabTitle(%d,%s)", sidebar, name),
 		"Windows", // tab id and width
 		fmt.Sprintf("LaunchVSplit(%d,bias=77)", sidebar),
-		fmt.Sprintf("FocusWindow(%d)", sidebar), // layout_action acts on the active window
-		fmt.Sprintf("LayoutAction(%d,move_to_screen_edge left)", sidebar),
 		"Windows", // pin pass 1
 		fmt.Sprintf("ResizeWindow(%d,horizontal,-1)", sidebar),
 		"Windows", // pin pass 2

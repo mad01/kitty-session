@@ -332,6 +332,9 @@ type Launch struct {
 	// Bias is the share of the split the new window takes, in percent.
 	// LaunchVSplit and LaunchHSplit only.
 	Bias int
+	// KeepFocus leaves the keyboard where it is: the window is created but
+	// neither it nor its tab is brought to the front.
+	KeepFocus bool
 	// Command runs in the new window.
 	Command []string
 }
@@ -368,6 +371,9 @@ func (c *Client) LaunchHSplit(l Launch) (int, error) {
 }
 
 func (c *Client) launch(args []string, l Launch) (int, error) {
+	if l.KeepFocus {
+		args = append(args, "--keep-focus")
+	}
 	if l.Dir != "" {
 		args = append(args, "--cwd="+l.Dir)
 	}
@@ -399,15 +405,6 @@ func (c *Client) launch(args []string, l Launch) (int, error) {
 // the window id, a different tab.
 func (c *Client) GotoLayout(windowID int, layout string) error {
 	_, err := c.at("goto-layout", matchWindowID(windowID), layout)
-	return err
-}
-
-// LayoutAction runs a layout_action (for example move_to_screen_edge left)
-// in the tab containing the window. Kitty applies layout actions to the
-// tab's active window, so focus the window to act on first.
-func (c *Client) LayoutAction(windowID int, args ...string) error {
-	full := append([]string{"action", matchID(windowID), "layout_action"}, args...)
-	_, err := c.at(full...)
 	return err
 }
 

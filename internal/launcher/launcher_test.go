@@ -202,16 +202,15 @@ func TestOpenNewSession(t *testing.T) {
 
 func TestOpenGeometryAndFocusFailuresAreWarnings(t *testing.T) {
 	l, f, store := newTestLauncher(t)
-	f.errs["LayoutAction"] = errors.New("no such action")
 	f.errs["ResizeWindow"] = errors.New("cannot resize")
-	f.errs["FocusWindow(3)"] = errors.New("no focus") // claude only; the sidebar focus works
+	f.errs["FocusWindow(3)"] = errors.New("no focus") // the one switch that shows the tab
 
 	res, err := l.Open(Request{Name: "demo", Dir: "/work/demo"})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if len(res.Warnings) != 3 {
-		t.Errorf("warnings = %v, want 3", res.Warnings)
+	if len(res.Warnings) != 2 {
+		t.Errorf("warnings = %v, want 2", res.Warnings)
 	}
 	got, err := store.Load("demo")
 	if err != nil {
@@ -279,8 +278,6 @@ func relaunchCalls(sidebar, claude int) []string {
 		"Windows", // liveness
 		"GotoLayout(2,splits)",
 		"LaunchVSplit(2,bias=77)",
-		"FocusWindow(2)",
-		"LayoutAction(2,move_to_screen_edge left)",
 		"Windows",
 		"ResizeWindow(2,horizontal,-1)",
 		"Windows",
@@ -533,5 +530,32 @@ func TestAlive(t *testing.T) {
 	f.errs["Windows"] = errors.New("down")
 	if l.Alive(sess) {
 		t.Error("Alive while the instance is unreachable")
+	}
+}
+
+// TestOpenBuildsTheTabHidden checks that a tab is laid out behind the current
+// one and shown with a single focus switch, which Background skips.
+func TestOpenBuildsTheTabHidden(t *testing.T) {
+	l, f, _ := newTestLauncher(t)
+	if _, err := l.Open(Request{Name: "demo", Dir: "/work/demo"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, launch := range f.launches {
+		if !launch.KeepFocus {
+			t.Errorf("launch %q takes focus; every launch must keep it", launch.Command)
+		}
+	}
+	if n := slices.Index(f.calls, "FocusWindow(3)"); n != len(f.calls)-3 {
+		t.Errorf("want FocusWindow(3) right before the home tab retires, calls %v", f.calls)
+	}
+
+	l, f, _ = newTestLauncher(t)
+	if _, err := l.Open(Request{Name: "bg", Dir: "/work/bg", Background: true}); err != nil {
+		t.Fatalf("Open background: %v", err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "FocusWindow(") {
+			t.Errorf("background open switched focus: %v", f.calls)
+		}
 	}
 }
