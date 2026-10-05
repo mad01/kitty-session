@@ -8,8 +8,8 @@ type keyHelp struct {
 	action string
 }
 
-// keyHelps is the keys popup, top to bottom. The last four rows are the
-// kitty chords that move the keyboard between the sidebar and claude.
+// keyHelps is the keys popup, top to bottom. The last row is the user's own
+// kitty window keys (cmd+] and cmd+[ in the dotfiles config): ks maps none.
 var keyHelps = []keyHelp{
 	{"j/k ↑↓", "move"},
 	{"enter", "focus / reopen"},
@@ -23,15 +23,12 @@ var keyHelps = []keyHelp{
 	{"/", "filter"},
 	{"m", "menu"},
 	{"?", "keys"},
-	{"ctrl+b s", "sidebar"},
-	{"ctrl+b a", "agent"},
-	{"ctrl+w w", "next window"},
-	{"ctrl+w h/l", "left/right"},
+	{"cmd+] [", "windows (kitty)"},
 }
 
 // keyColumn is the width of the key column in the keys popup: the widest
 // key plus two cells.
-const keyColumn = 12
+const keyColumn = 9
 
 // keysLines renders the two-column table the keys popup shows.
 func keysLines() []string {

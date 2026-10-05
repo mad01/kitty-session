@@ -45,7 +45,9 @@ var ErrNotFound = errors.New("kitty: not found")
 // instanceOverrides are the settings the ks topology depends on: remote
 // control, no tab bar (the sidebar is the tab list), no borders or margins
 // between the sidebar and claude, a little padding, and quitting with the last
-// window so CloseAll ends the instance.
+// window so CloseAll ends the instance. ks maps no keys of its own: moving
+// between windows is the user's kitty keys, and a user who wants chords adds
+// `map ...` lines through kitty_overrides (kitty takes map lines via -o).
 var instanceOverrides = []string{
 	"allow_remote_control=yes",
 	"tab_bar_style=hidden",
@@ -53,20 +55,6 @@ var instanceOverrides = []string{
 	"window_margin_width=0",
 	"window_padding_width=3",
 	"macos_quit_when_last_window_closed=yes",
-}
-
-// instanceMaps are the ks keyboard chords, passed to kitty as -o like the
-// overrides: ctrl+b then s lands on the sidebar (left of claude), ctrl+b then
-// a lands back on the agent, and ctrl+w then w, h or l move between windows
-// the vim way. They come after instanceOverrides and before the user's
-// kitty_overrides, so a user map wins. Inside the instance kitty takes ctrl+w
-// first, so it no longer deletes a word in Claude's prompt or in a shell.
-var instanceMaps = []string{
-	"map ctrl+b>s neighboring_window left",
-	"map ctrl+b>a neighboring_window right",
-	"map ctrl+w>w next_window",
-	"map ctrl+w>h neighboring_window left",
-	"map ctrl+w>l neighboring_window right",
 }
 
 // Environment hygiene. The instance inherits the environment of the process
@@ -222,7 +210,7 @@ type StartOptions struct {
 // returns once kitty has forked; Ping says when the socket answers.
 func (c *Client) Start(opts StartOptions) error {
 	args := []string{"--detach", "--listen-on", c.socket}
-	for _, o := range slices.Concat(instanceOverrides, instanceMaps, opts.Overrides) {
+	for _, o := range slices.Concat(instanceOverrides, opts.Overrides) {
 		args = append(args, "-o", o)
 	}
 	if opts.Title != "" {

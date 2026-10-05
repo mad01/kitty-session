@@ -27,8 +27,10 @@ Sidebar keys (m opens the menu with the rest):
   n           New agent (repo picker)
   r  c  d  u  Rename, close (keep), delete, restore
   /           Filter by name
-  ctrl+b>s    From claude, jump to the sidebar (kitty chord)
-  ctrl+b>a    From the sidebar, jump back to the agent`,
+  ?           Keys popup
+
+From claude, your own kitty window keys bring you back to the sidebar
+(cmd+] and cmd+[ in the dotfiles config); ks maps no chords of its own.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          runAttach,

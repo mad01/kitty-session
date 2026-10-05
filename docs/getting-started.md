@@ -59,7 +59,7 @@ In any sidebar:
 
 - `j`/`k` or `↑`/`↓` to move the cursor, `1`-`9` to jump to a row.
 - `enter` to focus that session's claude window (its tab is recreated if it is gone).
-- `l`, `tab` or `q` to hand the keyboard to the claude window of the tab you are in; `ctrl+b` then `s` brings it back from claude.
+- `l`, `tab` or `q` to hand the keyboard to the claude window of the tab you are in; your kitty window keys (`cmd+]` / `cmd+[` in the dotfiles config) bring it back from claude.
 - `c` to close the tab (the session record stays on disk, marked stopped).
 - `d` to delete the session (the record moves to trash; see [Sidebar guide](tui.md#trash-and-restore)).
 
