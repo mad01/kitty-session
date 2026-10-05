@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/mad01/kitty-session/internal/claude"
-	"github.com/mad01/kitty-session/internal/instance"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/session"
@@ -37,15 +36,14 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	c, err := instance.Client(w.cfg)
-	if err != nil {
-		return err
-	}
-	down := c.Ping() != nil
+	// One snapshot of the instance serves every session; a failure means the
+	// instance is down, so every active session reads as stopped.
+	all, lsErr := w.kitty.Windows()
+	down := lsErr != nil
 	for _, sess := range sessions {
 		st := claude.StateStopped
 		if !down {
-			st = listState(w.launcher, c, sess)
+			st = listState(w.kitty, all, sess)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
 	}
@@ -55,17 +53,21 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// listState resolves a session's state: the record's own status first, then
-// whether its claude window is in the instance, then a fresh state file, then
-// the terminal text.
-func listState(l *launcher.Launcher, c *kitty.Client, sess *session.Session) claude.State {
-	if !sess.IsActive() || !l.Alive(sess) {
+// listState resolves a session's state from one instance snapshot: the
+// record's own status first, then whether its claude window is in the
+// snapshot, then a fresh state file, then the terminal text.
+func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) claude.State {
+	if !sess.IsActive() {
+		return claude.StateStopped
+	}
+	w, ok := launcher.ClaudeWindow(all, sess)
+	if !ok {
 		return claude.StateStopped
 	}
 	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
 		return claude.ParseState(s)
 	}
-	text, err := c.GetText(sess.KittyWindowID)
+	text, err := c.GetText(w.ID)
 	if err != nil {
 		return claude.StateWorking
 	}

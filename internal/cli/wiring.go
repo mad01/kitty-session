@@ -5,16 +5,20 @@ import (
 	"io/fs"
 
 	"github.com/mad01/kitty-session/internal/instance"
+	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 )
 
 // wiring is what a session command works with: the store, the config (nil
-// when the file is absent) and a launcher bound to the ks instance.
+// when the file is absent), the client for the ks instance, and a launcher
+// bound to it. The client is shared, so a command takes one snapshot rather
+// than building a second client of its own.
 type wiring struct {
 	store    *session.Store
 	cfg      *config.Config
+	kitty    *kitty.Client
 	launcher *launcher.Launcher
 }
 
@@ -46,7 +50,7 @@ func ensureWiring(agent bool) (wiring, error) {
 	if err != nil {
 		return wiring{}, err
 	}
-	return wiring{store: store, cfg: cfg, launcher: l}, nil
+	return wiring{store: store, cfg: cfg, kitty: c, launcher: l}, nil
 }
 
 // offlineWiring never starts the instance. Commands that must work while it
@@ -65,7 +69,7 @@ func offlineWiring() (wiring, error) {
 	if err != nil {
 		return wiring{}, err
 	}
-	return wiring{store: store, cfg: cfg, launcher: l}, nil
+	return wiring{store: store, cfg: cfg, kitty: c, launcher: l}, nil
 }
 
 func storeAndConfig() (*session.Store, *config.Config, error) {

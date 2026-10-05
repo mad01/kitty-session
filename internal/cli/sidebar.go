@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
+	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/sidebar"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +18,10 @@ import (
 // ks instance.
 const listenOnEnv = "KITTY_LISTEN_ON"
 
-var sidebarSession string
+var (
+	sidebarSession   string
+	sidebarSessionID string
+)
 
 var sidebarCmd = &cobra.Command{
 	Use:   "sidebar",
@@ -34,7 +37,9 @@ monitor runs for as long as the sidebar does.`,
 
 func init() {
 	sidebarCmd.Flags().
-		StringVar(&sidebarSession, "session", "", "the session whose tab this sidebar sits in")
+		StringVar(&sidebarSessionID, "session-id", "", "the id of the session whose tab this sidebar sits in")
+	sidebarCmd.Flags().
+		StringVar(&sidebarSession, "session", "", "the name of the session whose tab this sidebar sits in")
 	rootCmd.AddCommand(sidebarCmd)
 }
 
@@ -44,29 +49,47 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	c, err := connectSidebar(cfg)
-	if errors.Is(err, instance.ErrNotRunning) {
-		return instance.ErrNotRunning
-	}
 	if err != nil {
 		return err
 	}
 	if agentFlag {
-		agent, err := startAgent(c.Socket())
-		if err != nil {
+		if agent, err := startAgent(c.Socket()); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: agent failed to start: %v\n", err)
 		} else {
 			defer stopAgent(agent)
+			stopAgentOnSignal(agent)
 		}
 	}
-	b, err := launcher.NewSidebarBackend(store, c, cfg, sidebarSession)
+	ownID, ownName := sidebarIdentity(store)
+	b, err := launcher.NewSidebarBackend(store, c, cfg, ownID)
 	if err != nil {
 		return err
 	}
 	return sidebar.Run(sidebar.Options{
-		Session: sidebarSession,
+		Session: ownName,
 		Width:   cfg.EffectiveSidebarWidth(),
 		Backend: b,
 	})
+}
+
+// sidebarIdentity resolves which session's tab this sidebar sits in. The
+// launcher passes --session-id (stable across renames); --session by name is
+// kept for a human running the command. The id drives the own marker; the
+// name is only for display, so an unknown name still shows the rest.
+func sidebarIdentity(store *session.Store) (id, name string) {
+	if sidebarSessionID != "" {
+		if sess, err := store.FindByID(sidebarSessionID); err == nil {
+			return sidebarSessionID, sess.Name
+		}
+		return sidebarSessionID, ""
+	}
+	if sidebarSession != "" {
+		if sess, err := store.Load(sidebarSession); err == nil {
+			return sess.ID, sess.Name
+		}
+		return "", sidebarSession
+	}
+	return "", ""
 }
 
 // connectSidebar returns a client for the running instance. Inside the

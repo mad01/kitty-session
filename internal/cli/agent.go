@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -102,4 +103,18 @@ func stopAgent(cmd *exec.Cmd) {
 	// Kill the process group (negative PID)
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 	_ = cmd.Wait()
+}
+
+// stopAgentOnSignal stops the agent's process group when the sidebar is
+// terminated by a signal. The sidebar dies on SIGHUP when `ks quit` or a tab
+// close ends it, and the deferred stopAgent never runs then, so the
+// Setpgid child would be orphaned without this.
+func stopAgentOnSignal(cmd *exec.Cmd) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sig
+		stopAgent(cmd)
+		os.Exit(0)
+	}()
 }
