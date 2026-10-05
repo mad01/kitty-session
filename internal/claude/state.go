@@ -34,6 +34,23 @@ func (s State) String() string {
 	}
 }
 
+// ParseState converts a state-file string ("working", "idle", "input",
+// "waiting") back to a State; anything else is StateUnknown.
+func ParseState(s string) State {
+	switch s {
+	case "working":
+		return StateWorking
+	case "idle":
+		return StateIdle
+	case "input":
+		return StateNeedsInput
+	case "waiting":
+		return StateWaiting
+	default:
+		return StateUnknown
+	}
+}
+
 // workingSignals are substrings that indicate Claude is actively processing.
 var workingSignals = []string{
 	"reading", "writing", "editing", "searching",

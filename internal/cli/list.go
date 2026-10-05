@@ -38,47 +38,31 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, sess := range sessions {
-		var st claude.State
-		if !kitty.TabExists(sess.KittyTabID) {
-			st = claude.StateStopped
-		} else if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
-			st = mapStateString(s)
-		} else {
-			winID := sess.KittyWindowID
-			if winID == 0 {
-				id, err := kitty.FirstWindowInTab(sess.KittyTabID)
-				if err == nil {
-					winID = id
-				}
-			}
-			if winID != 0 {
-				text, err := kitty.GetText(winID)
-				if err == nil {
-					st = claude.DetectState(text)
-				} else {
-					st = claude.StateWorking
-				}
-			} else {
-				st = claude.StateWorking
-			}
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, listState(sess), sess.Dir)
 	}
 	return nil
 }
 
-// mapStateString converts a state file string to a claude.State.
-func mapStateString(s string) claude.State {
-	switch s {
-	case "working":
-		return claude.StateWorking
-	case "idle":
-		return claude.StateIdle
-	case "input":
-		return claude.StateNeedsInput
-	case "waiting":
-		return claude.StateWaiting
-	default:
-		return claude.StateUnknown
+// listState resolves a session's state: the record's own status first, then
+// the kitty tab, then a fresh state file, then the terminal text.
+func listState(sess *session.Session) claude.State {
+	if !sess.IsActive() || !kitty.TabExists(sess.KittyTabID) {
+		return claude.StateStopped
 	}
+	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
+		return claude.ParseState(s)
+	}
+	winID := sess.KittyWindowID
+	if winID == 0 {
+		id, err := kitty.FirstWindowInTab(sess.KittyTabID)
+		if err != nil {
+			return claude.StateWorking
+		}
+		winID = id
+	}
+	text, err := kitty.GetText(winID)
+	if err != nil {
+		return claude.StateWorking
+	}
+	return claude.DetectState(text)
 }

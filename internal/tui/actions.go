@@ -38,23 +38,24 @@ func shortenDir(dir string) string {
 	return dir
 }
 
-// detectSessionState determines the Claude state for a session.
-// It uses a hybrid approach: check state files first (written by hooks or
-// the agent monitor), then fall back to terminal text parsing.
+// detectSessionState determines the Claude state for a session. A record the
+// user stopped is stopped whatever kitty shows; otherwise it checks state
+// files first (written by hooks or the agent monitor), then falls back to
+// terminal text parsing.
 func detectSessionState(sess *session.Session) claude.State {
-	if !kitty.TabExists(sess.KittyTabID) {
+	if !sess.IsActive() || !kitty.TabExists(sess.KittyTabID) {
 		return claude.StateStopped
 	}
 
 	// Check state file first (high-confidence, low-latency).
 	if s, t, err := state.Read(sess.Name); err == nil {
 		if state.IsFresh(t) {
-			return mapStringToState(s)
+			return claude.ParseState(s)
 		}
 		// State file is stale but said "working" recently — validate
 		// against terminal output. If the terminal clearly shows idle
 		// or input, use that; otherwise trust "working".
-		if mapStringToState(s) == claude.StateWorking && state.IsRecentlyWorking(t) {
+		if claude.ParseState(s) == claude.StateWorking && state.IsRecentlyWorking(t) {
 			termState := readTerminalState(sess)
 			if termState == claude.StateIdle || termState == claude.StateNeedsInput {
 				return termState
@@ -82,22 +83,6 @@ func readTerminalState(sess *session.Session) claude.State {
 		return claude.StateWorking
 	}
 	return claude.DetectState(text)
-}
-
-// mapStringToState converts a state file string to a claude.State.
-func mapStringToState(s string) claude.State {
-	switch s {
-	case "working":
-		return claude.StateWorking
-	case "idle":
-		return claude.StateIdle
-	case "input":
-		return claude.StateNeedsInput
-	case "waiting":
-		return claude.StateWaiting
-	default:
-		return claude.StateUnknown
-	}
 }
 
 func loadSessions(store *session.Store) ([]sessionItem, error) {
