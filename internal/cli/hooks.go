@@ -75,6 +75,7 @@ func ksMatcherGroups(binary string) map[string]matcherGroup {
 		"Stop":         {Matcher: "", Hooks: handler},
 		"Notification": {Matcher: "permission_prompt|elicitation_dialog", Hooks: handler},
 		"SessionStart": {Matcher: "", Hooks: handler},
+		"SessionEnd":   {Matcher: "", Hooks: handler},
 	}
 }
 
