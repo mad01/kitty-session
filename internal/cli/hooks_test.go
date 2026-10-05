@@ -10,8 +10,15 @@ import (
 	"testing"
 )
 
-// ksEvents are the Claude Code events ks hooks install must register.
-var ksEvents = []string{"PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd"}
+// ksMatchers are the Claude Code events ks hooks install must register and
+// the matcher each one carries.
+var ksMatchers = map[string]string{
+	"PreToolUse":   ".*",
+	"Stop":         "",
+	"Notification": "permission_prompt|elicitation_dialog",
+	"SessionStart": "",
+	"SessionEnd":   "prompt_input_exit|logout",
+}
 
 func TestHooksInstallAndUninstall(t *testing.T) {
 	home := t.TempDir()
@@ -30,9 +37,12 @@ func TestHooksInstallAndUninstall(t *testing.T) {
 	runHooksCmd(t, "install")
 	runHooksCmd(t, "install")
 	hooks := readHooks(t, path)
-	for _, event := range ksEvents {
+	for event, matcher := range ksMatchers {
 		if n := countKsGroups(hooks[event]); n != 1 {
 			t.Errorf("%s has %d ks groups after install, want 1", event, n)
+		}
+		if got := ksMatcher(hooks[event]); got != matcher {
+			t.Errorf("%s matcher = %q, want %q", event, got, matcher)
 		}
 	}
 	if countForeign(hooks["Stop"]) != 1 {
@@ -41,7 +51,7 @@ func TestHooksInstallAndUninstall(t *testing.T) {
 
 	runHooksCmd(t, "uninstall")
 	hooks = readHooks(t, path)
-	for _, event := range ksEvents {
+	for event := range ksMatchers {
 		if n := countKsGroups(hooks[event]); n != 0 {
 			t.Errorf("%s has %d ks groups after uninstall, want 0", event, n)
 		}
@@ -100,6 +110,16 @@ func isKsGroup(g matcherGroup) bool {
 	return slices.ContainsFunc(g.Hooks, func(h hookHandler) bool {
 		return strings.HasSuffix(h.Command, " _hook")
 	})
+}
+
+// ksMatcher returns the matcher of the first ks group in groups.
+func ksMatcher(groups []matcherGroup) string {
+	for _, g := range groups {
+		if isKsGroup(g) {
+			return g.Matcher
+		}
+	}
+	return "<none>"
 }
 
 func countKsGroups(groups []matcherGroup) int {

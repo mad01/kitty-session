@@ -66,6 +66,10 @@ func shortenHome(path string) string {
 	return path
 }
 
+// sessionEndMatcher limits SessionEnd to the reasons that mean the user ended
+// the agent on purpose; the handler checks the reason again.
+const sessionEndMatcher = reasonPromptInputExit + "|" + reasonLogout
+
 // ksMatcherGroups returns the matcher groups that ks manages, keyed by event.
 func ksMatcherGroups(binary string) map[string]matcherGroup {
 	cmd := shortenHome(binary) + " _hook"
@@ -75,7 +79,7 @@ func ksMatcherGroups(binary string) map[string]matcherGroup {
 		"Stop":         {Matcher: "", Hooks: handler},
 		"Notification": {Matcher: "permission_prompt|elicitation_dialog", Hooks: handler},
 		"SessionStart": {Matcher: "", Hooks: handler},
-		"SessionEnd":   {Matcher: "", Hooks: handler},
+		"SessionEnd":   {Matcher: sessionEndMatcher, Hooks: handler},
 	}
 }
 
