@@ -12,15 +12,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// hookPayload is the JSON structure Claude Code sends to hook commands via stdin.
+// hookPayload is the subset of the JSON object Claude Code pipes to hook
+// commands on stdin. Every event carries hook_event_name, session_id and
+// transcript_path. tool_name is set for PreToolUse and notification_type for
+// Notification; other events leave them empty.
 type hookPayload struct {
-	Event string `json:"event"`
-	Tool  struct {
-		Name string `json:"name"`
-	} `json:"tool"`
-	Notification struct {
-		Type string `json:"type"`
-	} `json:"notification"`
+	HookEventName    string `json:"hook_event_name"`
+	SessionID        string `json:"session_id"`
+	TranscriptPath   string `json:"transcript_path"`
+	ToolName         string `json:"tool_name"`
+	NotificationType string `json:"notification_type"`
 }
 
 var hookCmd = &cobra.Command{
@@ -40,7 +41,7 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return nil // not inside a ks session, nothing to do
 	}
 
-	data, err := io.ReadAll(os.Stdin)
+	data, err := io.ReadAll(cmd.InOrStdin())
 	if err != nil {
 		return fmt.Errorf("cannot read stdin: %w", err)
 	}
@@ -52,18 +53,18 @@ func runHook(cmd *cobra.Command, args []string) error {
 
 	var s string
 	var refreshSummary bool
-	switch payload.Event {
+	switch payload.HookEventName {
 	case "PreToolUse":
 		s = "working"
 		// Refresh summary on plan mode transitions
-		if payload.Tool.Name == "EnterPlanMode" || payload.Tool.Name == "ExitPlanMode" {
+		if payload.ToolName == "EnterPlanMode" || payload.ToolName == "ExitPlanMode" {
 			refreshSummary = true
 		}
 	case "Stop":
 		s = "idle"
 		refreshSummary = true
 	case "Notification":
-		switch payload.Notification.Type {
+		switch payload.NotificationType {
 		case "permission_prompt", "elicitation_dialog":
 			s = "input"
 		default:
