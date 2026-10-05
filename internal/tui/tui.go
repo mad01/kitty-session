@@ -603,7 +603,7 @@ func (m model) executeConfirm() (tea.Model, tea.Cmd) {
 
 	switch m.confirmAction {
 	case actionClose:
-		if err := closeSession(item.session); err != nil {
+		if err := closeSession(item.session, m.store); err != nil {
 			m.mode = modeList
 			return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 		}

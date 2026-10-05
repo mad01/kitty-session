@@ -218,7 +218,13 @@ func createSession(name, dir string, store *session.Store) error {
 	return store.Save(sess)
 }
 
-func closeSession(sess *session.Session) error {
+// closeSession closes the session's kitty tabs but keeps the record, marked
+// stopped so a later ks start does not treat it as a session to bring back.
+func closeSession(sess *session.Session, store *session.Store) error {
+	sess.Status = session.StatusStopped
+	if err := store.Save(sess); err != nil {
+		return err
+	}
 	state.Clean(sess.Name)
 	closeSessionTabs(sess)
 	return nil

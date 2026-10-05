@@ -36,6 +36,15 @@ func runClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session %q not found", name)
 	}
 
+	// Record the stop before the tab goes away: closing the window ends claude
+	// with SessionEnd reason "other", which the hook deliberately ignores.
+	if keepSession {
+		sess.Status = session.StatusStopped
+		if err := store.Save(sess); err != nil {
+			return fmt.Errorf("cannot save session: %w", err)
+		}
+	}
+
 	// Close the kitty tab(s) if still running
 	if kitty.TabExists(sess.KittyTabID) {
 		_ = kitty.CloseTab(sess.KittyTabID)
