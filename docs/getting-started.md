@@ -45,9 +45,9 @@ Tildes are expanded. See [Configuration](configuration.md) for `tmpdir`, `kitty_
 ks new -n demo -d ~/code/src/github.com/you/demo
 ```
 
-A kitty window titled `ks` appears: that is the instance. It holds a home tab and a `demo` tab. The tab is split in two: the sidebar on the left (the `ks` TUI, 36 cells wide) and Claude Code on the right, started in the chosen directory. There is no tab bar; the sidebar is the tab list. The first time Claude Code runs in a directory it asks whether you trust the folder; answer once.
+A kitty window titled `ks` appears: that is the instance. It holds a home tab and a `demo` tab. The tab is split in two: the `ks` sidebar on the left (36 cells wide) and Claude Code on the right, started in the chosen directory. There is no tab bar; the sidebar is the tab list. The first time Claude Code runs in a directory it asks whether you trust the folder; answer once.
 
-You can also start from the TUI. Run `ks`, and in the home tab's sidebar:
+You can also start from the sidebar. Run `ks`, and in the home tab's sidebar:
 
 1. Press `n` to open the repo picker.
 2. Type a few characters to filter, then `enter` to pick a repo.
@@ -57,12 +57,13 @@ You can also start from the TUI. Run `ks`, and in the home tab's sidebar:
 
 In any sidebar:
 
-- `j`/`k` or `↑`/`↓` to move the selection.
-- `enter` or `o` to focus the session's claude window.
-- `c` to close the tab (the session record stays on disk for recovery).
-- `d` to delete the session (the record moves to trash; see [TUI guide](tui.md#trash-and-restore)).
+- `j`/`k` or `↑`/`↓` to move the cursor, `1`-`9` to jump to a row.
+- `enter` to focus that session's claude window (its tab is recreated if it is gone).
+- `l`, `tab` or `q` to hand the keyboard to the claude window of the tab you are in; `ctrl+b` then `s` brings it back from claude.
+- `c` to close the tab (the session record stays on disk, marked stopped).
+- `d` to delete the session (the record moves to trash; see [Sidebar guide](tui.md#trash-and-restore)).
 
-Press `?` at any time for the full keybinding list.
+`m` opens a menu with every action, including `quit ks`.
 
 ## Come back later
 
@@ -74,7 +75,7 @@ Bare `ks` attaches. It starts the instance if it is not running and brings back 
 
 ## Install Claude Code hooks (optional, recommended)
 
-The sidebar shows a live state for each session: `working`, `idle`, `input`, `waiting`, or `stopped`. The most accurate source for that state is Claude Code's own hook events, written by a hidden `ks _hook` handler. Wire them up once with:
+The sidebar shows a live state for each session: `input`, `done`, `working`, `idle` or `stopped`. The most accurate source for that state is Claude Code's own hook events, written by a hidden `ks _hook` handler. Wire them up once with:
 
 ```bash
 ks hooks install
@@ -87,5 +88,5 @@ See [Hooks and state detection](hooks-and-state.md) for what each event maps to 
 ## Next reads
 
 - [Configuration](configuration.md): scratch tmp dirs, the instance socket, sidebar width, kitty overrides.
-- [TUI guide](tui.md): every mode, every key.
+- [Sidebar guide](tui.md): rows, states, every key.
 - [Command reference](commands.md): scripting with `ks new`, `ks list`, `ks quit`, `ks repo`.

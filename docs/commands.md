@@ -103,11 +103,13 @@ Print one line per session to stdout:
 <name>               <state>    <dir>
 ```
 
-State detection uses the same priority as the sidebar:
+State detection:
 
 1. If the record is `stopped`, or no window tagged with the session's id matches its claude window → `stopped`.
 2. If a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
 3. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
+
+The sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text and adds `done`); see [Sidebar guide](tui.md#states).
 
 When the instance is not running every active session prints `stopped` and a last line says `ks instance not running`. Prints `no sessions` if no session files are found.
 
@@ -141,14 +143,14 @@ Prints `ks instance not running` when there is nothing to close.
 Usage: ks sidebar [--session <name>] [--agent]
 ```
 
-Run the TUI in the current window. The instance runs one in its home tab (`ks sidebar`) and one on the left of every session tab (`ks sidebar --session <name>`); run it by hand to get the TUI in any terminal. The TUI talks to the instance on the configured socket without starting it, so outside the instance every session shows as `stopped`.
+Run the sidebar in the current window. The instance runs one in its home tab (`ks sidebar`) and one on the left of every session tab (`ks sidebar --session <name>`); run it by hand to get the sidebar in any terminal. It never starts the instance. Inside the instance it waits for the socket to answer, since kitty runs the home sidebar as its first window. Anywhere else it exits with `ks instance not running` when nothing answers.
 
 | Flag | Description |
 |---|---|
-| `--session` | The session whose tab this sidebar sits in. Shown in the title bar. |
+| `--session` | The session whose tab this sidebar sits in. Its row gets the `▌` marker, and the `l`/`tab`/`q` keys, `shell split` and the width re-pin act on that tab. |
 | `--agent` | Start the background Haiku state monitor for as long as the sidebar runs. |
 
-See [TUI guide](tui.md) for keybindings.
+See [Sidebar guide](tui.md) for rows, states and keys.
 
 ## `ks repo`
 
@@ -204,6 +206,14 @@ Invoked by Claude Code hooks, not by humans. Reads a JSON payload from stdin, ma
 If `KS_SESSION_NAME` is not set, the command exits silently; it's safe to have the hook installed globally even in terminals that aren't `ks` sessions.
 
 See [Hooks and state detection](hooks-and-state.md) for the full event-to-state table.
+
+## `ks _sidebar-demo` (hidden)
+
+```
+Usage: ks _sidebar-demo [--width <cols>] [--session <name>]
+```
+
+Run the sidebar on six fake agents covering every state, with an in-memory backend: no kitty, no session files, nothing touched. A development aid for reviewing the look in any terminal. `--width` sets the frame width (default 36); `--session` names the fake agent treated as this tab's own (default `kitty-session`).
 
 ## Scripting recipes
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — kitty-session
 
-`ks` is a session manager for the [kitty](https://sw.kovidgoyal.net/kitty/) terminal. It runs a kitty instance of its own. Every Claude Code session is one tab in it: a sidebar (the Bubble Tea TUI) on the left and claude on the right. The tab bar is hidden; the sidebar is the tab list. It tracks each session's state and brings every session back on attach. The user's own kitty is never touched. `README.md` is the front door; the `docs/` set is the deep dive. This file is the agent-facing working context: where code lives, how the on-disk model works, and the gotchas that bite.
+`ks` is a session manager for the [kitty](https://sw.kovidgoyal.net/kitty/) terminal. It runs a kitty instance of its own. Every Claude Code session is one tab in it: the ks sidebar (a Bubble Tea agent list) on the left and claude on the right. The tab bar is hidden; the sidebar is the tab list. It tracks each session's state and brings every session back on attach. The user's own kitty is never touched. `README.md` is the front door; the `docs/` set is the deep dive. This file is the agent-facing working context: where code lives, how the on-disk model works, and the gotchas that bite.
 
 Go module `github.com/mad01/kitty-session`, builds to a single `ks` binary. Needs Go 1.25+.
 
@@ -8,8 +8,9 @@ Go module `github.com/mad01/kitty-session`, builds to a single `ks` binary. Need
 
 ```
 cmd/ks/main.go              entry point — calls internal/cli
-internal/cli/               cobra subcommands (attach = bare ks, new, open, close, list, rename, quit, sidebar, tmp, repo, hooks, _hook, version)
-internal/tui/               Bubble Tea TUI, run as `ks sidebar`
+internal/cli/               cobra subcommands (attach = bare ks, new, open, close, list, rename, quit, sidebar, tmp, repo, hooks, _hook, _sidebar-demo, version)
+internal/sidebar/           Bubble Tea agent list, run as `ks sidebar`; every side effect behind sidebar.Backend
+internal/hooks/             the ks matcher groups in ~/.claude/settings.json (install, uninstall, installed)
 internal/instance/          the ks kitty instance: Ensure (ping or start), Connect, Client, Shutdown
 internal/launcher/          Launcher: Open/Close/Rename/Attach/Alive; tab topology behind a backend interface
 internal/kitty/client.go    the ONLY place that runs `kitty`: Client (every `kitty @ --to <socket>` call) and Start
@@ -21,7 +22,7 @@ internal/repo/config/       ~/.config/ks/config.yaml loader
 internal/repo/finder/       concurrent BFS repo walker + remote-URL parser
 ```
 
-`internal/cli` depends on almost everything; `internal/tui` is its second consumer. `instance` and `launcher` are the two mid-layer packages: `instance` owns the kitty process, `launcher` everything inside it. Leaf packages have a single responsibility and don't import their peers. See `docs/architecture.md` for the package graph and the create-session, attach and detect-state flows.
+`internal/cli` depends on almost everything. `instance` and `launcher` are the two mid-layer packages: `instance` owns the kitty process, `launcher` everything inside it, including `launcher.SidebarBackend`, the production `sidebar.Backend`. `sidebar` never imports `launcher`; `launcher` imports `sidebar` for the interface and row types. Leaf packages have a single responsibility and don't import their peers. See `docs/architecture.md` for the package graph and the create-session, attach and detect-state flows.
 
 **`internal/kitty` is the one exec boundary.** `kitty.New(socket)` returns a `Client`; each method wraps one `kitty @` subcommand and always passes `--to <socket>`. `Client.Start` is the only call that runs the kitty binary itself (`kitty --detach --listen-on ...` plus the `-o` overrides the topology depends on). Nothing else in the tree calls `exec.Command("kitty", ...)`. If you need a new kitty interaction, add a method to `client.go`. The repo finder also avoids subprocesses: it parses `.git/config` directly, never running `git`.
 
@@ -36,21 +37,21 @@ Everything `ks` writes lives under `~/.config/ks/`:
 ├── config.yaml            user-authored (the only config; no per-repo, no env override for the path)
 ├── kitty.sock             the instance's remote-control socket (kitty_socket in config)
 ├── sessions/<name>.json   one per live session
-├── sessions/trash/<name>.json   moved here by `ks close` (no --keep) and TUI delete
+├── sessions/trash/<name>.json   moved here by `ks close` (no --keep) and the sidebar's delete
 └── state/<name>.json      written by hooks or the --agent monitor
 ```
 
-A session file holds the kitty IDs (`kitty_tab_id`, `kitty_window_id` for claude, `kitty_sidebar_window_id`), the working dir, a created-at stamp, `status`, the Claude session id and transcript path from the last `SessionStart` hook, and `focused_at`. **Kitty IDs restart from 1 in every instance**, so after `ks quit` a stored id can point at another session's window. The launcher therefore tags both windows of a session with the kitty user variable `KS_SESSION_ID=<id>` (`launch --var`, read back as `user_vars` in `kitty @ ls`) and only trusts an id when the tag matches. A record with no `id` owns nothing. Records from older versions may carry `kitty_shell_window_id` / `kitty_summary_window_id`; they are cleared on the next reopen.
+A session file holds the kitty IDs (`kitty_tab_id`, `kitty_window_id` for claude, `kitty_sidebar_window_id`), the working dir, a created-at stamp, `status`, the Claude session id and transcript path from the last `SessionStart` hook, `focused_at`, and `viewed_at`. The session's own sidebar stamps `viewed_at` while its tab is active; a state-file `idle` newer than it shows as `done`. **Kitty IDs restart from 1 in every instance**, so after `ks quit` a stored id can point at another session's window. The launcher therefore tags both windows of a session with the kitty user variable `KS_SESSION_ID=<id>` (`launch --var`, read back as `user_vars` in `kitty @ ls`) and only trusts an id when the tag matches. A record with no `id` owns nothing. Records from older versions may carry `kitty_shell_window_id` / `kitty_summary_window_id`; they are cleared on the next reopen.
 
-State files are `{"state": "...", "updated_at": "..."}` where state is `working` / `idle` / `input` / `waiting`. Two freshness thresholds live in `internal/state/file.go`: `freshness = 10s` (trusted outright) and `IsRecentlyWorking = 5min` (a stale `working` is still honored unless terminal text clearly says idle or input).
+State files are `{"state": "...", "updated_at": "..."}` where state is `working` / `idle` / `input` / `waiting`. The one freshness threshold lives in `internal/state/file.go`: `freshness = 10s`, the age under which `ks list` trusts the file outright and the sidebar honours an `input`.
 
 ## State detection — three sources, in preference order
 
 1. **Claude Code hooks** (preferred, most accurate). `ks hooks install` registers a hidden `ks _hook` handler for `PreToolUse`→`working`, `Stop`→`idle`, `Notification`→`input`, `SessionStart`→`waiting` (plus `SessionEnd` for the stopped status) in `~/.claude/settings.json`. The handler keys off `KS_SESSION_ID` / `KS_SESSION_NAME`, which the launcher exports into both windows of a session. Unset env → handler exits silently, so the hook is safe to leave installed globally.
 2. **Background Haiku agent** (optional fallback). `ks sidebar --agent` runs a long-running `claude` with a tight allow-list that polls `kitty @ --to <socket> get-text` every 5s and writes state files; `ks --agent` passes the flag to the home sidebar when it starts the instance. Killed with its process group when that sidebar exits.
-3. **Terminal-text heuristic** (always-on). `internal/claude.DetectState` reads the last 50 non-empty lines and matches a fixed signal set. Fuzzy by design; loses to UI changes.
+3. **Title glyph / terminal text** (always-on). The sidebar reads the claude window's title from the `ls` snapshot it already has: `internal/claude.ParseTitle` maps Claude's leading spinner glyph to `working` and `✳` to `idle`. `ks list` instead runs `internal/claude.DetectState` over the last 50 non-empty lines of `get-text`. Fuzzy by design; loses to UI changes.
 
-Before any of that, `ks list` and the TUI ask `Launcher.Alive`: a `stopped` record, or no tagged window matching `kitty_window_id`, is `stopped` without reading text. Full event tables and the classifier rules: `docs/hooks-and-state.md`.
+Before any of that, both ask `Launcher.Alive` (or `findLive` on the shared snapshot): a `stopped` record, or no tagged window matching `kitty_window_id`, is `stopped` without reading anything. The sidebar's full rule set is `resolveState` in `internal/launcher/sidebar_backend.go` (table-tested); it adds `done`, an idle whose state-file `updated_at` is newer than the record's `viewed_at`. Full event tables and the classifier rules: `docs/hooks-and-state.md`; the sidebar's rules: `docs/tui.md`.
 
 ## Build / run / test
 
@@ -64,7 +65,7 @@ make lint       # golangci-lint run ./...
 
 Tests live next to the code. The heavier ones set `HOME` to a `t.TempDir()` so the session/state/config code reads from the tempdir; a few shell out to real `git init` / `git remote add` to exercise finder logic. Nothing drives kitty: `internal/kitty` tests inject a runner and assert the argument list, `internal/launcher` tests run against the in-memory instance in `fake_test.go` (window table, call sequence), `internal/instance` against a scripted pinger. `internal/cli/repo_test.go` is the pattern for capturing cobra output against a fake `HOME`.
 
-Live check by hand, with the branch build and never `make install`: `./ks new -n smoke -d /tmp/smoke`. Then `kitty @ --to unix:$HOME/.config/ks/kitty.sock ls` should show the home tab plus a `smoke` tab, with the sidebar at `sidebar_width` columns and claude beside it. `./ks quit` ends the instance. Running it from inside an agent session is fine: the instance's environment is scrubbed. Check that `ls` shows no `CLAUDE*` keys in the claude window's `env`, and that `kitty @ ... action neighboring_window left` from the claude window lands on the sidebar.
+Live check by hand, with the branch build and never `make install`: `./ks new -n smoke -d /tmp/smoke`. Then `kitty @ --to unix:$HOME/.config/ks/kitty.sock ls` should show the home tab plus a `smoke` tab, with the sidebar at `sidebar_width` columns and claude beside it. `get-text --match id:<sidebar window>` should print the framed list: an `agents … priority` header, a `smoke` row, a `new … menu` footer. `send-text` `m` to that window opens the menu, `\x1b` closes it. `./ks quit` ends the instance. Claude's folder-trust dialog defaults to "No, exit"; send a down arrow (`\x1b[B`) before `\r` to accept. `ks _sidebar-demo` previews the sidebar on fake data without kitty. Running it from inside an agent session is fine: the instance's environment is scrubbed. Check that `ls` shows no `CLAUDE*` keys in the claude window's `env`, and that `kitty @ ... action neighboring_window left` from the claude window lands on the sidebar.
 
 **Adding a subcommand:** add `internal/cli/<name>.go` with a `var <name>Cmd` and an `init()` that calls `rootCmd.AddCommand(...)`. Put non-trivial logic in a new `internal/` package. Reach the instance through `ensureWiring` / `offlineWiring`, and session/state through `session.NewStore()` and `internal/state`, never the files directly. Add a test.
 
@@ -75,7 +76,7 @@ Live check by hand, with the branch build and never `make install`: `./ks new -n
 
 ## Repo finder
 
-`ks repo` (and the TUI `n` picker) walk the `dirs` from `config.yaml` with a 32-worker concurrent BFS, stopping at the first `.git` in any subtree, deduped by absolute path. Names come from parsing the `origin` URL in `.git/config` (SSH and HTTPS; last two path components for deep GitLab subgroups); no `origin` → fallback name `<parent>/<dir>` with empty host. Output modes: interactive fuzzy finder (default), `--list` (TSV), `--json`, `--toon` (token-efficient, for LLM consumers). The MCP/search/zoekt stack that once lived here now lives in [`csl`](https://github.com/mad01/code-search-local); `ks` kept `repo` only so the shell `repo()` helper keeps working.
+`ks repo` (and the sidebar's `n` picker, through `SidebarBackend.Repos`) walk the `dirs` from `config.yaml` with a 32-worker concurrent BFS, stopping at the first `.git` in any subtree, deduped by absolute path. Names come from parsing the `origin` URL in `.git/config` (SSH and HTTPS; last two path components for deep GitLab subgroups); no `origin` → fallback name `<parent>/<dir>` with empty host. Output modes: interactive fuzzy finder (default), `--list` (TSV), `--json`, `--toon` (token-efficient, for LLM consumers). The MCP/search/zoekt stack that once lived here now lives in [`csl`](https://github.com/mad01/code-search-local); `ks` kept `repo` only so the shell `repo()` helper keeps working.
 
 ## Dotfiles wiring & catalog
 
@@ -89,7 +90,10 @@ Catalogued via root `service-info.yaml`: System `kitty-session`, Component `ks`.
 - **The instance inherits the environment of whoever starts it.** `kitty.Start` drops `CLAUDE*`, `KS_*` and `KITTY_*` (keeping `KITTY_CONFIG_DIRECTORY`), and every launch unsets the agent-session markers in the child (`unsetInWindows` in `client.go`). Without that, a ks run from inside a Claude Code session made every claude it hosted a child session with transcript saving off. `PATH` is forwarded per window.
 - **A new tab opens in the `fat` layout**, which ignores `--location=vsplit`; the topology switches it to `splits` first. Split sizes are fractions, so the sidebar is pinned by measuring `columns` and resizing, up to two passes.
 - **`layout_action` acts on the tab's active window, not the `--match` one.** Right after the split that is claude, so `moveSidebarLeft` focuses the sidebar before `move_to_screen_edge left` and `splitClaude` hands focus back. `kitty @ ls` has no positions; verify placement with `action neighboring_window left` from the claude window, which must land on the sidebar.
-- **Never pass `--title` to the claude window.** Claude's own OSC title is the state signal (and a future sidebar input).
+- **Never pass `--title` to the claude window.** Claude's own OSC title is the sidebar's state signal and its row title.
+- **`--next-to` is ignored unless `--match` selects its tab.** `LaunchHSplit` passes both (`--match=id:<claude> --next-to=id:<claude>`); with `--next-to` alone kitty splits the active tab's active window instead. `LaunchVSplit` gets away with `--match` only because the sidebar is the tab's sole window at that point.
+- **`ctrl+b>s` and `ctrl+b>a` are ks chords**, mapped with `-o 'map ...'` at instance start (`instanceMaps` in `client.go`; kitty takes `map` lines through `-o`). They jump between the sidebar and claude. Claude Code also binds `ctrl+b` (background a task); inside the instance kitty consumes it first.
+- **The sidebar never exits on its own.** `ctrl+c` is swallowed; the only exits are the menu's `quit ks` (instance.Shutdown) and the instance going away. Run by hand with no instance it exits at once with `ks instance not running`. Inside the instance it waits for the socket (`instance.Await`, keyed on `KITTY_LISTEN_ON`), since kitty starts the home sidebar before the socket necessarily answers.
 - **`ks quit` ends every session's claude** (SIGHUP). Records stay `active` and come back on the next `ks`. A reopen uses `--resume <id>` with the record's own transcript, `--continue` when the directory has any transcript, and a bare `claude` otherwise. A session that never got a message comes back as a fresh conversation. Attach re-checks launched windows after two seconds and prints `ks: <name> exited right after launch` for any that vanished.
 - **`layout` and `summary` in `config.yaml` are inert.** They still parse so old files load.
 - **The `--agent` monitor costs real Haiku calls.** Leave it off unless hooks are not installed.

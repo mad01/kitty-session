@@ -43,7 +43,7 @@ Changing it while an instance is running leaves that instance unreachable to `ks
 
 ### `sidebar_width`
 
-Width in cells of the sidebar window on the left of every session tab. Default 36. Values below 20 are raised to 20, the narrowest the TUI can render. Applied when a tab is created or claude is relaunched into it; resizing the kitty window later keeps the split's proportions, not the cell count.
+Width in cells of the sidebar window on the left of every session tab. Default 36. Values below 20 are raised to 20, the narrowest the sidebar can render. Applied when a tab is created or claude is relaunched into it; resizing the kitty window later keeps the split's proportions, not the cell count.
 
 ### `kitty_overrides`
 

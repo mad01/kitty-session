@@ -95,7 +95,7 @@ If the `state` field isn't `idle` and `updated_at` is older than the last Claude
 
 ## Sidebar is too narrow or wraps
 
-The sidebar is `sidebar_width` cells wide (default 36, minimum 20) and the TUI clamps its inner size to 150×50. Raise `sidebar_width` in [Configuration](configuration.md); it applies when a tab is created or claude is relaunched into it.
+The sidebar is `sidebar_width` cells wide (default 36, minimum 20) and draws its frame at that width, narrower only when the window is. Raise `sidebar_width` in [Configuration](configuration.md); it applies when a tab is created or claude is relaunched into it, and the sidebar re-pins itself after a window resize.
 
 ## Scratch session not being cleaned up
 

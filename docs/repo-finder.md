@@ -1,6 +1,6 @@
 # Repo finder
 
-`ks repo` scans your configured directories for git repositories and returns them interactively or in machine-readable formats. It's the same discovery layer that powers the TUI repo picker.
+`ks repo` scans your configured directories for git repositories and returns them interactively or in machine-readable formats. It's the same discovery layer that powers the sidebar's repo picker.
 
 ## What it scans
 
@@ -28,7 +28,7 @@ Names come from parsing the `origin` URL:
 | `git@git.corp.internal:team/service` | `team/service` |
 | `https://gitlab.com/group/subgroup/project.git` | `subgroup/project` |
 
-For deeper HTTPS paths (GitLab subgroups), only the last two path components are kept — this matches how the TUI displays repos.
+For deeper HTTPS paths (GitLab subgroups), only the last two path components are kept — this matches how the sidebar picker displays repos.
 
 If there is no `origin` remote, or the file can't be read, `ks` falls back to `<parent-dir>/<dir>`. That fallback loses host information (`Remote` and `Host` fields come back empty in JSON/TOON output).
 
