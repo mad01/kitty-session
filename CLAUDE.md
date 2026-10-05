@@ -10,6 +10,7 @@ Go module `github.com/mad01/kitty-session`, builds to a single `ks` binary. Need
 cmd/ks/main.go              entry point — calls internal/cli
 internal/cli/               cobra subcommands (new, open, close, list, rename, repo, hooks, _hook, version, tmp, agent)
 internal/tui/               Bubble Tea TUI (the no-subcommand path)
+internal/launcher/          one launch path for new/open/tmp/TUI: claude args, kitty layout, store save
 internal/kitty/client.go    the ONLY place that shells out to `kitty @`
 internal/session/           Session struct + Store (save/load/list/delete/rename/restore)
 internal/state/file.go      state JSON read/write + freshness predicates
@@ -19,7 +20,7 @@ internal/repo/finder/       concurrent BFS repo walker + remote-URL parser
 internal/summary/           Haiku summary-tab launcher
 ```
 
-`internal/cli` depends on almost everything; `internal/tui` is its second consumer. Leaf packages have a single responsibility and don't import their peers — `cli` and `tui` compose them. See `docs/architecture.md` for the package graph and data-flow diagrams (create-session, detect-state).
+`internal/cli` depends on almost everything; `internal/tui` is its second consumer. `internal/launcher` is the one mid-layer package (it composes `kitty`, `summary`, `session`, `config`); the other leaf packages have a single responsibility and don't import their peers. Anything that creates or reopens a session goes through `launcher.Open`. Don't call `kitty.LaunchTab` from a command. See `docs/architecture.md` for the package graph and data-flow diagrams (create-session, detect-state).
 
 **`internal/kitty` is the one exec boundary.** One function there wraps each `kitty @` subcommand (`launch`, `ls`, `get-text`, `send-text`, `focus-tab`, `close-tab`, `set-tab-title`). Nothing else in the tree calls `exec.Command("kitty", ...)`. If you need a new kitty interaction, add a wrapper to `client.go` rather than shelling out elsewhere. The repo finder also avoids subprocesses: it parses `.git/config` directly, never running `git`.
 
@@ -35,13 +36,13 @@ Everything `ks` writes lives under `~/.config/ks/`:
 └── state/<name>.json      written by hooks or the --agent monitor
 ```
 
-A session file holds the kitty IDs (`kitty_tab_id`, `kitty_window_id`, and optionally `kitty_shell_window_id` for `layout: tab` / `kitty_summary_window_id` when summary is on), the working dir, and a created-at stamp. **Kitty IDs do not survive a kitty restart** — a session whose tab ID no longer matches a live tab shows `stopped`; `ks open` detects the stale ID and recreates the tab via `claude --continue`. Session files are safe to hand-edit when an ID goes stale.
+A session file holds the kitty IDs (`kitty_tab_id`, `kitty_window_id`, and optionally `kitty_shell_window_id` for `layout: tab` / `kitty_summary_window_id` when summary is on), the working dir, a created-at stamp, and two lifecycle fields: `status` (`active` | `stopped`; absent in old files = active, see `session.IsActive`) and `claude_session_id` (from the last `SessionStart` hook). **Kitty IDs do not survive a kitty restart** — a session whose tab ID no longer matches a live tab shows `stopped` in the list. `ks open` detects the stale ID and recreates the tab via `claude --resume <claude_session_id>`, falling back to `claude --continue` when the record has no ID. `status` is written by `ks close --keep`, the TUI close action, and the `SessionEnd` hook (reasons `prompt_input_exit`/`logout` only). `Store.Save` is atomic (temp file + rename). Session files are safe to hand-edit when an ID goes stale.
 
 State files are `{"state": "...", "updated_at": "..."}` where state is `working` / `idle` / `input` / `waiting`. Two freshness thresholds live in `internal/state/file.go`: `freshness = 10s` (trusted outright) and `IsRecentlyWorking = 5min` (a stale `working` is still honored unless terminal text clearly says idle or input).
 
 ## State detection — three sources, in preference order
 
-1. **Claude Code hooks** (preferred, most accurate). `ks hooks install` registers a hidden `ks _hook` handler for `PreToolUse`→`working`, `Stop`→`idle`, `Notification`→`input`, `SessionStart`→`waiting` in `~/.claude/settings.json`. The handler keys off `KS_SESSION_NAME`, which `ks new`/`ks open` export into the kitty tab. Unset env → handler exits silently, so the hook is safe to leave installed globally.
+1. **Claude Code hooks** (preferred, most accurate). `ks hooks install` registers a hidden `ks _hook` handler for `PreToolUse`→`working`, `Stop`→`idle`, `Notification`→`input`, `SessionStart`→`waiting`, plus `SessionEnd` (no state; updates `status`) in `~/.claude/settings.json`. `SessionStart` also records `claude_session_id` on the session file. The handler keys off `KS_SESSION_NAME`, which every launch path exports into the kitty tab. Unset env → handler exits silently, so the hook is safe to leave installed globally. Hook payloads are flat JSON: `hook_event_name`, `session_id`, `cwd`, plus `tool_name` / `notification_type` / `source` / `reason` per event.
 2. **Background Haiku agent** (`ks --agent`, optional fallback). A long-running `claude` with a tight allow-list that polls `kitty @ get-text` every 5s and writes state files. Killed with its process group when the TUI exits.
 3. **Terminal-text heuristic** (always-on). `internal/claude.DetectState` reads the last 50 non-empty lines and matches a fixed signal set. Fuzzy by design; loses to UI changes.
 
@@ -63,8 +64,8 @@ Tests live next to the code. The heavier ones set `HOME` to a `t.TempDir()` so t
 
 ## Runtime prerequisites
 
-- **kitty with remote control enabled** — `allow_remote_control yes` + `listen_on unix:/tmp/mykitty` in `kitty.conf`, then restart kitty. Without it every launch/focus call fails. Verify with `kitty @ ls` (should print JSON).
-- **`claude` on the PATH kitty sees.** `kitty @ launch` uses kitty's environment, not the current shell's. The TUI forwards `PATH` via `--env`; the `ks new`/`ks open` subcommands do not — so creating sessions from a shell with a non-default `claude` location can fail unless you create via the TUI or set `launch_env` in `kitty.conf`.
+- **kitty with remote control enabled** — `allow_remote_control yes` + a `listen_on` socket in `kitty.conf`, then restart kitty. `kitty @` finds the socket through `KITTY_LISTEN_ON`, which kitty exports into its own terminals; on this machine it is `unix:~/.config/kitty/default`. Without it every launch/focus call fails. Verify with `kitty @ ls` (should print JSON).
+- **`claude` on the PATH kitty sees.** `kitty @ launch` uses kitty's environment, not the current shell's. The launcher forwards the caller's `PATH` via `--env PATH=...` on every launch path, so `claude` only has to be reachable from the shell that runs `ks`.
 
 ## Repo finder
 

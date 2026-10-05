@@ -33,7 +33,7 @@ The two thresholds live in `internal/state/file.go` (`freshness = 10 * time.Seco
 
 ## 1. Claude Code hooks (preferred)
 
-Claude Code fires [hook events](https://docs.claude.com/en/docs/claude-code/hooks) at specific points in its lifecycle. `ks hooks install` wires four of them to a hidden `ks _hook` handler, which writes the state file.
+Claude Code fires [hook events](https://docs.claude.com/en/docs/claude-code/hooks) at specific points in its lifecycle. `ks hooks install` wires five of them to a hidden `ks _hook` handler, which writes the state file and keeps the session record's lifecycle fields current.
 
 ### Install / uninstall
 
@@ -51,9 +51,19 @@ Both commands are idempotent. Install re-runs remove any stale ks entries (for e
 | `PreToolUse` | `.*` | `working` | On `EnterPlanMode` or `ExitPlanMode`, sends `refresh\n` to the session's summary tab (if any) |
 | `Stop` | *(empty)* | `idle` | Sends `refresh\n` to the summary tab |
 | `Notification` | `permission_prompt\|elicitation_dialog` | `input` | — |
-| `SessionStart` | *(empty)* | `waiting` | — |
+| `SessionStart` | *(empty)* | `waiting` | Stores the payload's `session_id` as the session's `claude_session_id` and sets `status` to `active` |
+| `SessionEnd` | *(empty)* | *(none)* | Reason `prompt_input_exit` or `logout` sets `status` to `stopped`; any other reason is ignored |
 
-`KS_SESSION_NAME` is exported by `ks new` and `ks open` when they launch the kitty tab (`--env KS_SESSION_NAME=<name>`). The hook uses that env var to know which state file to write. If `KS_SESSION_NAME` is unset, the hook exits silently — it's safe to keep installed even in terminals that aren't `ks` sessions.
+`KS_SESSION_NAME` is exported by every launch path (`ks new`, `ks open`, `ks tmp`, the TUI) via `--env KS_SESSION_NAME=<name>`. The hook uses that env var to know which state file and session record to touch. If `KS_SESSION_NAME` is unset, the hook exits silently — it's safe to keep installed even in terminals that aren't `ks` sessions.
+
+### Session ID and status
+
+Two fields on the session record (`~/.config/ks/sessions/<name>.json`) outlive kitty restarts and are maintained by the hook:
+
+- `claude_session_id` — the `session_id` from the most recent `SessionStart` payload. Every source (`startup`, `resume`, `clear`, `compact`, `fork`) updates it, so after a `/clear` the record points at the new conversation. `ks open` on a session whose tab is gone runs `claude --resume <id>` when this is set and `claude --continue` when it is not.
+- `status` — `active` or `stopped`. `SessionEnd` with reason `prompt_input_exit` (the user typed `/exit`) or `logout` writes `stopped`. Reason `other` is what Claude reports when kitty closes the window, and `clear`/`resume` are restarts, so those leave the record `active`. `ks close --keep` and the TUI close action also write `stopped` before closing the tab. `ks new`, `ks open`, `ks tmp`, and the TUI set `active` whenever they launch. Records written by older `ks` versions have no `status` field and read as `active`.
+
+Store updates in the hook are best effort: if the session record is missing or unreadable, the state file is still written and the hook exits 0.
 
 ### What gets written to `settings.json`
 
@@ -72,7 +82,8 @@ Simplified example after `ks hooks install`:
     ],
     "Stop":         [ /* ... */ ],
     "Notification": [ /* ... */ ],
-    "SessionStart": [ /* ... */ ]
+    "SessionStart": [ /* ... */ ],
+    "SessionEnd":   [ /* ... */ ]
   }
 }
 ```

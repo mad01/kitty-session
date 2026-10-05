@@ -8,25 +8,30 @@ Contributor-oriented tour. Covers the package graph, data flow for the two most 
 cmd/ks
   └── internal/cli              cobra subcommands
         ├── internal/tui        bubbletea TUI
+        │     ├── internal/launcher  create/reopen a session in kitty
         │     ├── internal/claude    state classifier + Claude projects reader
         │     ├── internal/kitty     kitty @ remote-control wrapper
         │     ├── internal/session   session struct + file store
         │     ├── internal/state     state file read/write
-        │     ├── internal/summary   summary tab launcher
         │     └── internal/repo      { config, finder }
+        ├── internal/launcher
+        │     ├── internal/kitty
+        │     ├── internal/session
+        │     ├── internal/summary   summary tab launcher
+        │     └── internal/repo/config
         ├── internal/kitty
         ├── internal/session
         ├── internal/state
-        ├── internal/summary
         └── internal/repo/{config,finder}
 ```
 
-`internal/cli` depends on almost everything. `internal/tui` is its second consumer. Each leaf package has a single responsibility and no dependencies on its peers except through `internal/cli` or `internal/tui` composing them.
+`internal/cli` depends on almost everything. `internal/tui` is its second consumer. `internal/launcher` is the one mid-layer package: it composes `kitty`, `summary`, `session`, and `config` so that `cli` and `tui` share a single launch path. Every other leaf package has a single responsibility and no dependencies on its peers.
 
 ### Leaf package responsibilities
 
 | Package | Responsibility |
 |---|---|
+| `internal/launcher` | `Open(store, cfg, Request)`: build the claude command line (`claude`, `claude --resume <id>`, or `claude --continue`), lay out the kitty windows, save the record. The layout lives in one function (`launchTopology`) behind a small backend interface so tests run without kitty. |
 | `internal/kitty` | Shell out to `kitty @` subcommands; parse `@ ls` JSON. No knowledge of sessions or Claude. |
 | `internal/session` | `Session` struct and `Store` (save/load/list/delete/rename/restore) backed by `~/.config/ks/sessions/`. |
 | `internal/state` | JSON state files under `~/.config/ks/state/`. Freshness predicates. |
@@ -60,36 +65,42 @@ Session files are small JSON:
   "kitty_tab_id": 42,
   "kitty_window_id": 87,
   "kitty_shell_window_id": 88,
-  "kitty_summary_window_id": 89
+  "kitty_summary_window_id": 89,
+  "status": "active",
+  "claude_session_id": "6f1c2a4e-3b7d-4c0e-9a51-2f8e7d6c5b4a"
 }
 ```
 
 `kitty_shell_window_id` is only populated with `layout: tab` (the shell is a sibling kitty tab rather than a split pane). `kitty_summary_window_id` is only populated when the summary tab is enabled.
 
+The `kitty_*` IDs are ephemeral and go stale when kitty restarts. `status` and `claude_session_id` are not: `status` is `active` or `stopped` (absent in files from older versions, which read as `active`), and `claude_session_id` is the ID Claude Code reported on its last `SessionStart` hook. Together they let `ks open` bring back a conversation with `claude --resume <id>`. See [Hooks and state detection](hooks-and-state.md#session-id-and-status) for who writes them. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
+
 State files are even smaller — see [Hooks and state detection](hooks-and-state.md#state-file).
 
 ## Flow: creating a session
 
-Triggered by `ks new -n foo -d /path` or the TUI's repo picker.
+Triggered by `ks new -n foo -d /path`, `ks tmp`, `ks open <stopped>`, or the TUI. All of them call `launcher.Open`; only the `Request` differs (`ResumeNone` for a new session, `ResumeStored` to focus or recreate an existing one).
 
 ```
-cli.runNew / tui.createSession
+cli.runNew / cli.runTmp / cli.runOpen / tui.createSession / tui.openSession
     └── config.Load()                        ~/.config/ks/config.yaml
-    └── kitty.LaunchTab(dir, ...)            → new OS window, returns Claude window ID
-    └── kitty.SetTabTitle(name)
-    └── kitty.FindTabForWindow(windowID)     → tab ID
-    └── session.New(name, dir, tabID, windowID)
-    └── if layout == "tab":
-          kitty.LaunchTabInWindow(claudeWinID, dir)     → shell window
-        else:
-          kitty.LaunchSplit(dir)                         → shell pane
-    └── if summary enabled:
-          summary.LaunchTab(...)             → haiku summary tab
-    └── kitty.FocusWindow(claudeWinID)
-    └── store.Save(sess)                     → ~/.config/ks/sessions/<name>.json
+    └── launcher.Open(store, cfg, Request{Name, Dir, Resume})
+          ├── target: session.New(...) or store.Load(name)
+          ├── ResumeStored and tab alive → focus it, return (nothing saved)
+          ├── claudeArgs: --env PATH, --env KS_SESSION_NAME, -- claude [--resume <id> | --continue]
+          ├── launchTopology(plan)
+          │     ├── kitty.LaunchTab(dir, claudeArgs...)     → new OS window, Claude window ID
+          │     ├── kitty.SetTabTitle(name)
+          │     ├── kitty.FindTabForWindow(windowID)        → tab ID
+          │     ├── layout tab:  kitty.LaunchTabInWindow    → shell window
+          │     │   layout split: kitty.LaunchSplit         → shell pane
+          │     ├── summary enabled: summary.LaunchTab      → haiku tab (failure = warning)
+          │     └── kitty.FocusWindow(claudeWinID)          (failure = warning)
+          ├── copy IDs onto the record, status = active
+          └── store.Save(sess)                              → ~/.config/ks/sessions/<name>.json
 ```
 
-Environment variables passed to `claude` include `KS_SESSION_NAME=<name>` so the `ks _hook` handler knows which state file to write.
+`claude` is started with `--resume <id>` when the record has a `claude_session_id`, `--continue` when it is a reopen without one, and bare for a new session. `PATH` is forwarded because `kitty @ launch` runs with kitty's environment, not the caller's. `KS_SESSION_NAME=<name>` lets the `ks _hook` handler find the state file and record. Callers print the launcher's warnings (summary tab, focus) themselves; the TUI drops them.
 
 ## Flow: detecting a session's state
 
