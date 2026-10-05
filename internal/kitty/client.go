@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -54,19 +55,66 @@ var instanceOverrides = []string{
 	"macos_quit_when_last_window_closed=yes",
 }
 
-// runner executes the kitty binary with args and returns its stdout.
+// Environment hygiene. The instance inherits the environment of the process
+// that starts it and hands it to every window it hosts. Started from inside a
+// Claude Code session, that would make every claude in it a child session
+// with transcript saving off; started from the user's kitty, its children
+// would believe they live in that kitty.
+var (
+	// scrubPrefixes name the variables Start drops from the instance's
+	// environment.
+	scrubPrefixes = []string{"CLAUDE", "KS_", "KITTY_"}
+	// keepNames are exempt from scrubPrefixes: the instance must read the
+	// same kitty.conf as the user's kitty.
+	keepNames = []string{"KITTY_CONFIG_DIRECTORY"}
+	// unsetInWindows are removed from every window ks launches (kitty's
+	// `--env NAME` with no value unsets), covering an instance that was
+	// started with them by an older ks or by hand.
+	unsetInWindows = []string{
+		"CLAUDECODE",
+		"CLAUDE_CODE_CHILD_SESSION",
+		"CLAUDE_CODE_SESSION_ID",
+		"CLAUDE_PID",
+		"CLAUDE_CODE_ENTRYPOINT",
+	}
+)
+
+// scrubEnv returns environ without the variables ks must not leak into the
+// instance: every name with one of scrubPrefixes except keepNames.
+func scrubEnv(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(keepNames, name) || !hasScrubPrefix(name) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+func hasScrubPrefix(name string) bool {
+	return slices.ContainsFunc(scrubPrefixes, func(p string) bool {
+		return strings.HasPrefix(name, p)
+	})
+}
+
+// runner executes `kitty @` with args and returns its stdout.
 type runner func(ctx context.Context, args ...string) ([]byte, error)
+
+// spawner starts the kitty binary itself with the given environment.
+type spawner func(env []string, args ...string) error
 
 // Client talks to one kitty instance through its remote-control socket.
 type Client struct {
 	socket string
 	run    runner
+	spawn  spawner
 }
 
 // New returns a client for the instance listening on socket (unix:<path>).
 // Nothing is contacted until a method runs.
 func New(socket string) *Client {
-	return &Client{socket: socket, run: runKitty}
+	return &Client{socket: socket, run: runKitty, spawn: spawnKitty}
 }
 
 // Socket returns the address the client talks to.
@@ -78,12 +126,27 @@ func runKitty(ctx context.Context, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("%w: %s", err, msg)
-		}
-		return nil, err
+		return nil, withStderr(err, stderr.Bytes())
 	}
 	return out, nil
+}
+
+func spawnKitty(env []string, args ...string) error {
+	cmd := exec.Command("kitty", args...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return withStderr(err, out)
+	}
+	return nil
+}
+
+// withStderr attaches kitty's own message to an exit error when there is one.
+func withStderr(err error, out []byte) error {
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return fmt.Errorf("%w: %s", err, msg)
+	}
+	return err
 }
 
 // at runs one `kitty @` subcommand against the instance socket.
@@ -112,8 +175,9 @@ type StartOptions struct {
 	Title string
 }
 
-// Start launches a detached kitty instance listening on the client's socket.
-// It returns once kitty has forked; Ping says when the socket answers.
+// Start launches a detached kitty instance listening on the client's socket,
+// with the caller's environment minus the variables in scrubPrefixes. It
+// returns once kitty has forked; Ping says when the socket answers.
 func (c *Client) Start(opts StartOptions) error {
 	args := []string{"--detach", "--listen-on", c.socket}
 	for _, o := range slices.Concat(instanceOverrides, opts.Overrides) {
@@ -124,7 +188,7 @@ func (c *Client) Start(opts StartOptions) error {
 	}
 	args = append(args, "--")
 	args = append(args, opts.Command...)
-	if _, err := c.run(context.Background(), args...); err != nil {
+	if err := c.spawn(scrubEnv(os.Environ()), args...); err != nil {
 		return fmt.Errorf("kitty --detach: %w", err)
 	}
 	return nil
@@ -281,7 +345,8 @@ type Launch struct {
 	Match int
 	// Dir is the new window's working directory.
 	Dir string
-	// Env are KEY=VALUE pairs exported into the new window's process.
+	// Env are KEY=VALUE pairs exported into the new window's process, on top
+	// of the instance's environment minus unsetInWindows.
 	Env []string
 	// Vars are KEY=VALUE kitty user variables set on the new window.
 	Vars []string
@@ -313,6 +378,9 @@ func (c *Client) launch(args []string, l Launch) (int, error) {
 	if l.Dir != "" {
 		args = append(args, "--cwd="+l.Dir)
 	}
+	for _, name := range unsetInWindows {
+		args = append(args, "--env", name)
+	}
 	for _, e := range l.Env {
 		args = append(args, "--env", e)
 	}
@@ -339,7 +407,8 @@ func (c *Client) GotoLayout(windowID int, layout string) error {
 }
 
 // LayoutAction runs a layout_action (for example move_to_screen_edge left)
-// in the tab containing the window.
+// in the tab containing the window. Kitty applies layout actions to the
+// tab's active window, so focus the window to act on first.
 func (c *Client) LayoutAction(windowID int, args ...string) error {
 	full := append([]string{"action", matchID(windowID), "layout_action"}, args...)
 	_, err := c.at(full...)

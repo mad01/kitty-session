@@ -18,16 +18,41 @@ const lsFixture = `[{"id":1,"tabs":[
     {"id":3,"title":"✳ claude","columns":119,"lines":39,"user_vars":{"KS_SESSION_ID":"abc"}}]}
 ]}]`
 
+// spawned records one Start.
+type spawned struct {
+	env  []string
+	args []string
+}
+
 // newFake returns a client whose kitty binary is a recorder answering with
-// out, or failing with err.
+// out, or failing with err. Start is recorded in the returned spawned.
 func newFake(out string, err error) (*Client, *[][]string) {
+	c, calls, _ := newFakeWithSpawn(out, err)
+	return c, calls
+}
+
+func newFakeWithSpawn(out string, err error) (*Client, *[][]string, *spawned) {
 	var calls [][]string
+	var sp spawned
 	c := New("unix:/tmp/t.sock")
 	c.run = func(_ context.Context, args ...string) ([]byte, error) {
 		calls = append(calls, args)
 		return []byte(out), err
 	}
-	return c, &calls
+	c.spawn = func(env []string, args ...string) error {
+		sp = spawned{env: env, args: args}
+		return err
+	}
+	return c, &calls, &sp
+}
+
+// unsetArgs is what every launch passes to drop the agent-session markers.
+var unsetArgs = []string{
+	"--env", "CLAUDECODE",
+	"--env", "CLAUDE_CODE_CHILD_SESSION",
+	"--env", "CLAUDE_CODE_SESSION_ID",
+	"--env", "CLAUDE_PID",
+	"--env", "CLAUDE_CODE_ENTRYPOINT",
 }
 
 func TestEveryCallTargetsTheSocket(t *testing.T) {
@@ -91,11 +116,14 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 				})
 				return err
 			},
-			[]string{
-				"launch", "--type=tab", "--match=id:1", "--cwd=/work",
-				"--env", "A=1", "--env", "B=2", "--var", "KS_SESSION_ID=abc",
-				"--", "ks", "sidebar",
-			},
+			slices.Concat(
+				[]string{"launch", "--type=tab", "--match=id:1", "--cwd=/work"},
+				unsetArgs,
+				[]string{
+					"--env", "A=1", "--env", "B=2", "--var", "KS_SESSION_ID=abc",
+					"--", "ks", "sidebar",
+				},
+			),
 		},
 		{
 			"LaunchVSplit",
@@ -105,10 +133,14 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 				})
 				return err
 			},
-			[]string{
-				"launch", "--type=window", "--location=vsplit", "--bias=77",
-				"--match=id:2", "--cwd=/work", "--", "claude", "--continue",
-			},
+			slices.Concat(
+				[]string{
+					"launch", "--type=window", "--location=vsplit", "--bias=77",
+					"--match=id:2", "--cwd=/work",
+				},
+				unsetArgs,
+				[]string{"--", "claude", "--continue"},
+			),
 		},
 	}
 	for _, tc := range tests {
@@ -154,7 +186,13 @@ func TestErrorsNameTheSubcommand(t *testing.T) {
 }
 
 func TestStart(t *testing.T) {
-	c, calls := newFake("", nil)
+	t.Setenv("PATH", "/opt/bin")
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+	t.Setenv("KS_SESSION_NAME", "demo")
+	t.Setenv("KITTY_WINDOW_ID", "4")
+	t.Setenv("KITTY_CONFIG_DIRECTORY", "/cfg")
+	c, calls, sp := newFakeWithSpawn("", nil)
 	err := c.Start(StartOptions{
 		Overrides: []string{"font_size=13"},
 		Command:   []string{"/bin/ks", "sidebar"},
@@ -163,7 +201,21 @@ func TestStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	got := (*calls)[0]
+	if len(*calls) != 0 {
+		t.Errorf("Start went through the remote-control protocol: %q", *calls)
+	}
+	for _, want := range []string{"PATH=/opt/bin", "KITTY_CONFIG_DIRECTORY=/cfg"} {
+		if !slices.Contains(sp.env, want) {
+			t.Errorf("instance env lacks %s", want)
+		}
+	}
+	for _, kv := range sp.env {
+		name, _, _ := strings.Cut(kv, "=")
+		if name != "KITTY_CONFIG_DIRECTORY" && hasScrubPrefix(name) {
+			t.Errorf("instance env leaks %s", kv)
+		}
+	}
+	got := sp.args
 	want := []string{
 		"--detach", "--listen-on", "unix:/tmp/t.sock",
 		"-o", "allow_remote_control=yes",
@@ -179,12 +231,33 @@ func TestStart(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("Start args = %q, want %q", got, want)
 	}
-	if slices.Contains(got, "@") {
-		t.Error("Start went through the remote-control protocol")
-	}
 	// The package-level override list must not grow with a caller's extras.
 	if len(instanceOverrides) != 6 {
 		t.Errorf("instanceOverrides mutated: %v", instanceOverrides)
+	}
+}
+
+func TestScrubEnv(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin",
+		"HOME=/Users/me",
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_PID=7",
+		"KS_SESSION_ID=abc",
+		"KS_SESSION_NAME=demo",
+		"KITTY_LISTEN_ON=unix:/tmp/k",
+		"KITTY_PID=9",
+		"KITTY_CONFIG_DIRECTORY=/cfg",
+		"TERM=xterm-kitty",
+		"NOEQUALS",
+	}
+	want := []string{
+		"PATH=/usr/bin", "HOME=/Users/me", "KITTY_CONFIG_DIRECTORY=/cfg",
+		"TERM=xterm-kitty", "NOEQUALS",
+	}
+	if got := scrubEnv(in); !slices.Equal(got, want) {
+		t.Errorf("scrubEnv = %q, want %q", got, want)
 	}
 }
 
