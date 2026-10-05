@@ -51,19 +51,26 @@ Both commands are idempotent. Install re-runs remove any stale ks entries (for e
 | `PreToolUse` | `.*` | `working` | On `EnterPlanMode` or `ExitPlanMode`, sends `refresh\n` to the session's summary tab (if any) |
 | `Stop` | *(empty)* | `idle` | Sends `refresh\n` to the summary tab |
 | `Notification` | `permission_prompt\|elicitation_dialog` | `input` | — |
-| `SessionStart` | *(empty)* | `waiting` | Stores the payload's `session_id` as the session's `claude_session_id` and sets `status` to `active` |
-| `SessionEnd` | *(empty)* | *(none)* | Reason `prompt_input_exit` or `logout` sets `status` to `stopped`; any other reason is ignored |
+| `SessionStart` | *(empty)* | `waiting` | Stores the payload's `session_id` and `transcript_path` on the record as `claude_session_id` / `claude_transcript_path` and sets `status` to `active` |
+| `SessionEnd` | `prompt_input_exit\|logout` | *(none)* | Sets `status` to `stopped` and removes the state file. The handler checks the reason again, so a `clear`, `resume` or `other` that slips through is still ignored |
 
-`KS_SESSION_NAME` is exported by every launch path (`ks new`, `ks open`, `ks tmp`, the TUI) via `--env KS_SESSION_NAME=<name>`. The hook uses that env var to know which state file and session record to touch. If `KS_SESSION_NAME` is unset, the hook exits silently — it's safe to keep installed even in terminals that aren't `ks` sessions.
+Every launch path (`ks new`, `ks open`, `ks tmp`, the TUI) exports two variables into the claude window: `KS_SESSION_NAME=<name>` and `KS_SESSION_ID=<id>`. The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the TUI does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
+
+Two more guards keep the record honest:
+
+- **Nested claudes are ignored.** A `claude` started from inside a session (say `claude -p ...` from the Bash tool) inherits `KS_SESSION_NAME`. The hook therefore checks the process tree: the Claude that fired it must be a direct child of the `kitty` process, which is how `kitty @ launch` starts it. Anything else exits 0 without writing. The lookup lives in `internal/procinfo` and only exists on macOS; elsewhere the hook trusts the environment as before.
+- **Subagents write state, not the record.** Events carrying an `agent_id` come from an in-process subagent. Their `PreToolUse`/`Stop` still update the state file, but `SessionStart`/`SessionEnd` from a subagent leave `claude_session_id` and `status` alone.
 
 ### Session ID and status
 
-Two fields on the session record (`~/.config/ks/sessions/<name>.json`) outlive kitty restarts and are maintained by the hook:
+Four fields on the session record (`~/.config/ks/sessions/<name>.json`) outlive kitty restarts:
 
-- `claude_session_id` — the `session_id` from the most recent `SessionStart` payload. Every source (`startup`, `resume`, `clear`, `compact`, `fork`) updates it, so after a `/clear` the record points at the new conversation. `ks open` on a session whose tab is gone runs `claude --resume <id>` when this is set and `claude --continue` when it is not.
-- `status` — `active` or `stopped`. `SessionEnd` with reason `prompt_input_exit` (the user typed `/exit`) or `logout` writes `stopped`. Reason `other` is what Claude reports when kitty closes the window, and `clear`/`resume` are restarts, so those leave the record `active`. `ks close --keep` and the TUI close action also write `stopped` before closing the tab. `ks new`, `ks open`, `ks tmp`, and the TUI set `active` whenever they launch. Records written by older `ks` versions have no `status` field and read as `active`.
+- `id`: random, assigned by `ks new`/`ks tmp` (or on the first reopen of an older record) and never changed. It is what `KS_SESSION_ID` carries.
+- `claude_session_id`: the `session_id` from the most recent `SessionStart` payload. Every source (`startup`, `resume`, `clear`, `compact`, `fork`) updates it, so after a `/clear` the record points at the new conversation.
+- `claude_transcript_path`: the `transcript_path` from the same payload. `ks open` on a session whose claude window is gone runs `claude --resume <id>` only while that file still exists. Records without the field fall back to `~/.claude/projects/<encoded dir>/<id>.jsonl`. Claude Code purges transcripts after its cleanup period, and `--resume` then fails with "No conversation found", so a missing file means `claude --continue` instead.
+- `status`: `active` or `stopped`. `SessionEnd` with reason `prompt_input_exit` (the user typed `/exit`) or `logout` writes `stopped`. Reason `other` is what Claude reports when kitty closes the window, and `clear`/`resume` are restarts, so those leave the record `active`. `ks close --keep` and the TUI close action also write `stopped` before closing the tab. Every launch path saves the record as `active` *before* the first kitty call, so `SessionStart` always finds it. Afterwards it writes only the kitty IDs back, so the hook's update is not clobbered. Records written by older `ks` versions have no `status` field and read as `active`.
 
-Store updates in the hook are best effort: if the session record is missing or unreadable, the state file is still written and the hook exits 0.
+The state file and the record are updated independently: a failure in one does not skip the other. Record problems (missing, unreadable, unsaveable) are printed to stderr as `ks _hook: <error>` and the hook still exits 0, so Claude's hook run never fails because of `ks`.
 
 ### What gets written to `settings.json`
 
@@ -81,9 +88,9 @@ Simplified example after `ks hooks install`:
       }
     ],
     "Stop":         [ /* ... */ ],
-    "Notification": [ /* ... */ ],
+    "Notification": [ /* matcher "permission_prompt|elicitation_dialog" */ ],
     "SessionStart": [ /* ... */ ],
-    "SessionEnd":   [ /* ... */ ]
+    "SessionEnd":   [ /* matcher "prompt_input_exit|logout" */ ]
   }
 }
 ```
@@ -138,6 +145,6 @@ cat ~/.config/ks/state/<name>.json
 
 ## Cleaning state
 
-- `ks close <name>` removes the session's state file.
-- `ks delete` (from the TUI) does the same before trashing the session record.
-- Stale state for sessions that no longer exist is harmless — `ks list` and the TUI only look up state for sessions that are present in the session store.
+- `ks close <name>` (with or without `--keep`) and the TUI close and delete actions all go through one helper, `launcher.Close`. It removes the state file, closes the session's live tabs, and then either marks the record `stopped` or moves it to the trash.
+- The `SessionEnd` hook removes the state file when it marks a record `stopped`.
+- Stale state for sessions that no longer exist is harmless. `ks list` and the TUI only look up state for sessions that are present in the session store. A record whose `status` is `stopped` shows `stopped` without consulting kitty or the state file.

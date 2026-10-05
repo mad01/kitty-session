@@ -17,21 +17,25 @@ cmd/ks
         ├── internal/launcher
         │     ├── internal/kitty
         │     ├── internal/session
+        │     ├── internal/state
+        │     ├── internal/claude    transcript path for the --resume check
         │     ├── internal/summary   summary tab launcher
         │     └── internal/repo/config
+        ├── internal/procinfo       process parent/comm lookup (hook's nested-claude guard)
         ├── internal/kitty
         ├── internal/session
         ├── internal/state
         └── internal/repo/{config,finder}
 ```
 
-`internal/cli` depends on almost everything. `internal/tui` is its second consumer. `internal/launcher` is the one mid-layer package: it composes `kitty`, `summary`, `session`, and `config` so that `cli` and `tui` share a single launch path. Every other leaf package has a single responsibility and no dependencies on its peers.
+`internal/cli` depends on almost everything. `internal/tui` is its second consumer. `internal/launcher` is the one mid-layer package: it composes `kitty`, `summary`, `session`, `state`, `claude` and `config` so that `cli` and `tui` share a single launch path and a single close path. Every other leaf package has a single responsibility and no dependencies on its peers.
 
 ### Leaf package responsibilities
 
 | Package | Responsibility |
 |---|---|
-| `internal/launcher` | `Open(store, cfg, Request)`: build the claude command line (`claude`, `claude --resume <id>`, or `claude --continue`), lay out the kitty windows, save the record. The layout lives in one function (`launchTopology`) behind a small backend interface so tests run without kitty. |
+| `internal/launcher` | `Open(store, cfg, Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude`, `claude --resume <id>`, or `claude --continue`), lay out the kitty windows, write the kitty IDs back. `Close(store, sess, keep)`: drop the state file, close the live tabs, mark stopped or trash. Layout and teardown sit behind a small backend interface so tests run without kitty. |
+| `internal/procinfo` | `ParentOf(pid)` and `CommOf(pid)` via the darwin `kern.proc.pid` sysctl; `ErrUnsupported` elsewhere. Used by the hook to tell the Claude kitty launched from one nested inside the session. |
 | `internal/kitty` | Shell out to `kitty @` subcommands; parse `@ ls` JSON. No knowledge of sessions or Claude. |
 | `internal/session` | `Session` struct and `Store` (save/load/list/delete/rename/restore) backed by `~/.config/ks/sessions/`. |
 | `internal/state` | JSON state files under `~/.config/ks/state/`. Freshness predicates. |
@@ -59,6 +63,7 @@ Session files are small JSON:
 
 ```json
 {
+  "id": "9f2c7b1e4d6a8c0f9f2c7b1e4d6a8c0f",
   "name": "kitty-session-main",
   "dir": "/Users/you/code/src/github.com/mad01/kitty-session",
   "created_at": "2026-04-16T10:15:00Z",
@@ -67,13 +72,14 @@ Session files are small JSON:
   "kitty_shell_window_id": 88,
   "kitty_summary_window_id": 89,
   "status": "active",
-  "claude_session_id": "6f1c2a4e-3b7d-4c0e-9a51-2f8e7d6c5b4a"
+  "claude_session_id": "6f1c2a4e-3b7d-4c0e-9a51-2f8e7d6c5b4a",
+  "claude_transcript_path": "/Users/you/.claude/projects/-Users-you-code-src-github-com-mad01-kitty-session/6f1c2a4e-3b7d-4c0e-9a51-2f8e7d6c5b4a.jsonl"
 }
 ```
 
 `kitty_shell_window_id` is only populated with `layout: tab` (the shell is a sibling kitty tab rather than a split pane). `kitty_summary_window_id` is only populated when the summary tab is enabled.
 
-The `kitty_*` IDs are ephemeral and go stale when kitty restarts. `status` and `claude_session_id` are not: `status` is `active` or `stopped` (absent in files from older versions, which read as `active`), and `claude_session_id` is the ID Claude Code reported on its last `SessionStart` hook. Together they let `ks open` bring back a conversation with `claude --resume <id>`. See [Hooks and state detection](hooks-and-state.md#session-id-and-status) for who writes them. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
+The `kitty_*` IDs are ephemeral and go stale when kitty restarts. The rest is not. `id` is random and stable across renames (exported as `KS_SESSION_ID`, found with `Store.FindByID`). `status` is `active` or `stopped` (absent in files from older versions, which read as `active`). `claude_session_id` and `claude_transcript_path` are what Claude Code reported on its last `SessionStart` hook. Together they let `ks open` bring back a conversation with `claude --resume <id>` while the transcript file still exists. See [Hooks and state detection](hooks-and-state.md#session-id-and-status) for who writes them. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
 
 State files are even smaller — see [Hooks and state detection](hooks-and-state.md#state-file).
 
@@ -85,9 +91,13 @@ Triggered by `ks new -n foo -d /path`, `ks tmp`, `ks open <stopped>`, or the TUI
 cli.runNew / cli.runTmp / cli.runOpen / tui.createSession / tui.openSession
     └── config.Load()                        ~/.config/ks/config.yaml
     └── launcher.Open(store, cfg, Request{Name, Dir, Resume})
-          ├── target: session.New(...) or store.Load(name)
-          ├── ResumeStored and tab alive → focus it, return (nothing saved)
-          ├── claudeArgs: --env PATH, --env KS_SESSION_NAME, -- claude [--resume <id> | --continue]
+          ├── target: ResumeNone → ErrExists if the name is taken, else session.New(...)
+          │           ResumeStored → store.Load(name), assigning an id if the record has none
+          ├── ResumeStored and tab + claude window alive → focus it, return (nothing saved)
+          ├── ResumeStored otherwise → close whatever tabs are left (claude, shell, summary)
+          ├── store.Save(sess) with status = active   (before kitty, so SessionStart finds it)
+          ├── claudeArgs: --env PATH, --env KS_SESSION_NAME, --env KS_SESSION_ID,
+          │               -- claude [--resume <id> if its transcript exists | --continue]
           ├── launchTopology(plan)
           │     ├── kitty.LaunchTab(dir, claudeArgs...)     → new OS window, Claude window ID
           │     ├── kitty.SetTabTitle(name)
@@ -96,11 +106,12 @@ cli.runNew / cli.runTmp / cli.runOpen / tui.createSession / tui.openSession
           │     │   layout split: kitty.LaunchSplit         → shell pane
           │     ├── summary enabled: summary.LaunchTab      → haiku tab (failure = warning)
           │     └── kitty.FocusWindow(claudeWinID)          (failure = warning)
-          ├── copy IDs onto the record, status = active
-          └── store.Save(sess)                              → ~/.config/ks/sessions/<name>.json
+          └── store.Load(name), copy only the kitty IDs, store.Save → ~/.config/ks/sessions/<name>.json
 ```
 
-`claude` is started with `--resume <id>` when the record has a `claude_session_id`, `--continue` when it is a reopen without one, and bare for a new session. `PATH` is forwarded because `kitty @ launch` runs with kitty's environment, not the caller's. `KS_SESSION_NAME=<name>` lets the `ks _hook` handler find the state file and record. Callers print the launcher's warnings (summary tab, focus) themselves; the TUI drops them.
+`claude` is started with `--resume <id>` when the record has a `claude_session_id` whose transcript file still exists, `--continue` for any other reopen, and bare for a new session. `PATH` is forwarded because `kitty @ launch` runs with kitty's environment, not the caller's. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (summary tab, focus, leftover tabs) themselves; the TUI drops them.
+
+Closing is the mirror image. `ks close` and the TUI close/delete actions call `launcher.Close(store, sess, keep)`. It removes the state file, closes the session's live tabs, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`.
 
 ## Flow: detecting a session's state
 
@@ -108,6 +119,8 @@ Triggered by every TUI poll (every 3 seconds) and by every `ks list` invocation.
 
 ```
 detectSessionState(sess):
+    if !sess.IsActive():                      # status == "stopped": no kitty call needed
+        return StateStopped
     if !kitty.TabExists(sess.KittyTabID):
         return StateStopped
     state.Read(sess.Name):
@@ -141,6 +154,7 @@ See [Hooks and state detection](hooks-and-state.md) for the textual rules inside
 | `FindTabForWindow(winID)` | Walks `ListTabsDetailed` output |
 | `FirstWindowInTab(tabID)` | Walks `ListTabsDetailed` output |
 | `TabExists(tabID)` | Walks `ListTabs` output |
+| `WindowExists(winID)` | Walks `ListTabsDetailed` output |
 
 Nothing else in the codebase calls `exec.Command("kitty", ...)`.
 
