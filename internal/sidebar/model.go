@@ -60,6 +60,10 @@ type (
 		repos []Repo
 		err   error
 	}
+	focusMsg struct {
+		focused bool // whether the sidebar window had keyboard focus when asked
+		err     error
+	}
 )
 
 // confirmAction is what a y/n prompt will do.
@@ -84,6 +88,14 @@ type model struct {
 	pinned  int // width of the last successful PinWidth; zero before one
 	mode    mode
 	frame   int // animation frame for pulsing dots
+	// focused is whether the sidebar window has keyboard focus; the frame is
+	// drawn in the focus colour while it is set. Seeded once by the backend
+	// from Init, then kept current by the terminal's focus events.
+	focused bool
+	// focusSeen is set by the first focus event. The seed is a snapshot taken
+	// off the update loop and can land after an event that already moved the
+	// focus, so once an event has arrived the seed is dropped.
+	focusSeen bool
 
 	filter textinput.Model // the `/` name filter
 	input  textinput.Model // rename and new-agent name
@@ -128,9 +140,14 @@ func newInput(prompt string) textinput.Model {
 	return ti
 }
 
-// Init starts the poll and animation tickers; the first tick loads the list.
+// Init starts the poll and animation tickers and seeds the focus flag; the
+// first tick loads the list.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(func() tea.Msg { return tickMsg(time.Now()) }, animCmd())
+	return tea.Batch(
+		func() tea.Msg { return tickMsg(time.Now()) },
+		animCmd(),
+		m.focusedCmd(),
+	)
 }
 
 func tickCmd() tea.Cmd {
@@ -158,6 +175,17 @@ func (m model) reposCmd() tea.Cmd {
 	return func() tea.Msg {
 		repos, err := backend.Repos()
 		return reposMsg{repos: repos, err: err}
+	}
+}
+
+// focusedCmd asks the backend whether this sidebar's window has keyboard
+// focus, off the update loop. Focus events only report changes, so this one
+// snapshot gives the frame its starting colour.
+func (m model) focusedCmd() tea.Cmd {
+	backend := m.backend
+	return func() tea.Msg {
+		focused, err := backend.Focused()
+		return focusMsg{focused: focused, err: err}
 	}
 }
 

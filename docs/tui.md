@@ -17,7 +17,7 @@ Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instanc
 
 ## Rows
 
-The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Under the `agents … priority` header each agent takes two lines:
+The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Its border is light green while the sidebar window has the keyboard and muted gray otherwise, so the frame tells you which side of the tab has focus. Under the `agents … priority` header each agent takes two lines:
 
 - A dot for the state, then the name. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background.
 - Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one.

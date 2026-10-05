@@ -23,14 +23,15 @@ func (m model) View() string {
 	}
 	lines = fitLines(lines, m.innerHeight(), inner)
 
+	frame := frameStyle(m.focused)
 	hline := strings.Repeat("─", inner)
-	side := borderStyle.Render("│")
+	side := frame.Render("│")
 	var b strings.Builder
-	b.WriteString(borderStyle.Render("╭" + hline + "╮"))
+	b.WriteString(frame.Render("╭" + hline + "╮"))
 	for _, l := range lines {
 		b.WriteString("\n" + side + l + side)
 	}
-	b.WriteString("\n" + borderStyle.Render("╰"+hline+"╯"))
+	b.WriteString("\n" + frame.Render("╰"+hline+"╯"))
 	return b.String()
 }
 

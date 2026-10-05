@@ -46,13 +46,20 @@ func New(opts Options) tea.Model {
 	return newModel(opts, home)
 }
 
-// Run drives the sidebar in the alternate screen with mouse support until
-// the backend's Quit succeeds or the program is killed.
+// Run drives the sidebar in the alternate screen with mouse support and
+// terminal focus reporting until the backend's Quit succeeds or the program
+// is killed. Focus reporting is what recolours the frame when the keyboard
+// moves between the sidebar and claude.
 func Run(opts Options) error {
 	if opts.Backend == nil {
 		return ErrNoBackend
 	}
-	p := tea.NewProgram(New(opts), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(
+		New(opts),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+		tea.WithReportFocus(),
+	)
 	_, err := p.Run()
 	return err
 }

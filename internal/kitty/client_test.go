@@ -9,13 +9,17 @@ import (
 )
 
 // lsFixture is a trimmed `kitty @ ls` of an instance with the home tab and
-// one session tab (sidebar 2, claude 3) tagged with the session id.
+// one session tab (sidebar 2, claude 3) tagged with the session id. Claude
+// holds the keyboard focus.
 const lsFixture = `[{"id":1,"tabs":[
   {"id":1,"title":"ks","is_active":false,"windows":[
-    {"id":1,"title":"ks","columns":158,"lines":39,"user_vars":{"KS_HOME_AGENT":"1"}}]},
+    {"id":1,"title":"ks","columns":158,"lines":39,"is_focused":false,
+     "user_vars":{"KS_HOME_AGENT":"1"}}]},
   {"id":2,"title":"demo","is_active":true,"windows":[
-    {"id":2,"title":"ks","columns":36,"lines":39,"user_vars":{"KS_SESSION_ID":"abc"}},
-    {"id":3,"title":"✳ claude","columns":119,"lines":39,"user_vars":{"KS_SESSION_ID":"abc"}}]}
+    {"id":2,"title":"ks","columns":36,"lines":39,"is_focused":false,
+     "user_vars":{"KS_SESSION_ID":"abc"}},
+    {"id":3,"title":"✳ claude","columns":119,"lines":39,"is_focused":true,
+     "user_vars":{"KS_SESSION_ID":"abc"}}]}
 ]}]`
 
 // spawned records one Start.
@@ -299,7 +303,7 @@ func TestWindows(t *testing.T) {
 		},
 		{
 			ID: 3, TabID: 2, TabTitle: "demo", TabActive: true,
-			Title: "✳ claude", Columns: 119, SessionID: "abc",
+			Title: "✳ claude", Columns: 119, SessionID: "abc", Focused: true,
 		},
 	}
 	if !slices.Equal(windows, want) {

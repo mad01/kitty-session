@@ -254,6 +254,9 @@ type Window struct {
 	SessionID string
 	// HomeAgent is true when the window carries HomeAgentVar.
 	HomeAgent bool
+	// Focused is true when the window has keyboard focus: the active window
+	// of the active tab in the OS window the user is typing in.
+	Focused bool
 }
 
 // ls JSON shapes, limited to the fields ks reads.
@@ -268,10 +271,11 @@ type (
 		Windows  []lsWindow `json:"windows"`
 	}
 	lsWindow struct {
-		ID       int               `json:"id"`
-		Title    string            `json:"title"`
-		Columns  int               `json:"columns"`
-		UserVars map[string]string `json:"user_vars"`
+		ID        int               `json:"id"`
+		Title     string            `json:"title"`
+		Columns   int               `json:"columns"`
+		IsFocused bool              `json:"is_focused"`
+		UserVars  map[string]string `json:"user_vars"`
 	}
 )
 
@@ -304,6 +308,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					Columns:   w.Columns,
 					SessionID: w.UserVars[SessionVar],
 					HomeAgent: w.UserVars[HomeAgentVar] != "",
+					Focused:   w.IsFocused,
 				})
 			}
 		}

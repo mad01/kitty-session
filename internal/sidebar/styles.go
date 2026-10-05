@@ -8,6 +8,7 @@ var (
 	colorSuccess = lipgloss.AdaptiveColor{Light: "#40A14F", Dark: "#02BF87"} // green
 	colorTeal    = lipgloss.AdaptiveColor{Light: "#0B8F8F", Dark: "#2DD4BF"} // teal
 	colorMuted   = lipgloss.AdaptiveColor{Light: "#A0A1A7", Dark: "#636363"} // gray
+	colorFocus   = lipgloss.AdaptiveColor{Light: "#7BC96F", Dark: "#A6E3A1"} // light green
 	colorDanger  = lipgloss.AdaptiveColor{Light: "#E45649", Dark: "#ED567A"} // red / coral
 	colorTextPri = lipgloss.AdaptiveColor{Light: "#383A42", Dark: "#FFFDF5"} // foreground
 	colorTextSec = lipgloss.AdaptiveColor{Light: "#696C77", Dark: "#C1C6B2"} // dimmed foreground
@@ -70,6 +71,16 @@ var (
 				Background(colorPickBG)
 	pickerTmpStyle = lipgloss.NewStyle().Foreground(colorAccent)
 )
+
+// frameStyle styles the sidebar's outer frame: light green while the sidebar
+// window has keyboard focus, muted otherwise, so the frame says which side of
+// the tab the keys go to. The popups keep borderStyle whatever the focus.
+func frameStyle(focused bool) lipgloss.Style {
+	if focused {
+		return lipgloss.NewStyle().Foreground(colorFocus)
+	}
+	return borderStyle
+}
 
 // Glyphs.
 const (

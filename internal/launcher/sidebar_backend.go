@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -410,6 +411,35 @@ func (b *SidebarBackend) PinWidth(cols int) error {
 		return nil
 	}
 	return b.l.kitty.ResizeWindow(lv.sidebar.ID, kitty.AxisHorizontal, delta)
+}
+
+// Focused reports whether this sidebar's own kitty window has keyboard focus,
+// from one instance snapshot. The window is the one kitty named in
+// KITTY_WINDOW_ID when it launched this process; without that variable, or
+// with a window the instance no longer has, the answer is false.
+func (b *SidebarBackend) Focused() (bool, error) {
+	id, ok := ownWindowID()
+	if !ok {
+		return false, nil
+	}
+	all, err := b.l.kitty.Windows()
+	if err != nil {
+		return false, fmt.Errorf("cannot list kitty windows: %w", err)
+	}
+	for _, w := range all {
+		if w.ID == id {
+			return w.Focused, nil
+		}
+	}
+	return false, nil
+}
+
+// ownWindowID is the id of the kitty window this process runs in, from the
+// KITTY_WINDOW_ID kitty sets in every window it launches. ok is false when
+// the variable is unset or not a number.
+func ownWindowID() (id int, ok bool) {
+	id, err := strconv.Atoi(os.Getenv("KITTY_WINDOW_ID"))
+	return id, err == nil
 }
 
 // tabWindows counts the windows of one tab in a snapshot.

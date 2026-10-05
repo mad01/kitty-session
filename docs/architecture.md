@@ -28,7 +28,7 @@ cmd/ks
         └── internal/repo/{config,finder}
 ```
 
-`internal/cli` depends on almost everything. Two mid-layer packages sit between it and the leaves: `internal/instance` owns the kitty process (is it up, start it, close it), `internal/launcher` owns everything that happens inside it (tabs, windows, records). `internal/sidebar` is the UI and knows nothing of kitty or the store: it drives a `Backend` interface of 15 methods, which `launcher.SidebarBackend` implements for production and `sidebar.NewDemoBackend` for `ks _sidebar-demo`. The sidebar package never imports the launcher; the launcher imports the sidebar for its types. Every other leaf package has a single responsibility and no dependencies on its peers.
+`internal/cli` depends on almost everything. Two mid-layer packages sit between it and the leaves: `internal/instance` owns the kitty process (is it up, start it, close it), `internal/launcher` owns everything that happens inside it (tabs, windows, records). `internal/sidebar` is the UI and knows nothing of kitty or the store: it drives a `Backend` interface of 16 methods, which `launcher.SidebarBackend` implements for production and `sidebar.NewDemoBackend` for `ks _sidebar-demo`. The sidebar package never imports the launcher; the launcher imports the sidebar for its types. Every other leaf package has a single responsibility and no dependencies on its peers.
 
 ### Leaf package responsibilities
 

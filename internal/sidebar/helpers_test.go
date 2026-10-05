@@ -19,6 +19,8 @@ type fakeBackend struct {
 	calls     []string
 	pinned    int
 	pinErr    error
+	focused   bool  // what Focused reports
+	focusErr  error // returned by Focused when set
 	fail      error  // returned by every mutating call when set
 	noSuggest bool   // SuggestName returns ""
 	tmpBase   string // when set, TmpDir creates a real directory under it
@@ -67,6 +69,8 @@ func (f *fakeBackend) PinWidth(cols int) error {
 	f.pinned = cols
 	return f.pinErr
 }
+
+func (f *fakeBackend) Focused() (bool, error) { return f.focused, f.focusErr }
 
 var errFake = errors.New("fake failure")
 

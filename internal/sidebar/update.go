@@ -35,12 +35,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reposMsg:
 		m.picker.setRepos(msg.repos, msg.err)
 		return m, nil
+	case tea.FocusMsg:
+		m.focused, m.focusSeen = true, true
+		return m, nil
+	case tea.BlurMsg:
+		m.focused, m.focusSeen = false, true
+		return m, nil
+	case focusMsg:
+		return m.applyFocusSeed(msg), nil
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
 		return m.updateKey(msg)
 	}
 	return m, nil
+}
+
+// applyFocusSeed applies the startup focus snapshot unless a focus event has
+// already arrived, which is newer by definition.
+func (m model) applyFocusSeed(msg focusMsg) model {
+	if m.focusSeen {
+		return m
+	}
+	if msg.err != nil {
+		m.setError(msg.err)
+		return m
+	}
+	m.focused = msg.focused
+	return m
 }
 
 // updateKey clears the transient status, then routes the key by mode.

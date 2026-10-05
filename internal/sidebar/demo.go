@@ -218,6 +218,10 @@ func (d *DemoBackend) PinWidth(cols int) error {
 	return nil
 }
 
+// Focused reports no focus: the demo has no kitty window to ask, and the
+// terminal's own focus events take over from the first change.
+func (d *DemoBackend) Focused() (bool, error) { return false, nil }
+
 // index returns the position of the named agent, or -1. Callers hold mu.
 func (d *DemoBackend) index(name string) int {
 	for i, a := range d.agents {

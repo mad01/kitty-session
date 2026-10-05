@@ -94,6 +94,8 @@ type Backend interface {
 	Repos() ([]Repo, error)
 	// PinWidth tells the host the sidebar's terminal is cols wide so it can re-pin the split.
 	PinWidth(cols int) error
+	// Focused reports whether this sidebar's own kitty window has keyboard focus right now.
+	Focused() (bool, error)
 }
 
 // sortAgents orders agents for the "priority" sort: by State ascending, then

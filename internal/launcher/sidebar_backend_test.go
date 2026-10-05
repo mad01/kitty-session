@@ -636,3 +636,46 @@ func TestListReflectsRenameByID(t *testing.T) {
 		t.Errorf("after rename own row = %+v, ok %v; want name after and still own", a, ok)
 	}
 }
+
+func TestFocused(t *testing.T) {
+	b, f, _ := newTestBackend(t)
+	sess := &session.Session{ID: "abc", Name: "demo", Dir: "/tmp/demo"}
+	f.addTab(sess, true)
+	f.find(sess.KittyWindowID).Focused = true // claude holds the keys
+
+	tests := []struct {
+		name   string
+		env    string
+		want   bool
+		asksLs bool
+	}{
+		{"no window id", "", false, false},
+		{"window id not a number", "two", false, false},
+		{"window gone from the instance", "99", false, true},
+		{"own window without focus", itoa(sess.KittySidebarWindowID), false, true},
+		{"own window with focus", itoa(sess.KittyWindowID), true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KITTY_WINDOW_ID", tt.env)
+			before := countCalls(f, "Windows")
+			got, err := b.Focused()
+			if err != nil {
+				t.Fatalf("Focused: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Focused() = %v, want %v", got, tt.want)
+			}
+			if asked := countCalls(f, "Windows") > before; asked != tt.asksLs {
+				t.Errorf("asked kitty for a snapshot = %v, want %v", asked, tt.asksLs)
+			}
+		})
+	}
+
+	t.Setenv("KITTY_WINDOW_ID", itoa(sess.KittyWindowID))
+	errSocket := errors.New("socket gone")
+	f.errs["Windows"] = errSocket
+	if _, err := b.Focused(); !errors.Is(err, errSocket) {
+		t.Fatalf("Focused with a dead instance: err = %v, want %v wrapped", err, errSocket)
+	}
+}
