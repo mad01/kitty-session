@@ -23,9 +23,10 @@ const (
 // idBytes is the length of a random session ID before hex encoding.
 const idBytes = 16
 
-// Session is one ks-managed kitty tab pairing claude with a shell. The kitty
-// IDs are ephemeral and go stale when kitty restarts; ID, ClaudeSessionID and
-// Status survive that and let ks find the record and resume the conversation.
+// Session is one ks-managed kitty tab in the ks instance: a sidebar window
+// beside a claude window. The kitty IDs are ephemeral and go stale when the
+// instance restarts; ID, ClaudeSessionID and Status survive that and let ks
+// find the record and resume the conversation.
 type Session struct {
 	// ID identifies the record across renames. The launcher exports it as
 	// KS_SESSION_ID so the hook finds the record whatever its current name.
@@ -36,8 +37,11 @@ type Session struct {
 	CreatedAt            string `json:"created_at"`
 	KittyTabID           int    `json:"kitty_tab_id"`
 	KittyWindowID        int    `json:"kitty_window_id,omitempty"`
-	KittyShellWindowID   int    `json:"kitty_shell_window_id,omitempty"`
-	KittySummaryWindowID int    `json:"kitty_summary_window_id,omitempty"`
+	KittySidebarWindowID int    `json:"kitty_sidebar_window_id,omitempty"`
+	// KittyShellWindowID and KittySummaryWindowID were written by the
+	// pre-instance topology. New records never set them.
+	KittyShellWindowID   int `json:"kitty_shell_window_id,omitempty"`
+	KittySummaryWindowID int `json:"kitty_summary_window_id,omitempty"`
 	// Status is StatusActive or StatusStopped; see IsActive for the empty case.
 	Status string `json:"status,omitempty"`
 	// ClaudeSessionID is the session_id Claude Code reported on its last
@@ -46,6 +50,9 @@ type Session struct {
 	// ClaudeTranscriptPath is the transcript_path from that same hook. The
 	// launcher only resumes while this file still exists.
 	ClaudeTranscriptPath string `json:"claude_transcript_path,omitempty"`
+	// FocusedAt is when the launcher last created or focused the session.
+	// Attach brings the most recently focused session to the front.
+	FocusedAt time.Time `json:"focused_at,omitzero"`
 }
 
 // New returns an active session record for name rooted at dir, with a fresh ID.

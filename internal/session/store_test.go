@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -199,5 +201,40 @@ func TestIsActive(t *testing.T) {
 		if got := s.IsActive(); got != tc.want {
 			t.Errorf("IsActive() with Status %q = %v, want %v", tc.status, got, tc.want)
 		}
+	}
+}
+
+// TestFocusedAtRoundTrip: a record that was never focused serializes without
+// the field, so old readers and hand-edits see no bogus zero time; a stamped
+// one survives the trip.
+func TestFocusedAtRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	fresh := New("fresh", "/tmp/fresh", 1, 2)
+	fresh.KittySidebarWindowID = 3
+	if err := store.Save(fresh); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(store.path("fresh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "focused_at") {
+		t.Errorf("zero FocusedAt written: %s", raw)
+	}
+
+	stamp := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	fresh.FocusedAt = stamp
+	if err := store.Save(fresh); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load("fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.FocusedAt.Equal(stamp) {
+		t.Errorf("FocusedAt = %v, want %v", got.FocusedAt, stamp)
+	}
+	if got.KittySidebarWindowID != 3 {
+		t.Errorf("KittySidebarWindowID = %d, want 3", got.KittySidebarWindowID)
 	}
 }
