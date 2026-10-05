@@ -5,10 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
-	"github.com/mad01/kitty-session/internal/summary"
 	"github.com/spf13/cobra"
 )
 
@@ -58,64 +57,20 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot resolve directory: %w", err)
 	}
 
-	// Load config for layout preference
 	cfg, _ := config.Load()
-	layout := cfg.EffectiveLayout()
-
-	// Launch tab with claude
-	windowID, err := kitty.LaunchTab(dir, "--env", "KS_SESSION_NAME="+newName, "--", "claude")
+	res, err := launcher.Open(store, cfg, launcher.Request{Name: newName, Dir: dir})
 	if err != nil {
-		return fmt.Errorf("cannot create tab: %w", err)
+		return err
 	}
-
-	// Set tab title to session name
-	if err := kitty.SetTabTitle(newName); err != nil {
-		return fmt.Errorf("cannot set tab title: %w", err)
-	}
-
-	// Get the tab ID from the window we just created
-	tabID, err := kitty.FindTabForWindow(windowID)
-	if err != nil {
-		return fmt.Errorf("cannot find tab: %w", err)
-	}
-
-	// Launch shell as split or tab based on layout config
-	sess := session.New(newName, dir, tabID, windowID)
-	if layout == config.LayoutTab {
-		shellWindowID, err := kitty.LaunchTabInWindow(windowID, dir)
-		if err != nil {
-			return fmt.Errorf("cannot create shell tab: %w", err)
-		}
-		sess.KittyShellWindowID = shellWindowID
-	} else {
-		if err := kitty.LaunchSplit(dir); err != nil {
-			return fmt.Errorf("cannot create split: %w", err)
-		}
-	}
-
-	// Launch summary tab if enabled
-	if cfg.SummaryEnabled() {
-		summaryWindowID, err := summary.LaunchTab(windowID, windowID, dir)
-		if err != nil {
-			fmt.Fprintf(
-				cmd.ErrOrStderr(),
-				"warning: could not create summary tab: %v\n",
-				err,
-			)
-		} else {
-			sess.KittySummaryWindowID = summaryWindowID
-		}
-	}
-
-	// Focus back on the claude window (top pane)
-	if err := kitty.FocusWindow(windowID); err != nil {
-		// Non-fatal: session is still usable
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
-	}
-	if err := store.Save(sess); err != nil {
-		return fmt.Errorf("cannot save session: %w", err)
-	}
+	printWarnings(cmd, res.Warnings)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", newName, dir)
 	return nil
+}
+
+// printWarnings reports the launcher's non-fatal problems on stderr.
+func printWarnings(cmd *cobra.Command, warnings []error) {
+	for _, w := range warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", w)
+	}
 }

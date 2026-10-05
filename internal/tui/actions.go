@@ -1,17 +1,16 @@
 package tui
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
-	"github.com/mad01/kitty-session/internal/summary"
 )
 
 // Compile-time interface check.
@@ -101,21 +100,6 @@ func mapStringToState(s string) claude.State {
 	}
 }
 
-// claudeLaunchArgs builds the kitty launch arguments for starting claude.
-// When continuing is true, --continue is appended so claude resumes the last
-// conversation in the session directory.
-func claudeLaunchArgs(name string, continuing bool) []string {
-	args := []string{
-		"--env", "PATH=" + os.Getenv("PATH"),
-		"--env", "KS_SESSION_NAME=" + name,
-		"--", "claude",
-	}
-	if continuing {
-		args = append(args, "--continue")
-	}
-	return args
-}
-
 func loadSessions(store *session.Store) ([]sessionItem, error) {
 	sessions, err := store.List()
 	if err != nil {
@@ -133,89 +117,18 @@ func loadSessions(store *session.Store) ([]sessionItem, error) {
 }
 
 func openSession(sess *session.Session, store *session.Store) error {
-	if kitty.TabExists(sess.KittyTabID) {
-		// Focus the Claude pane directly if we have a window ID
-		if sess.KittyWindowID != 0 {
-			return kitty.FocusWindow(sess.KittyWindowID)
-		}
-		return kitty.FocusTab(sess.KittyTabID)
-	}
-
 	cfg, _ := config.Load()
-	layout := cfg.EffectiveLayout()
-
-	// Recreate the session — use --continue to resume the last conversation.
-	windowID, err := kitty.LaunchTab(sess.Dir, claudeLaunchArgs(sess.Name, true)...)
-	if err != nil {
-		return fmt.Errorf("cannot create tab: %w", err)
-	}
-	if err := kitty.SetTabTitle(sess.Name); err != nil {
-		return fmt.Errorf("cannot set tab title: %w", err)
-	}
-	tabID, err := kitty.FindTabForWindow(windowID)
-	if err != nil {
-		return fmt.Errorf("cannot find tab: %w", err)
-	}
-	sess.KittyShellWindowID = 0
-	sess.KittySummaryWindowID = 0
-	if layout == config.LayoutTab {
-		shellWindowID, err := kitty.LaunchTabInWindow(windowID, sess.Dir)
-		if err != nil {
-			return fmt.Errorf("cannot create shell tab: %w", err)
-		}
-		sess.KittyShellWindowID = shellWindowID
-	} else {
-		if err := kitty.LaunchSplit(sess.Dir); err != nil {
-			return fmt.Errorf("cannot create split: %w", err)
-		}
-	}
-	if cfg.SummaryEnabled() {
-		summaryWindowID, err := summary.LaunchTab(windowID, windowID, sess.Dir)
-		if err == nil {
-			sess.KittySummaryWindowID = summaryWindowID
-		}
-	}
-	_ = kitty.FocusWindow(windowID)
-	sess.KittyTabID = tabID
-	sess.KittyWindowID = windowID
-	return store.Save(sess)
+	_, err := launcher.Open(store, cfg, launcher.Request{
+		Name:   sess.Name,
+		Resume: launcher.ResumeStored,
+	})
+	return err
 }
 
 func createSession(name, dir string, store *session.Store) error {
 	cfg, _ := config.Load()
-	layout := cfg.EffectiveLayout()
-
-	windowID, err := kitty.LaunchTab(dir, claudeLaunchArgs(name, false)...)
-	if err != nil {
-		return fmt.Errorf("cannot create tab: %w", err)
-	}
-	if err := kitty.SetTabTitle(name); err != nil {
-		return fmt.Errorf("cannot set tab title: %w", err)
-	}
-	tabID, err := kitty.FindTabForWindow(windowID)
-	if err != nil {
-		return fmt.Errorf("cannot find tab: %w", err)
-	}
-	sess := session.New(name, dir, tabID, windowID)
-	if layout == config.LayoutTab {
-		shellWindowID, err := kitty.LaunchTabInWindow(windowID, dir)
-		if err != nil {
-			return fmt.Errorf("cannot create shell tab: %w", err)
-		}
-		sess.KittyShellWindowID = shellWindowID
-	} else {
-		if err := kitty.LaunchSplit(dir); err != nil {
-			return fmt.Errorf("cannot create split: %w", err)
-		}
-	}
-	if cfg.SummaryEnabled() {
-		summaryWindowID, err := summary.LaunchTab(windowID, windowID, dir)
-		if err == nil {
-			sess.KittySummaryWindowID = summaryWindowID
-		}
-	}
-	_ = kitty.FocusWindow(windowID)
-	return store.Save(sess)
+	_, err := launcher.Open(store, cfg, launcher.Request{Name: name, Dir: dir})
+	return err
 }
 
 // closeSession closes the session's kitty tabs but keeps the record, marked

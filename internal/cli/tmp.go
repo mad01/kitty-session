@@ -7,10 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
-	"github.com/mad01/kitty-session/internal/summary"
 	"github.com/spf13/cobra"
 )
 
@@ -60,54 +59,11 @@ func runTmp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session %q already exists (use 'ks open %s' or 'ks close %s' first)", name, name, name)
 	}
 
-	layout := cfg.EffectiveLayout()
-
-	windowID, err := kitty.LaunchTab(tmpDir, "--env", "KS_SESSION_NAME="+name, "--", "claude")
+	res, err := launcher.Open(store, cfg, launcher.Request{Name: name, Dir: tmpDir})
 	if err != nil {
-		return fmt.Errorf("cannot create tab: %w", err)
+		return err
 	}
-
-	if err := kitty.SetTabTitle(name); err != nil {
-		return fmt.Errorf("cannot set tab title: %w", err)
-	}
-
-	tabID, err := kitty.FindTabForWindow(windowID)
-	if err != nil {
-		return fmt.Errorf("cannot find tab: %w", err)
-	}
-
-	sess := session.New(name, tmpDir, tabID, windowID)
-	if layout == config.LayoutTab {
-		shellWindowID, err := kitty.LaunchTabInWindow(windowID, tmpDir)
-		if err != nil {
-			return fmt.Errorf("cannot create shell tab: %w", err)
-		}
-		sess.KittyShellWindowID = shellWindowID
-	} else {
-		if err := kitty.LaunchSplit(tmpDir); err != nil {
-			return fmt.Errorf("cannot create split: %w", err)
-		}
-	}
-
-	if cfg.SummaryEnabled() {
-		summaryWindowID, err := summary.LaunchTab(windowID, windowID, tmpDir)
-		if err != nil {
-			fmt.Fprintf(
-				cmd.ErrOrStderr(),
-				"warning: could not create summary tab: %v\n",
-				err,
-			)
-		} else {
-			sess.KittySummaryWindowID = summaryWindowID
-		}
-	}
-
-	if err := kitty.FocusWindow(windowID); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not focus claude pane: %v\n", err)
-	}
-	if err := store.Save(sess); err != nil {
-		return fmt.Errorf("cannot save session: %w", err)
-	}
+	printWarnings(cmd, res.Warnings)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", name, tmpDir)
 	return nil
