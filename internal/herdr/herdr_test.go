@@ -167,12 +167,28 @@ func TestAgentsFlattensClaudePanes(t *testing.T) {
 	agents, skipped := snap.Agents()
 
 	wantAgents := []Agent{
-		{NameHint: "", Dir: "/home/u/code/alpha", SessionID: "b75ee90c-9382-4d0a-a09b-99b7fd5f34ef"},
-		{NameHint: "Beta Work", Dir: "/home/u/code/beta", SessionID: "211b8c21-c5a0-4fa1-864a-8d6c8d72f67c"},
+		{
+			NameHint:  "",
+			Dir:       "/home/u/code/alpha",
+			SessionID: "b75ee90c-9382-4d0a-a09b-99b7fd5f34ef",
+		},
+		{
+			NameHint:  "Beta Work",
+			Dir:       "/home/u/code/beta",
+			SessionID: "211b8c21-c5a0-4fa1-864a-8d6c8d72f67c",
+		},
 		// Pane 6 has no cwd of its own and takes the workspace's.
-		{NameHint: "gamma tab", Dir: "/home/u/code/gamma", SessionID: "0f0f0f0f-0000-4000-8000-000000000006"},
+		{
+			NameHint:  "gamma tab",
+			Dir:       "/home/u/code/gamma",
+			SessionID: "0f0f0f0f-0000-4000-8000-000000000006",
+		},
 		// Pane 10 sorts after 6 numerically, not before 3 as a string.
-		{NameHint: "gamma tab", Dir: "/home/u/code/gamma", SessionID: "0f0f0f0f-0000-4000-8000-000000000010"},
+		{
+			NameHint:  "gamma tab",
+			Dir:       "/home/u/code/gamma",
+			SessionID: "0f0f0f0f-0000-4000-8000-000000000010",
+		},
 	}
 	if !reflect.DeepEqual(agents, wantAgents) {
 		t.Errorf("agents:\n got %+v\nwant %+v", agents, wantAgents)

@@ -19,8 +19,8 @@ type fakeBackend struct {
 	calls     []string
 	pinned    int
 	pinErr    error
-	focused   bool  // what Focused reports
-	focusErr  error // returned by Focused when set
+	focused   bool   // what Focused reports
+	focusErr  error  // returned by Focused when set
 	fail      error  // returned by every mutating call when set
 	noSuggest bool   // SuggestName returns ""
 	tmpBase   string // when set, TmpDir creates a real directory under it

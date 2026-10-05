@@ -137,7 +137,10 @@ func TestImportDryRunWritesNothing(t *testing.T) {
 	if got := row(out, "import", "alpha"); len(got) != 4 || got[3] != alphaID[:8] {
 		t.Errorf("alpha row = %v", got)
 	}
-	if !strings.Contains(out, "ks: dry run, nothing written: 2 to import, 0 already present, 2 skipped") {
+	if !strings.Contains(
+		out,
+		"ks: dry run, nothing written: 2 to import, 0 already present, 2 skipped",
+	) {
 		t.Errorf("summary missing in:\n%s", out)
 	}
 	if files := sessionFiles(t, home); len(files) != 0 {
@@ -161,7 +164,10 @@ func TestImportWritesActiveRecords(t *testing.T) {
 	if got := row(out, "imported", "beta-work"); len(got) != 4 || got[3] != betaID[:8] {
 		t.Errorf("beta row = %v", got)
 	}
-	if got := row(out, "skipped", "~/code/beta"); !strings.HasSuffix(strings.Join(got, " "), "shell, no agent") {
+	if got := row(out, "skipped", "~/code/beta"); !strings.HasSuffix(
+		strings.Join(got, " "),
+		"shell, no agent",
+	) {
 		t.Errorf("shell skip row = %v", got)
 	}
 	if !strings.Contains(out, "codex is not claude") {

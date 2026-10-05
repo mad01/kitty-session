@@ -101,8 +101,13 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	toImport := countAction(items, actionImport)
 	if importDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "ks: dry run, nothing written: %d to import, %d already present, %d skipped\n",
-			toImport, len(items)-toImport, len(skipped))
+		fmt.Fprintf(
+			cmd.OutOrStdout(),
+			"ks: dry run, nothing written: %d to import, %d already present, %d skipped\n",
+			toImport,
+			len(items)-toImport,
+			len(skipped),
+		)
 		return nil
 	}
 	imported, err := writeImports(store, items)
@@ -127,7 +132,8 @@ func loadHerdrSnapshot() (string, *herdr.Snapshot, error) {
 	snap, err := herdr.Load(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil, fmt.Errorf(
-			"no herdr session file at %s; pass --from <session.json> to read another", path)
+			"no herdr session file at %s; pass --from <session.json> to read another", path,
+		)
 	}
 	if err != nil {
 		return "", nil, err

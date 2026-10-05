@@ -95,8 +95,12 @@ func Load(path string) (*Snapshot, error) {
 		return nil, fmt.Errorf("cannot parse herdr session file %s: %w", path, err)
 	}
 	if snap.Version != Version {
-		return nil, fmt.Errorf("herdr session file %s is format version %d; ks import understands version %d",
-			path, snap.Version, Version)
+		return nil, fmt.Errorf(
+			"herdr session file %s is format version %d; ks import understands version %d",
+			path,
+			snap.Version,
+			Version,
+		)
 	}
 	return &snap, nil
 }
