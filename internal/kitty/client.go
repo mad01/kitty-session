@@ -180,6 +180,12 @@ func ListTabsDetailed() ([]DetailedTab, error) {
 	return tabs, nil
 }
 
+// WindowExists checks whether a window (pane) with the given ID is still alive.
+func WindowExists(windowID int) bool {
+	_, err := FindTabForWindow(windowID)
+	return err == nil
+}
+
 // FocusWindow focuses a specific window (pane) by ID.
 func FocusWindow(windowID int) error {
 	if err := exec.Command("kitty", "@", "focus-window", "--match=id:"+strconv.Itoa(windowID)).Run(); err != nil {

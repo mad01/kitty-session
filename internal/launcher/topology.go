@@ -14,6 +14,9 @@ import (
 // shells out.
 type backend interface {
 	TabExists(tabID int) bool
+	WindowExists(windowID int) bool
+	CloseTab(tabID int) error
+	CloseTabForWindow(windowID int) error
 	FocusTab(tabID int) error
 	FocusWindow(windowID int) error
 	LaunchTab(dir string, args ...string) (int, error)
@@ -28,6 +31,8 @@ type backend interface {
 type kittyBackend struct{}
 
 func (kittyBackend) TabExists(tabID int) bool       { return kitty.TabExists(tabID) }
+func (kittyBackend) WindowExists(windowID int) bool { return kitty.WindowExists(windowID) }
+func (kittyBackend) CloseTab(tabID int) error       { return kitty.CloseTab(tabID) }
 func (kittyBackend) FocusTab(tabID int) error       { return kitty.FocusTab(tabID) }
 func (kittyBackend) FocusWindow(windowID int) error { return kitty.FocusWindow(windowID) }
 func (kittyBackend) SetTabTitle(title string) error { return kitty.SetTabTitle(title) }
@@ -37,6 +42,10 @@ func (kittyBackend) LaunchSplit(dir string, args ...string) error {
 
 func (kittyBackend) LaunchTab(dir string, args ...string) (int, error) {
 	return kitty.LaunchTab(dir, args...)
+}
+
+func (kittyBackend) CloseTabForWindow(windowID int) error {
+	return kitty.CloseTabForWindow(windowID)
 }
 
 func (kittyBackend) FindTabForWindow(windowID int) (int, error) {
@@ -125,4 +134,26 @@ func focus(b backend, sess *session.Session) error {
 		return fmt.Errorf("cannot focus tab: %w", err)
 	}
 	return nil
+}
+
+// closeTabs closes every kitty tab the session still owns: the claude tab,
+// the shell tab (layout tab) and the summary tab. Tabs that are already gone
+// are skipped; a tab that exists but will not close is a warning, since the
+// session is being torn down regardless.
+func closeTabs(b backend, sess *session.Session) []error {
+	var warnings []error
+	if b.TabExists(sess.KittyTabID) {
+		if err := b.CloseTab(sess.KittyTabID); err != nil {
+			warnings = append(warnings, fmt.Errorf("could not close tab: %w", err))
+		}
+	}
+	for _, id := range []int{sess.KittyShellWindowID, sess.KittySummaryWindowID} {
+		if id == 0 || !b.WindowExists(id) {
+			continue
+		}
+		if err := b.CloseTabForWindow(id); err != nil {
+			warnings = append(warnings, fmt.Errorf("could not close tab of window %d: %w", id, err))
+		}
+	}
+	return warnings
 }
