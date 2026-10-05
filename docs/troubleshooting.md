@@ -27,7 +27,7 @@ Fix: install [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
 
 Symptom: the tab comes back with the sidebar only; `ks list` says `stopped`.
 
-Cause: the session had no conversation to continue. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists, else `claude --continue`. With nothing to continue Claude prints `No conversation found` and exits, and kitty closes the window. Sessions that never received a message, or whose transcript Claude Code purged (30 days by default), behave like this.
+Cause: the session had no conversation to continue. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists. Otherwise it starts `claude --continue`. With nothing to continue Claude prints `No conversation found` and exits, and kitty closes the window. Sessions that never received a message, or whose transcript Claude Code purged (30 days by default), behave like this.
 
 Fix: `ks open <name>` again puts a fresh claude beside the surviving sidebar. Type something before you `ks quit` next time.
 
