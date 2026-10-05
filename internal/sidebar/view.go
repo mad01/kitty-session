@@ -54,6 +54,8 @@ func (m model) listLines(inner int) []string {
 		popup = m.confirmPopup(inner)
 	case modeRestore:
 		popup = m.restorePopup(inner)
+	case modeKeys:
+		popup = m.keysPopup(inner)
 	default:
 		return lines
 	}

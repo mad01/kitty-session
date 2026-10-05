@@ -65,6 +65,8 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateConfirm(msg)
 	case modeRestore:
 		return m.updateRestore(msg)
+	case modeKeys:
+		return m.updateKeys(msg)
 	default:
 		return m.updateList(msg)
 	}
@@ -103,6 +105,8 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "m":
 		m.mode = modeMenu
 		m.menu.cursor = 0
+	case "?":
+		return m.openKeys()
 	}
 	return m, nil
 }
@@ -218,6 +222,8 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.clickMenu(msg.X, line)
 	case modeList:
 		return m.clickList(msg.X, line)
+	case modeKeys:
+		m.mode = modeList // any click dismisses the keys popup
 	}
 	return m, nil
 }

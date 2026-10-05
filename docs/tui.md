@@ -62,6 +62,7 @@ Rows are ordered by state in the order of the table above, then by the state fil
 | `u` | Restore a trashed session |
 | `/` | Filter rows by name; `enter` keeps the filter, `esc` clears it |
 | `m` | Open the menu |
+| `?` | Show the keys popup; `esc`, `?` or `q` closes it |
 
 `ctrl+c` does nothing: the sidebar never exits on its own. To end ks use the menu's `quit ks` or `ks quit`.
 
@@ -93,7 +94,7 @@ A popup lists the trashed sessions; `j`/`k` move, `enter` restores, `esc` cancel
 
 ## Menu (`m`)
 
-A popup above the footer: `new agent`, `rename`, `close (keep)`, `delete`, `restore`, `shell split`, `hooks status`, `quit ks`. `j`/`k` move, `enter` runs the entry, `esc`, `m` or `q` close it.
+A popup above the footer: `new agent`, `rename`, `close (keep)`, `delete`, `restore`, `shell split`, `hooks status`, `keys`, `quit ks`. `j`/`k` move, `enter` runs the entry, `esc`, `m` or `q` close it.
 
 - `shell split` opens a shell below this tab's claude window, in the session directory, taking roughly a third of the height. The home tab has no agent, so there the entry reports that instead.
 - `hooks status` says whether the five Claude Code hook events are registered in `~/.claude/settings.json`, or which are missing.

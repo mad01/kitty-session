@@ -159,7 +159,7 @@ func TestViewMenuPopup(t *testing.T) {
 			t.Errorf("menu line %d = %q, want %q", first+i, got[first+i], e.label)
 		}
 	}
-	if !strings.HasPrefix(got[first], "│ · dotfiles") {
+	if !strings.HasPrefix(got[first], "│   Claude Code") {
 		t.Errorf("row left of the popup lost: %q", got[first])
 	}
 }

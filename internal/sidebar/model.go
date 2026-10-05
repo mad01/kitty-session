@@ -20,6 +20,7 @@ const (
 	modeRename              // inline rename of the cursor row
 	modeConfirm             // y/n before close or delete
 	modeRestore             // picking a trashed session to restore
+	modeKeys                // the keys help popup
 )
 
 // Layout constants, in terminal cells and lines.

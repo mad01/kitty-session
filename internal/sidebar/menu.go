@@ -25,6 +25,7 @@ var menuEntries = []menuEntry{
 	{"restore", model.openRestore},
 	{"shell split", model.shellSplit},
 	{"hooks status", model.hooksStatus},
+	{"keys", model.openKeys},
 	{"quit ks", model.quit},
 }
 
