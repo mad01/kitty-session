@@ -68,11 +68,16 @@ func (m model) applyDone(msg doneMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// focusCursor focuses the agent under the cursor.
+// focusCursor focuses the agent under the cursor. Focusing another agent
+// moves kitty to that tab, whose own sidebar takes over, so this one snaps
+// its cursor back to the Own row right away; the status line is kept.
 func (m model) focusCursor() (tea.Model, tea.Cmd) {
 	a, ok := m.cursorAgent()
 	if !ok {
 		return m, nil
+	}
+	if !a.Own {
+		m.snapToOwn()
 	}
 	backend := m.backend
 	return m, act(func() error { return backend.Focus(a.Name) }, doneMsg{refresh: true})

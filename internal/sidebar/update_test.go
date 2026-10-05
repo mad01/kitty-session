@@ -11,14 +11,18 @@ import (
 func TestCursorMovesAndEnterFocuses(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
-	if got := m.cursorName(); got != "thismoon" {
-		t.Fatalf("initial cursor on %q, want thismoon", got)
+	if got := m.cursorName(); got != "kitty-session" {
+		t.Fatalf("initial cursor on %q, want the own row kitty-session", got)
 	}
-	m, _ = press(t, m, "j", "j", "k", "down")
+	m, _ = press(t, m, "k", "k", "j", "up")
 	if got := m.cursorName(); got != "code-search-local" {
 		t.Fatalf("cursor on %q, want code-search-local", got)
 	}
-	m, _ = press(t, m, "k", "k", "k", "up", "up")
+	m, _ = press(t, m, "j", "j", "j", "down", "down")
+	if got := m.cursorName(); got != "dotfiles" {
+		t.Fatalf("cursor ran past the end: %q", got)
+	}
+	m, _ = press(t, m, "k", "k", "k", "k", "k", "up", "up")
 	if m.cursor != 0 {
 		t.Fatalf("cursor went negative: %d", m.cursor)
 	}
@@ -35,13 +39,13 @@ func TestDigitJumpsAndFocuses(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
 	m, _ = run(t, m, "4")
-	if got := m.cursorName(); got != "migraine-me" {
-		t.Fatalf("cursor on %q, want migraine-me", got)
-	}
 	wantCalls(t, fb, "focus:migraine-me")
+	if got := m.cursorName(); got != "kitty-session" {
+		t.Fatalf("cursor on %q after focusing another agent, want the own row", got)
+	}
 	m, _ = run(t, m, "9") // past the end: no-op
 	wantCalls(t, fb, "focus:migraine-me")
-	if m.cursor != 3 {
+	if m.cursor != 4 {
 		t.Fatalf("cursor moved to %d on an out-of-range digit", m.cursor)
 	}
 }
@@ -166,24 +170,24 @@ func TestRenameInline(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
 	m, _ = press(t, m, "r")
-	if m.mode != modeRename || m.input.Value() != "thismoon" {
+	if m.mode != modeRename || m.input.Value() != "kitty-session" {
 		t.Fatalf("rename should prefill the name: mode %v value %q", m.mode, m.input.Value())
 	}
 	m, _ = run(t, m, "-2", "enter")
-	wantCalls(t, fb, "rename:thismoon:thismoon-2")
-	if m.mode != modeList || m.follow != "thismoon-2" {
+	wantCalls(t, fb, "rename:kitty-session:kitty-session-2")
+	if m.mode != modeList || m.follow != "kitty-session-2" {
 		t.Fatalf("after rename: mode %v follow %q", m.mode, m.follow)
 	}
 	m, _ = run(t, m, "r", "esc")
 	m, _ = run(t, m, "r", "enter") // unchanged name: no call
-	wantCalls(t, fb, "rename:thismoon:thismoon-2")
+	wantCalls(t, fb, "rename:kitty-session:kitty-session-2")
 }
 
 func TestConfirmCloseAndDelete(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
 	m, _ = press(t, m, "j", "c")
-	if m.mode != modeConfirm || m.target != "dropbrain-app" {
+	if m.mode != modeConfirm || m.target != "dotfiles" {
 		t.Fatalf("c should confirm on the cursor row: mode %v target %q", m.mode, m.target)
 	}
 	m, _ = run(t, m, "n")
@@ -191,7 +195,7 @@ func TestConfirmCloseAndDelete(t *testing.T) {
 	m, _ = run(t, m, "c", "y")
 	m, _ = run(t, m, "d", "enter")
 	m, _ = run(t, m, "d", "esc")
-	wantCalls(t, fb, "close:dropbrain-app:true", "close:dropbrain-app:false")
+	wantCalls(t, fb, "close:dotfiles:true", "close:dotfiles:false")
 	if m.mode != modeList {
 		t.Fatalf("mode = %v", m.mode)
 	}
@@ -395,15 +399,15 @@ func TestMouseFooterAndRows(t *testing.T) {
 	next, cmd := m.Update(click(5, 6)) // third content line pair -> second row
 	m, _ = feed(t, asModel(t, next), cmd)
 	wantCalls(t, fb, "focus:dropbrain-app")
-	if m.cursor != 1 {
-		t.Fatalf("cursor = %d after a row click", m.cursor)
+	if got := m.cursorName(); got != "kitty-session" {
+		t.Fatalf("cursor on %q after a row click focused another agent, want the own row", got)
 	}
 }
 
 func TestApplyAgentsKeepsCursorOnSameAgent(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
-	m, _ = press(t, m, "j", "j")      // code-search-local
+	m, _ = press(t, m, "k", "k")      // code-search-local
 	fb.agents[4].State = StateStopped // it drops to the bottom
 	m = load(t, m)
 	if got := m.cursorName(); got != "code-search-local" {

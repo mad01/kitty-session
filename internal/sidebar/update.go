@@ -120,6 +120,7 @@ func (m model) jumpTo(i int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.cursor = i
+	m.navigated = true
 	return m.focusCursor()
 }
 
@@ -236,6 +237,7 @@ func (m model) clickList(x, line int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.cursor = idx
+	m.navigated = true
 	return m.focusCursor()
 }
 

@@ -93,6 +93,11 @@ type model struct {
 	trashed  []string
 	trashIdx int
 	follow   string // agent to put the cursor on after the next List
+	// navigated is set by a cursor key, digit or row click and cleared by
+	// snapToOwn. While it is clear, every refresh keeps the cursor on the
+	// Own row, so the per-tab sidebars read as one sidebar whose cursor
+	// sits on the tab you are in.
+	navigated bool
 
 	status    string // transient line above the footer; cleared on the next key
 	statusErr bool
@@ -161,9 +166,10 @@ func (m model) pinCmd(cols int) tea.Cmd {
 	}
 }
 
-// applyAgents replaces the list with a freshly sorted copy, keeping the
-// cursor on the same agent when it is still there. Results from a List
-// older than the latest issued one are dropped.
+// applyAgents replaces the list with a freshly sorted copy. The cursor goes
+// to the agent a pending follow names, else stays on the agent the user
+// navigated to, else snaps to the Own row. Results from a List older than
+// the latest issued one are dropped.
 func (m model) applyAgents(msg agentsMsg) model {
 	if msg.gen < m.listGen {
 		return m
@@ -172,21 +178,50 @@ func (m model) applyAgents(msg agentsMsg) model {
 		m.setError(msg.err)
 		return m
 	}
-	selected := m.cursorName()
+	keep := m.cursorName()
 	if m.follow != "" {
-		selected, m.follow = m.follow, ""
+		keep, m.follow = m.follow, ""
+		m.navigated = true
 	}
 	m.agents = make([]Agent, len(msg.agents))
 	copy(m.agents, msg.agents)
 	sortAgents(m.agents)
-	m.cursor = 0
+	if i := m.indexOf(keep); m.navigated && i >= 0 {
+		m.cursor = i
+		return m
+	}
+	m.snapToOwn()
+	return m
+}
+
+// snapToOwn puts the cursor on the Own row, or row 0 when no agent is Own,
+// and forgets any navigation so later refreshes keep it there.
+func (m *model) snapToOwn() {
+	m.cursor = max(m.ownIndex(), 0)
+	m.navigated = false
+}
+
+// ownIndex returns the position of the Own agent among the visible rows, or -1.
+func (m model) ownIndex() int {
 	for i, a := range m.visible() {
-		if a.Name == selected {
-			m.cursor = i
-			break
+		if a.Own {
+			return i
 		}
 	}
-	return m
+	return -1
+}
+
+// indexOf returns the position of the named agent among the visible rows, or -1.
+func (m model) indexOf(name string) int {
+	if name == "" {
+		return -1
+	}
+	for i, a := range m.visible() {
+		if a.Name == name {
+			return i
+		}
+	}
+	return -1
 }
 
 // visible returns the agents that pass the name filter, in display order.
@@ -221,8 +256,10 @@ func (m model) cursorName() string {
 	return a.Name
 }
 
+// moveCursor shifts the cursor by delta rows and records the navigation.
 func (m *model) moveCursor(delta int) {
 	m.cursor += delta
+	m.navigated = true
 	m.clampCursor()
 }
 
