@@ -11,9 +11,9 @@ import (
 // lsFixture is a trimmed `kitty @ ls` of an instance with the home tab and
 // one session tab (sidebar 2, claude 3) tagged with the session id.
 const lsFixture = `[{"id":1,"tabs":[
-  {"id":1,"title":"ks","windows":[
+  {"id":1,"title":"ks","is_active":false,"windows":[
     {"id":1,"title":"ks","columns":158,"lines":39,"user_vars":{}}]},
-  {"id":2,"title":"demo","windows":[
+  {"id":2,"title":"demo","is_active":true,"windows":[
     {"id":2,"title":"ks","columns":36,"lines":39,"user_vars":{"KS_SESSION_ID":"abc"}},
     {"id":3,"title":"✳ claude","columns":119,"lines":39,"user_vars":{"KS_SESSION_ID":"abc"}}]}
 ]}]`
@@ -142,6 +142,23 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 				[]string{"--", "claude", "--continue"},
 			),
 		},
+		{
+			"LaunchHSplit names the window to split",
+			func(c *Client) error {
+				_, err := c.LaunchHSplit(Launch{
+					Match: 3, Dir: "/work", Bias: 30, Vars: []string{"KS_SESSION_ID=abc"},
+				})
+				return err
+			},
+			slices.Concat(
+				[]string{
+					"launch", "--type=window", "--location=hsplit", "--bias=30",
+					"--match=id:3", "--next-to=id:3", "--cwd=/work",
+				},
+				unsetArgs,
+				[]string{"--var", "KS_SESSION_ID=abc", "--"},
+			),
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -224,6 +241,8 @@ func TestStart(t *testing.T) {
 		"-o", "window_margin_width=0",
 		"-o", "window_padding_width=3",
 		"-o", "macos_quit_when_last_window_closed=yes",
+		"-o", "map ctrl+b>s neighboring_window left",
+		"-o", "map ctrl+b>a neighboring_window right",
 		"-o", "font_size=13",
 		"--title", "ks",
 		"--", "/bin/ks", "sidebar",
@@ -231,9 +250,9 @@ func TestStart(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("Start args = %q, want %q", got, want)
 	}
-	// The package-level override list must not grow with a caller's extras.
-	if len(instanceOverrides) != 6 {
-		t.Errorf("instanceOverrides mutated: %v", instanceOverrides)
+	// The package-level lists must not grow with a caller's extras.
+	if len(instanceOverrides) != 6 || len(instanceMaps) != 2 {
+		t.Errorf("instance settings mutated: %v %v", instanceOverrides, instanceMaps)
 	}
 }
 
@@ -269,8 +288,14 @@ func TestWindows(t *testing.T) {
 	}
 	want := []Window{
 		{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: 158},
-		{ID: 2, TabID: 2, TabTitle: "demo", Title: "ks", Columns: 36, SessionID: "abc"},
-		{ID: 3, TabID: 2, TabTitle: "demo", Title: "✳ claude", Columns: 119, SessionID: "abc"},
+		{
+			ID: 2, TabID: 2, TabTitle: "demo", TabActive: true,
+			Title: "ks", Columns: 36, SessionID: "abc",
+		},
+		{
+			ID: 3, TabID: 2, TabTitle: "demo", TabActive: true,
+			Title: "✳ claude", Columns: 119, SessionID: "abc",
+		},
 	}
 	if !slices.Equal(windows, want) {
 		t.Errorf("Windows() = %+v, want %+v", windows, want)

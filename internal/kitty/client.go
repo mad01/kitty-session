@@ -55,6 +55,15 @@ var instanceOverrides = []string{
 	"macos_quit_when_last_window_closed=yes",
 }
 
+// instanceMaps are the ks keyboard chords, passed to kitty as -o like the
+// overrides: ctrl+b then s lands on the sidebar (left of claude), ctrl+b then
+// a lands back on the agent. They come after instanceOverrides and before the
+// user's kitty_overrides, so a user map wins.
+var instanceMaps = []string{
+	"map ctrl+b>s neighboring_window left",
+	"map ctrl+b>a neighboring_window right",
+}
+
 // Environment hygiene. The instance inherits the environment of the process
 // that starts it and hands it to every window it hosts. Started from inside a
 // Claude Code session, that would make every claude in it a child session
@@ -180,7 +189,7 @@ type StartOptions struct {
 // returns once kitty has forked; Ping says when the socket answers.
 func (c *Client) Start(opts StartOptions) error {
 	args := []string{"--detach", "--listen-on", c.socket}
-	for _, o := range slices.Concat(instanceOverrides, opts.Overrides) {
+	for _, o := range slices.Concat(instanceOverrides, instanceMaps, opts.Overrides) {
 		args = append(args, "-o", o)
 	}
 	if opts.Title != "" {
@@ -207,6 +216,9 @@ type Window struct {
 	ID       int
 	TabID    int
 	TabTitle string
+	// TabActive is true when the window's tab is the one its OS window
+	// shows, whether or not that OS window has keyboard focus.
+	TabActive bool
 	// Title is the window title. Claude sets it through OSC while it runs,
 	// which is why ks never passes --title to the claude window.
 	Title   string
@@ -222,9 +234,10 @@ type (
 		Tabs []lsTab `json:"tabs"`
 	}
 	lsTab struct {
-		ID      int        `json:"id"`
-		Title   string     `json:"title"`
-		Windows []lsWindow `json:"windows"`
+		ID       int        `json:"id"`
+		Title    string     `json:"title"`
+		IsActive bool       `json:"is_active"`
+		Windows  []lsWindow `json:"windows"`
 	}
 	lsWindow struct {
 		ID       int               `json:"id"`
@@ -258,6 +271,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					ID:        w.ID,
 					TabID:     t.ID,
 					TabTitle:  t.Title,
+					TabActive: t.IsActive,
 					Title:     w.Title,
 					Columns:   w.Columns,
 					SessionID: w.UserVars[SessionVar],
@@ -341,7 +355,8 @@ func (c *Client) WindowTitle(windowID int) (string, error) {
 // Launch describes a window to create.
 type Launch struct {
 	// Match is the id of an existing window: any window in the target OS
-	// window for LaunchTab, the window to split for LaunchVSplit.
+	// window for LaunchTab, the window to split for LaunchVSplit and
+	// LaunchHSplit.
 	Match int
 	// Dir is the new window's working directory.
 	Dir string
@@ -351,7 +366,7 @@ type Launch struct {
 	// Vars are KEY=VALUE kitty user variables set on the new window.
 	Vars []string
 	// Bias is the share of the split the new window takes, in percent.
-	// LaunchVSplit only.
+	// LaunchVSplit and LaunchHSplit only.
 	Bias int
 	// Command runs in the new window.
 	Command []string
@@ -365,11 +380,25 @@ func (c *Client) LaunchTab(l Launch) (int, error) {
 
 // LaunchVSplit splits window l.Match side by side and returns the new
 // window's id. The tab must be in the splits layout (GotoLayout) or kitty
-// ignores the location.
+// ignores the location. The split is relative to the tab's active window,
+// which at the one call site is l.Match itself.
 func (c *Client) LaunchVSplit(l Launch) (int, error) {
 	args := []string{
 		"launch", "--type=window", "--location=vsplit",
 		"--bias=" + strconv.Itoa(l.Bias), matchID(l.Match),
+	}
+	return c.launch(args, l)
+}
+
+// LaunchHSplit creates a window below l.Match and returns its id. Unlike
+// LaunchVSplit it names the window to split with --next-to, so it works while
+// another window of the tab (the sidebar) is active; --match still selects
+// the tab, without which kitty ignores --next-to.
+func (c *Client) LaunchHSplit(l Launch) (int, error) {
+	args := []string{
+		"launch", "--type=window", "--location=hsplit",
+		"--bias=" + strconv.Itoa(l.Bias), matchID(l.Match),
+		"--next-to=id:" + strconv.Itoa(l.Match),
 	}
 	return c.launch(args, l)
 }
