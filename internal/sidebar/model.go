@@ -77,10 +77,10 @@ type model struct {
 	agents  []Agent // sorted by priority
 	listGen int     // generation of the latest List issued
 	cursor  int     // index into visible()
-	width  int     // terminal size from the last WindowSizeMsg; zero before it
-	height int
-	mode   mode
-	frame  int // animation frame for pulsing dots
+	width   int     // terminal size from the last WindowSizeMsg; zero before it
+	height  int
+	mode    mode
+	frame   int // animation frame for pulsing dots
 
 	filter textinput.Model // the `/` name filter
 	input  textinput.Model // rename and new-agent name
@@ -302,4 +302,3 @@ func (m model) rowOffset() int {
 	}
 	return m.cursor - fit + 1
 }
-

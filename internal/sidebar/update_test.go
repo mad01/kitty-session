@@ -225,7 +225,8 @@ func TestPickerCreatesFromRepoAndTmp(t *testing.T) {
 		t.Fatalf("n should open a loading picker: mode %v loading %v", m.mode, m.picker.loading)
 	}
 	m = update(t, m, reposMsg{repos: fb.repos})
-	if got := m.picker.items; len(got) != 3 || got[0].name != tmpLabel || got[1].name != "mad01/kitty-session" {
+	if got := m.picker.items; len(got) != 3 || got[0].name != tmpLabel ||
+		got[1].name != "mad01/kitty-session" {
 		t.Fatalf("picker items = %+v", got)
 	}
 	m, _ = run(t, m, "kitty", "enter")
@@ -254,7 +255,12 @@ func TestPickerFallsBackToNamePromptOnError(t *testing.T) {
 	m = update(t, m, reposMsg{repos: fb.repos})
 	m, _ = run(t, m, "zeta", "enter")
 	if m.mode != modeName || m.input.Value() != "sug-zeta" || !m.statusErr {
-		t.Fatalf("want name prompt with error: mode %v value %q status %q", m.mode, m.input.Value(), m.status)
+		t.Fatalf(
+			"want name prompt with error: mode %v value %q status %q",
+			m.mode,
+			m.input.Value(),
+			m.status,
+		)
 	}
 	fb.fail = nil
 	fb.calls = nil
@@ -266,14 +272,20 @@ func TestPickerFallsBackToNamePromptOnError(t *testing.T) {
 }
 
 func TestNamePromptRejectsEmptyName(t *testing.T) {
-	fb := &fakeBackend{agents: mockupAgents(), noSuggest: true,
-		repos: []Repo{{Name: "mad01/zeta", Path: "/r/zeta"}}}
+	fb := &fakeBackend{
+		agents: mockupAgents(), noSuggest: true,
+		repos: []Repo{{Name: "mad01/zeta", Path: "/r/zeta"}},
+	}
 	m := newTestModel(t, fb, "")
 	m, _ = press(t, m, "n")
 	m = update(t, m, reposMsg{repos: fb.repos})
 	m, _ = press(t, m, "zeta", "enter")
 	if m.mode != modeName || m.input.Value() != "" {
-		t.Fatalf("no suggestion should open an empty prompt: mode %v value %q", m.mode, m.input.Value())
+		t.Fatalf(
+			"no suggestion should open an empty prompt: mode %v value %q",
+			m.mode,
+			m.input.Value(),
+		)
 	}
 	m, cmd := press(t, m, "   ", "enter")
 	if cmd != nil || m.mode != modeName || m.status != errNameRequired.Error() || !m.statusErr {
@@ -391,8 +403,8 @@ func TestMouseFooterAndRows(t *testing.T) {
 func TestApplyAgentsKeepsCursorOnSameAgent(t *testing.T) {
 	fb := &fakeBackend{agents: mockupAgents()}
 	m := newTestModel(t, fb, "")
-	m, _ = press(t, m, "j", "j")        // code-search-local
-	fb.agents[4].State = StateStopped   // it drops to the bottom
+	m, _ = press(t, m, "j", "j")      // code-search-local
+	fb.agents[4].State = StateStopped // it drops to the bottom
 	m = load(t, m)
 	if got := m.cursorName(); got != "code-search-local" {
 		t.Fatalf("cursor on %q, want code-search-local", got)
@@ -404,12 +416,12 @@ func TestApplyAgentsKeepsCursorOnSameAgent(t *testing.T) {
 
 func TestFirstLine(t *testing.T) {
 	tests := map[string]string{
-		"one":                    "one",
-		"  padded  ":             "padded",
-		"first\nsecond\nthird":   "first",
-		"\nleading newline":      "",
-		"trailing newline\n":     "trailing newline",
-		"":                       "",
+		"one":                  "one",
+		"  padded  ":           "padded",
+		"first\nsecond\nthird": "first",
+		"\nleading newline":    "",
+		"trailing newline\n":   "trailing newline",
+		"":                     "",
 	}
 	for in, want := range tests {
 		if got := firstLine(in); got != want {
