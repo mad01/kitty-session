@@ -47,8 +47,8 @@ type Agent struct {
 	Dir   string
 	Title string // Claude's tab title, already stripped of its state glyph; empty falls back to Dir
 	State State
-	// ChangedAt is when the agent last changed state; it breaks ties within a state.
-	ChangedAt time.Time
+	// CreatedAt is when the session was created; agents in the same state keep creation order.
+	CreatedAt time.Time
 	// Own marks the session this sidebar belongs to. The model also treats
 	// an agent whose Name equals Options.Session as own.
 	Own bool
@@ -99,15 +99,15 @@ type Backend interface {
 }
 
 // sortAgents orders agents for the "priority" sort: by State ascending, then
-// most recent ChangedAt first, then by Name so the order is deterministic.
+// oldest CreatedAt first, then by Name so the order is deterministic.
 func sortAgents(agents []Agent) {
 	sort.SliceStable(agents, func(i, j int) bool {
 		a, b := agents[i], agents[j]
 		if a.State != b.State {
 			return a.State < b.State
 		}
-		if !a.ChangedAt.Equal(b.ChangedAt) {
-			return a.ChangedAt.After(b.ChangedAt)
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.Before(b.CreatedAt)
 		}
 		return a.Name < b.Name
 	})

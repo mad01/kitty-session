@@ -15,30 +15,30 @@ func TestSortAgents(t *testing.T) {
 		want string
 	}{
 		{
-			name: "state priority wins over recency",
+			name: "state priority wins over creation order",
 			in: []Agent{
-				{Name: "stopped", State: StateStopped, ChangedAt: at(0)},
-				{Name: "idle", State: StateIdle, ChangedAt: at(-time.Minute)},
-				{Name: "working", State: StateWorking, ChangedAt: at(-2 * time.Minute)},
-				{Name: "done", State: StateDone, ChangedAt: at(-3 * time.Minute)},
-				{Name: "input", State: StateInput, ChangedAt: at(-4 * time.Minute)},
+				{Name: "stopped", State: StateStopped, CreatedAt: at(0)},
+				{Name: "idle", State: StateIdle, CreatedAt: at(-time.Minute)},
+				{Name: "working", State: StateWorking, CreatedAt: at(-2 * time.Minute)},
+				{Name: "done", State: StateDone, CreatedAt: at(-3 * time.Minute)},
+				{Name: "input", State: StateInput, CreatedAt: at(-4 * time.Minute)},
 			},
 			want: "input,done,working,idle,stopped",
 		},
 		{
-			name: "ties by most recent change first",
+			name: "ties by creation order, oldest first",
 			in: []Agent{
-				{Name: "old", State: StateIdle, ChangedAt: at(-time.Hour)},
-				{Name: "new", State: StateIdle, ChangedAt: at(0)},
-				{Name: "mid", State: StateIdle, ChangedAt: at(-time.Minute)},
+				{Name: "old", State: StateIdle, CreatedAt: at(-time.Hour)},
+				{Name: "new", State: StateIdle, CreatedAt: at(0)},
+				{Name: "mid", State: StateIdle, CreatedAt: at(-time.Minute)},
 			},
-			want: "new,mid,old",
+			want: "old,mid,new",
 		},
 		{
 			name: "same state and time falls back to name",
 			in: []Agent{
-				{Name: "b", State: StateWorking, ChangedAt: at(0)},
-				{Name: "a", State: StateWorking, ChangedAt: at(0)},
+				{Name: "b", State: StateWorking, CreatedAt: at(0)},
+				{Name: "a", State: StateWorking, CreatedAt: at(0)},
 			},
 			want: "a,b",
 		},

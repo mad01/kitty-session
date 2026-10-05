@@ -165,7 +165,7 @@ SidebarBackend.List():
             ParseTitle(title) == idle                 → done if state file idle and updated_at > viewed_at, else idle
             no glyph: state file working / input      → working / input
             otherwise                                 → idle
-        Title = title minus glyph, or ~-shortened dir; ChangedAt = state file updated_at
+        Title = title minus glyph, or ~-shortened dir; CreatedAt = record created_at
 ```
 
 `ks list` has its own, older chain: `stopped` when the record is stopped or `Launcher.Alive` says no, a fresh state file's value if there is one, else `DetectState(kitty.GetText(...))` on the pane text. It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.

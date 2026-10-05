@@ -30,31 +30,31 @@ func NewDemoBackend() *DemoBackend {
 			{
 				Name: "thismoon", Dir: filepath.Join(src, "thismoon"),
 				Title: "Mods overview and integration plan for the events service",
-				State: StateInput, ChangedAt: now.Add(-1 * time.Minute),
+				State: StateInput, CreatedAt: now.Add(-1 * time.Minute),
 			},
 			{
 				Name: "dropbrain-app", Dir: filepath.Join(src, "dropbrain-app"),
 				Title: "Migrane iOS 27.1 migration ✳ follow-ups",
-				State: StateDone, ChangedAt: now.Add(-3 * time.Minute),
+				State: StateDone, CreatedAt: now.Add(-3 * time.Minute),
 			},
 			{
 				Name: "code-search-local", Dir: filepath.Join(src, "code-search-local"),
 				Title: "Reindex after sparse checkout 日本語 テスト",
-				State: StateWorking, ChangedAt: now.Add(-10 * time.Second),
+				State: StateWorking, CreatedAt: now.Add(-10 * time.Second),
 			},
 			{
 				Name: "migraine-me", Dir: filepath.Join(src, "migraine-me"),
 				Title: "Migrane iOS 27.1 update",
-				State: StateIdle, ChangedAt: now.Add(-20 * time.Minute),
+				State: StateIdle, CreatedAt: now.Add(-25 * time.Minute),
 			},
 			{
 				Name: "kitty-session", Dir: filepath.Join(src, "kitty-session"),
 				Title: "Claude Code",
-				State: StateIdle, ChangedAt: now.Add(-25 * time.Minute),
+				State: StateIdle, CreatedAt: now.Add(-20 * time.Minute),
 			},
 			{
 				Name: "dotfiles", Dir: filepath.Join(src, "dotfiles"),
-				State: StateStopped, ChangedAt: now.Add(-2 * time.Hour),
+				State: StateStopped, CreatedAt: now.Add(-2 * time.Hour),
 			},
 		},
 		trashed: []string{"old-experiment", "spike-2026-09"},
@@ -97,7 +97,6 @@ func (d *DemoBackend) Focus(name string) error {
 	}
 	if d.agents[i].State == StateDone {
 		d.agents[i].State = StateIdle
-		d.agents[i].ChangedAt = time.Now()
 	}
 	return nil
 }
@@ -113,7 +112,7 @@ func (d *DemoBackend) New(name, dir string) error {
 		return fmt.Errorf("demo: session %q already exists", name)
 	}
 	d.agents = append(d.agents, Agent{
-		Name: name, Dir: dir, Title: "Claude Code", State: StateIdle, ChangedAt: time.Now(),
+		Name: name, Dir: dir, Title: "Claude Code", State: StateIdle, CreatedAt: time.Now(),
 	})
 	return nil
 }
@@ -138,7 +137,6 @@ func (d *DemoBackend) Close(name string, keep bool) error {
 	}
 	if keep {
 		d.agents[i].State = StateStopped
-		d.agents[i].ChangedAt = time.Now()
 		return nil
 	}
 	d.agents = append(d.agents[:i], d.agents[i+1:]...)
@@ -154,7 +152,7 @@ func (d *DemoBackend) Restore(name string) error {
 		if t == name {
 			d.trashed = append(d.trashed[:i], d.trashed[i+1:]...)
 			d.agents = append(d.agents, Agent{
-				Name: name, Title: "restored", State: StateStopped, ChangedAt: time.Now(),
+				Name: name, Title: "restored", State: StateStopped, CreatedAt: time.Now(),
 			})
 			return nil
 		}

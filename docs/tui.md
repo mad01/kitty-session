@@ -47,7 +47,7 @@ Each row's state comes from one `kitty @ ls` snapshot plus the session's state f
 
 ### Sort
 
-Rows are ordered by state in the order of the table above, then by the state file's `updated_at` with the most recent first, then by name. The cursor stays on the same agent across refreshes.
+Rows are ordered by state in the order of the table above, then by creation time with the oldest first, so agents in the same state keep the order you created them in, then by name. The cursor stays on the same agent across refreshes.
 
 ## Keys
 

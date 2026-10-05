@@ -83,30 +83,30 @@ func mockupAgents() []Agent {
 	return []Agent{
 		{
 			Name: "kitty-session", Dir: "/home/u/code/kitty-session", Title: "Claude Code",
-			State: StateIdle, ChangedAt: testNow.Add(-25 * time.Minute), Own: true,
+			State: StateIdle, CreatedAt: testNow.Add(-20 * time.Minute), Own: true,
 		},
 		{
 			Name: "migraine-me", Dir: "/home/u/code/migraine-me", Title: "Migrane iOS 27.1 update",
-			State: StateIdle, ChangedAt: testNow.Add(-20 * time.Minute),
+			State: StateIdle, CreatedAt: testNow.Add(-25 * time.Minute),
 		},
 		{
 			Name: "dropbrain-app", Dir: "/home/u/code/dropbrain-app",
 			Title: "Migrane iOS 27.1 migration ✳ follow-ups",
-			State: StateDone, ChangedAt: testNow.Add(-3 * time.Minute),
+			State: StateDone, CreatedAt: testNow.Add(-3 * time.Minute),
 		},
 		{
 			Name: "thismoon", Dir: "/home/u/code/thismoon",
 			Title: "Mods overview and integration plan",
-			State: StateInput, ChangedAt: testNow.Add(-time.Minute),
+			State: StateInput, CreatedAt: testNow.Add(-time.Minute),
 		},
 		{
 			Name: "code-search-local", Dir: "/home/u/code/code-search-local",
 			Title: "Reindex 日本語 テスト after sparse checkout",
-			State: StateWorking, ChangedAt: testNow.Add(-10 * time.Second),
+			State: StateWorking, CreatedAt: testNow.Add(-10 * time.Second),
 		},
 		{
 			Name: "dotfiles", Dir: "/home/u/code/dotfiles", State: StateStopped,
-			ChangedAt: testNow.Add(-2 * time.Hour),
+			CreatedAt: testNow.Add(-2 * time.Hour),
 		},
 	}
 }

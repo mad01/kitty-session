@@ -131,7 +131,7 @@ func (b *SidebarBackend) markViewed(sess *session.Session) (*session.Session, er
 }
 
 // agent builds the sidebar row for sess, whose claude window is w (nil when
-// gone). ChangedAt is the state file's timestamp, zero without one.
+// gone). CreatedAt is the record's creation stamp, zero when it does not parse.
 func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window, own bool) sidebar.Agent {
 	in := stateInput{active: sess.IsActive(), viewedAt: sess.ViewedAt}
 	if w != nil {
@@ -145,7 +145,7 @@ func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window, own bool)
 		Dir:       sess.Dir,
 		Title:     b.title(in, sess.Dir),
 		State:     resolveState(in),
-		ChangedAt: in.fileAt,
+		CreatedAt: createdAt(sess),
 		Own:       own,
 	}
 }
@@ -451,4 +451,14 @@ func tabWindows(all []kitty.Window, tabID int) int {
 		}
 	}
 	return n
+}
+
+// createdAt parses the record's RFC3339 creation stamp. A record that does
+// not parse sorts first among its state, which keeps it visible.
+func createdAt(sess *session.Session) time.Time {
+	t, err := time.Parse(time.RFC3339, sess.CreatedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
