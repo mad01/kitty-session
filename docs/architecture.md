@@ -107,7 +107,7 @@ cli.runNew / cli.runTmp / cli.runOpen / SidebarBackend.New / SidebarBackend.Focu
           ├── env for both windows: PATH, KS_SESSION_NAME, KS_SESSION_ID; var KS_SESSION_ID
           ├── launchTopology
           │     ├── anchor = first window in the instance
-          │     ├── LaunchTab(anchor, dir, `ks sidebar --session <name>`)  → sidebar window
+          │     ├── LaunchTab(anchor, dir, `ks sidebar --session-id <id>`)  → sidebar window
           │     ├── GotoLayout(sidebar, splits)       a new tab opens in `fat`, which ignores vsplit
           │     ├── SetTabTitleForWindow(name, sidebar)
           │     ├── measure the sidebar: it spans the tab, so its columns are the tab width
@@ -119,7 +119,7 @@ cli.runNew / cli.runTmp / cli.runOpen / SidebarBackend.New / SidebarBackend.Focu
           └── store.Load(name), copy the kitty IDs and focused_at, store.Save
 ```
 
-The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. Every launch also passes `--env NAME` without a value for the agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`), which unsets them in the child; `Client.Start` already drops every `CLAUDE*`, `KS_*` and `KITTY_*` variable except `KITTY_CONFIG_DIRECTORY` from the instance's own environment. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the sidebar backend drops them, since the UI has one status line and the action itself succeeded.
+The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. Every launch also passes `--env NAME` without a value for the agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`), which unsets them in the child; `Client.Start` already drops the Claude Code session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_EFFORT`) and every `KS_*` and `KITTY_*` variable except `KITTY_CONFIG_DIRECTORY` from the instance's own environment, leaving the user's `CLAUDE_CONFIG_DIR`, Bedrock and Vertex flags and auth tokens in place. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the sidebar backend drops them, since the UI has one status line and the action itself succeeded.
 
 Closing is the mirror image. `ks close` and the sidebar's close/delete actions call `Launcher.Close(sess, keep)`. It removes the state file, closes every tab holding a window tagged with the session id, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`. An instance that cannot be reached is a warning; the record is handled regardless.
 
@@ -158,6 +158,7 @@ SidebarBackend.List():
         resolveState(record status, claude window present?, its title, state file, viewed_at):
             !IsActive or no claude window             → stopped
             state file input, < 10 s old              → input
+            state file working, < 10 s old            → working   (a fresh working file outranks a ✳ title)
             ParseTitle(title) == working              → working
             ParseTitle(title) == idle                 → done if state file idle and updated_at > viewed_at, else idle
             no glyph: state file working / input      → working / input
@@ -173,7 +174,7 @@ SidebarBackend.List():
 
 | Method | Wraps |
 |---|---|
-| `Start(opts)` | `kitty --detach --listen-on <socket> -o allow_remote_control=yes -o tab_bar_style=hidden -o window_border_width=0 -o window_margin_width=0 -o window_padding_width=3 -o macos_quit_when_last_window_closed=yes -o 'map ctrl+b>s neighboring_window left' -o 'map ctrl+b>a neighboring_window right' [-o <override>...] --title ks -- <command>`, with the caller's environment minus `CLAUDE*`, `KS_*`, `KITTY_*` (keeping `KITTY_CONFIG_DIRECTORY`). kitty accepts `map` lines through `-o`, so no config file is written. |
+| `Start(opts)` | `kitty --detach --listen-on <socket> -o allow_remote_control=yes -o tab_bar_style=hidden -o window_border_width=0 -o window_margin_width=0 -o window_padding_width=3 -o macos_quit_when_last_window_closed=yes -o 'map ctrl+b>s neighboring_window left' -o 'map ctrl+b>a neighboring_window right' [-o <override>...] --title ks -- <command>`, with the caller's environment minus the Claude Code session markers and every `KS_*` / `KITTY_*` (keeping `KITTY_CONFIG_DIRECTORY` and the user's other `CLAUDE_*` configuration). kitty accepts `map` lines through `-o`, so no config file is written. Started with a 5 s deadline and closed stdin so a non-detaching kitty cannot block ks. |
 | `Ping()` | `ls`, 2 s timeout |
 | `Windows()` | `ls`, parsed into `Window{ID, TabID, TabTitle, TabActive, Title, Columns, SessionID}` |
 | `AnyWindow`, `TabExists`, `WindowExists`, `FindTabForWindow`, `WindowColumns`, `WindowTitle` | Walk one `Windows()` snapshot |

@@ -1,6 +1,6 @@
 # Sidebar guide
 
-The sidebar is `ks sidebar`, a fixed-width [Bubble Tea](https://github.com/charmbracelet/bubbletea) view that lists every agent (session) with its state. The ks instance runs one in its home tab and one on the left of every session tab (`ks sidebar --session <name>`). The tab bar is hidden, so the sidebar is the tab list. Every session action the subcommands expose is available from here too.
+The sidebar is `ks sidebar`, a fixed-width [Bubble Tea](https://github.com/charmbracelet/bubbletea) view that lists every agent (session) with its state. The ks instance runs one in its home tab and one on the left of every session tab (`ks sidebar --session-id <id>`). The tab bar is hidden, so the sidebar is the tab list. Every session action the subcommands expose is available from here too.
 
 ## Launch
 
@@ -36,9 +36,10 @@ Each row's state comes from one `kitty @ ls` snapshot plus the session's state f
 
 1. Record `stopped`, or no claude window tagged with the session's id: `stopped`.
 2. State file says `input` and is less than 10 s old: `input`.
-3. Claude's title starts with a spinner glyph: `working`.
-4. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
-5. No glyph: the state file's `working` or `input` as is; `idle`, `waiting`, or no file at all: `idle`.
+3. State file says `working` and is less than 10 s old: `working`. A fresh working file outranks the `✳` title below, because `✳` is also one of Claude's spinner frames, so a snapshot mid-turn can catch it.
+4. Claude's title starts with a spinner glyph: `working`.
+5. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
+6. No glyph: the state file's `working` or `input` as is; `idle`, `waiting`, or no file at all: `idle`.
 
 `viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. Without the hooks there is no state file, and `done` and `input` never appear; the title glyph still gives `working` and `idle`.
 

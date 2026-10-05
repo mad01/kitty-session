@@ -48,7 +48,7 @@ Behavior:
 1. Reads `~/.config/ks/config.yaml` (a missing file is fine).
 2. Starts the instance if needed.
 3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
-4. Creates a tab in the instance running `ks sidebar --session <name>`, switches it to the `splits` layout and titles it `<name>`.
+4. Creates a tab in the instance running `ks sidebar --session-id <id>`, switches it to the `splits` layout and titles it `<name>`.
 5. Splits claude in beside the sidebar, moves the sidebar to the left edge and resizes it to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
 6. Focuses the claude window.
 7. Writes the kitty IDs and `focused_at` back to the session file.
@@ -140,15 +140,16 @@ Prints `ks instance not running` when there is nothing to close.
 ## `ks sidebar`
 
 ```
-Usage: ks sidebar [--session <name>] [--agent]
+Usage: ks sidebar [--session-id <id> | --session <name>] [--agent]
 ```
 
-Run the sidebar in the current window. The instance runs one in its home tab (`ks sidebar`) and one on the left of every session tab (`ks sidebar --session <name>`); run it by hand to get the sidebar in any terminal. It never starts the instance. Inside the instance it waits for the socket to answer, since kitty runs the home sidebar as its first window. Anywhere else it exits with `ks instance not running` when nothing answers.
+Run the sidebar in the current window. The instance runs one in its home tab (`ks sidebar`) and one on the left of every session tab (`ks sidebar --session-id <id>`); run it by hand to get the sidebar in any terminal. It never starts the instance. Inside the instance it waits for the socket to answer, since kitty runs the home sidebar as its first window. Anywhere else it exits with `ks instance not running` when nothing answers.
 
 | Flag | Description |
 |---|---|
-| `--session` | The session whose tab this sidebar sits in. Its row gets the `▌` marker, and the `l`/`tab`/`q` keys, `shell split` and the width re-pin act on that tab. |
-| `--agent` | Start the background Haiku state monitor for as long as the sidebar runs. |
+| `--session-id` | The id of the session whose tab this sidebar sits in. The launcher passes it; it is stable across renames, so the own row and the `l`/`tab`/`q` keys, `shell split` and the width re-pin follow a renamed session without a restart. |
+| `--session` | The same, by name, for a human running the command. |
+| `--agent` | Start the background Haiku state monitor for as long as the sidebar runs. Stopped on SIGHUP/SIGTERM/SIGINT as well as a clean exit, so `ks quit` or a tab close does not orphan it. |
 
 See [Sidebar guide](tui.md) for rows, states and keys.
 
