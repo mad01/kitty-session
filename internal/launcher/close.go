@@ -14,6 +14,11 @@ import (
 // instance that cannot be reached, come back as warnings; only store
 // failures are errors.
 func (l *Launcher) Close(sess *session.Session, keep bool) ([]error, error) {
+	// Every store mutation happens before the first kitty call. The sidebar
+	// that issued this close lives in the tab being closed and is killed by
+	// SIGHUP the instant the tab goes, so a store write left until after the
+	// close might never run. The in-memory sess keeps its kitty ids, so the
+	// tab can still be found after the record is trashed.
 	if keep {
 		// Record the stop before the tab goes away: closing the window ends
 		// claude with SessionEnd reason "other", which the hook ignores.
@@ -21,20 +26,14 @@ func (l *Launcher) Close(sess *session.Session, keep bool) ([]error, error) {
 		if err := l.store.Save(sess); err != nil {
 			return nil, fmt.Errorf("cannot save session: %w", err)
 		}
+	} else if err := l.store.Delete(sess.Name); err != nil {
+		return nil, fmt.Errorf("cannot delete session file: %w", err)
 	}
 	state.Clean(sess.Name)
-	var warnings []error
+
 	lv, err := l.liveWindows(sess)
 	if err != nil {
-		warnings = append(warnings, fmt.Errorf("tabs left as they are: %w", err))
-	} else {
-		warnings = l.closeTabs(lv)
+		return []error{fmt.Errorf("tabs left as they are: %w", err)}, nil
 	}
-	if keep {
-		return warnings, nil
-	}
-	if err := l.store.Delete(sess.Name); err != nil {
-		return warnings, fmt.Errorf("cannot delete session file: %w", err)
-	}
-	return warnings, nil
+	return l.closeTabs(lv), nil
 }

@@ -75,6 +75,18 @@ func (lv live) tabActive() bool {
 	return false
 }
 
+// ClaudeWindow returns sess's claude window from an already-taken snapshot,
+// matched by the session tag (never a stored id alone), and whether it is
+// present. A command that already holds a Windows() snapshot resolves state
+// through this instead of taking one snapshot per session.
+func ClaudeWindow(all []kitty.Window, sess *session.Session) (kitty.Window, bool) {
+	lv := findLive(all, sess)
+	if lv.claude == nil {
+		return kitty.Window{}, false
+	}
+	return *lv.claude, true
+}
+
 // liveWindows takes a snapshot and picks out the session's windows.
 func (l *Launcher) liveWindows(sess *session.Session) (live, error) {
 	all, err := l.kitty.Windows()

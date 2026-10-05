@@ -173,7 +173,7 @@ func TestOpenNewSession(t *testing.T) {
 		t.Fatalf("launches = %d, want sidebar and claude", len(f.launches))
 	}
 	sidebar, claudeWin := f.launches[0], f.launches[1]
-	if want := []string{"/bin/ks", "sidebar", "--session", "demo"}; !slices.Equal(
+	if want := []string{"/bin/ks", "sidebar", "--session-id", got.ID}; !slices.Equal(
 		sidebar.Command,
 		want,
 	) {

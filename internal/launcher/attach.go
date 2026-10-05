@@ -75,9 +75,13 @@ func (l *Launcher) Attach() (*AttachResult, error) {
 func (l *Launcher) resume(active []*session.Session, res *AttachResult) map[string]bool {
 	skip := map[string]bool{}
 	var launched []string
+	// One snapshot answers "already alive?" for every session; a session that
+	// was not alive cannot be brought up by another session's relaunch, so a
+	// snapshot taken before any Open stays correct for the scan.
+	all, _ := l.kitty.Windows()
 	attempts := 0
 	for _, s := range active {
-		if l.Alive(s) {
+		if l.aliveIn(all, s) {
 			res.Running++
 			continue
 		}
@@ -107,10 +111,11 @@ func (l *Launcher) settle(launched []string, res *AttachResult) []string {
 		return nil
 	}
 	l.sleep(settleAfterLaunch)
+	all, _ := l.kitty.Windows()
 	var exited []string
 	for _, name := range launched {
 		sess, err := l.store.Load(name)
-		if err != nil || !l.Alive(sess) {
+		if err != nil || !l.aliveIn(all, sess) {
 			exited = append(exited, name)
 			continue
 		}

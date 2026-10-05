@@ -171,6 +171,13 @@ func (l *Launcher) Alive(sess *session.Session) bool {
 	return err == nil && lv.claude != nil
 }
 
+// aliveIn reports whether sess has a claude window in an already-taken
+// snapshot, so a scan over many sessions costs one Windows() call, not one
+// per session.
+func (l *Launcher) aliveIn(all []kitty.Window, sess *session.Session) bool {
+	return findLive(all, sess).claude != nil
+}
+
 // focus brings a live session to the front and stamps FocusedAt.
 func (l *Launcher) focus(sess *session.Session, claudeWindow int) (*Result, error) {
 	if err := l.kitty.FocusWindow(claudeWindow); err != nil {
@@ -204,7 +211,7 @@ func (l *Launcher) plan(sess *session.Session, mode ResumeMode) plan {
 		dir:        sess.Dir,
 		env:        sessionEnv(sess),
 		vars:       []string{kitty.SessionVar + "=" + sess.ID},
-		sidebarCmd: []string{l.exe, "sidebar", "--session", sess.Name},
+		sidebarCmd: []string{l.exe, "sidebar", "--session-id", sess.ID},
 		claudeCmd:  claudeCmd(sess, mode),
 	}
 }

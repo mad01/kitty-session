@@ -31,14 +31,15 @@ const (
 
 // SidebarBackend is the sidebar.Backend over one ks instance: every action
 // of the sidebar UI mapped onto the launcher, the store and the instance.
-// One runs in every sidebar process; own names the session whose tab the
-// sidebar sits in, empty in the home tab.
+// One runs in every sidebar process; ownID is the ID of the session whose
+// tab the sidebar sits in, empty in the home tab. Identity is the ID, not the
+// name, so a rename shows up on the next List without restarting the sidebar.
 type SidebarBackend struct {
-	l    *Launcher
-	cfg  *config.Config
-	own  string
-	home string // for shortening directories in titles
-	quit func() error
+	l     *Launcher
+	cfg   *config.Config
+	ownID string
+	home  string // for shortening directories in titles
+	quit  func() error
 	// readState reads a session's state file; tests substitute a fake.
 	readState func(name string) (string, time.Time, error)
 
@@ -47,23 +48,24 @@ type SidebarBackend struct {
 }
 
 // NewSidebarBackend returns the backend for the instance behind client.
-// cfg may be nil; ownSession is the --session argument of ks sidebar.
+// cfg may be nil; ownID is the id of the session whose tab this sidebar sits
+// in (empty in the home tab).
 func NewSidebarBackend(
 	store *session.Store,
 	client *kitty.Client,
 	cfg *config.Config,
-	ownSession string,
+	ownID string,
 ) (*SidebarBackend, error) {
 	l, err := New(store, client, cfg)
 	if err != nil {
 		return nil, err
 	}
-	b := newSidebarBackend(l, cfg, ownSession)
+	b := newSidebarBackend(l, cfg, ownID)
 	b.quit = func() error { return instance.Shutdown(client) }
 	return b, nil
 }
 
-func newSidebarBackend(l *Launcher, cfg *config.Config, own string) *SidebarBackend {
+func newSidebarBackend(l *Launcher, cfg *config.Config, ownID string) *SidebarBackend {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = ""
@@ -71,7 +73,7 @@ func newSidebarBackend(l *Launcher, cfg *config.Config, own string) *SidebarBack
 	return &SidebarBackend{
 		l:         l,
 		cfg:       cfg,
-		own:       own,
+		ownID:     ownID,
 		home:      home,
 		quit:      func() error { return errors.New("launcher: quit is not wired") },
 		readState: state.Read,
@@ -94,12 +96,13 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	agents := make([]sidebar.Agent, 0, len(sessions))
 	for _, sess := range sessions {
 		lv := findLive(all, sess)
-		if sess.Name == b.own && lv.tabActive() {
+		own := b.ownID != "" && sess.ID == b.ownID
+		if own && lv.tabActive() {
 			if sess, err = b.markViewed(sess); err != nil {
 				return nil, err
 			}
 		}
-		agents = append(agents, b.agent(sess, lv.claude))
+		agents = append(agents, b.agent(sess, lv.claude, own))
 	}
 	return agents, nil
 }
@@ -128,7 +131,7 @@ func (b *SidebarBackend) markViewed(sess *session.Session) (*session.Session, er
 
 // agent builds the sidebar row for sess, whose claude window is w (nil when
 // gone). ChangedAt is the state file's timestamp, zero without one.
-func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window) sidebar.Agent {
+func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window, own bool) sidebar.Agent {
 	in := stateInput{active: sess.IsActive(), viewedAt: sess.ViewedAt}
 	if w != nil {
 		in.hasWindow, in.title = true, w.Title
@@ -142,7 +145,7 @@ func (b *SidebarBackend) agent(sess *session.Session, w *kitty.Window) sidebar.A
 		Title:     b.title(in, sess.Dir),
 		State:     resolveState(in),
 		ChangedAt: in.fileAt,
-		Own:       sess.Name == b.own,
+		Own:       own,
 	}
 }
 
@@ -160,17 +163,26 @@ type stateInput struct {
 //
 //	record stopped, or claude window gone           → stopped
 //	state file fresh and input                      → input
+//	state file fresh and working                    → working
 //	title glyph working                             → working
-//	title glyph idle                                → done if the state file says idle later than viewed_at, else idle
+//	title glyph idle (✳)                            → done if the state file says idle later than viewed_at, else idle
 //	no glyph: state file working / input            → working / input
 //	anything else (idle, waiting, no state file)    → idle
+//
+// A fresh working state file outranks the ✳ idle title because ✳ is also one
+// of Claude Code's spinner frames, so a mid-turn snapshot can catch it while
+// the hooks already know the turn is still running.
 func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
 	}
 	fileState := claude.ParseState(in.fileState)
-	if fileState == claude.StateNeedsInput && state.IsFresh(in.fileAt) {
+	fresh := state.IsFresh(in.fileAt)
+	if fresh && fileState == claude.StateNeedsInput {
 		return sidebar.StateInput
+	}
+	if fresh && fileState == claude.StateWorking {
+		return sidebar.StateWorking
 	}
 	if titleState, _, ok := claude.ParseTitle(in.title); ok {
 		if titleState == claude.StateWorking {
@@ -268,7 +280,7 @@ func (b *SidebarBackend) Rename(oldName, newName string) error {
 // FocusAgentWindow focuses the own session's claude window and stamps
 // FocusedAt. The home tab has no agent, so there it does nothing.
 func (b *SidebarBackend) FocusAgentWindow() error {
-	if b.own == "" {
+	if b.ownID == "" {
 		return nil
 	}
 	sess, lv, err := b.ownWindows()
@@ -276,7 +288,7 @@ func (b *SidebarBackend) FocusAgentWindow() error {
 		return err
 	}
 	if lv.claude == nil {
-		return fmt.Errorf("%s has no claude window", b.own)
+		return fmt.Errorf("%s has no claude window", sess.Name)
 	}
 	_, err = b.l.focus(sess, lv.claude.ID)
 	return err
@@ -285,7 +297,7 @@ func (b *SidebarBackend) FocusAgentWindow() error {
 // ShellSplit opens a shell below the own session's claude window, in the
 // session directory, tagged with the session like every ks window.
 func (b *SidebarBackend) ShellSplit() error {
-	if b.own == "" {
+	if b.ownID == "" {
 		return errors.New("launcher: the home tab has no agent to split")
 	}
 	sess, lv, err := b.ownWindows()
@@ -293,7 +305,7 @@ func (b *SidebarBackend) ShellSplit() error {
 		return err
 	}
 	if lv.claude == nil {
-		return fmt.Errorf("%s has no claude window", b.own)
+		return fmt.Errorf("%s has no claude window", sess.Name)
 	}
 	_, err = b.l.kitty.LaunchHSplit(kitty.Launch{
 		Match: lv.claude.ID,
@@ -307,9 +319,9 @@ func (b *SidebarBackend) ShellSplit() error {
 	return nil
 }
 
-// ownWindows loads the own session's record and finds its windows.
+// ownWindows loads the own session's record by id and finds its windows.
 func (b *SidebarBackend) ownWindows() (*session.Session, live, error) {
-	sess, err := b.l.store.Load(b.own)
+	sess, err := b.l.store.FindByID(b.ownID)
 	if err != nil {
 		return nil, live{}, err
 	}
@@ -375,7 +387,7 @@ func (b *SidebarBackend) Repos() ([]sidebar.Repo, error) {
 // sees; when it already matches nothing is asked of kitty. The home tab and
 // a record without a known sidebar window are left alone.
 func (b *SidebarBackend) PinWidth(cols int) error {
-	if b.own == "" || cols == b.l.sidebarWidth {
+	if b.ownID == "" || cols == b.l.sidebarWidth {
 		return nil
 	}
 	_, lv, err := b.ownWindows()

@@ -39,14 +39,16 @@ func (f fakeStates) read(name string) (string, time.Time, error) {
 	return e.state, e.at, nil
 }
 
-// newTestBackend wires a backend over the fake instance with a fixed clock
-// and no state files. The clock stands still until the test moves it.
-func newTestBackend(t *testing.T, own string) (*SidebarBackend, *fakeKitty, *time.Time) {
+// newTestBackend wires a home-tab backend (no own session) over the fake
+// instance with a fixed clock and no state files. The clock stands still
+// until the test moves it; a test that needs an own session sets b.ownID to
+// its record id after creating it.
+func newTestBackend(t *testing.T) (*SidebarBackend, *fakeKitty, *time.Time) {
 	t.Helper()
 	l, f, _ := newTestLauncher(t)
 	clock := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	l.now = func() time.Time { return clock }
-	b := newSidebarBackend(l, nil, own)
+	b := newSidebarBackend(l, nil, "")
 	b.readState = fakeStates{}.read
 	return b, f, &clock
 }
@@ -129,13 +131,25 @@ func TestResolveState(t *testing.T) {
 			sidebar.StateDone,
 		},
 		{
-			"idle title with a working state file stays idle",
+			"fresh working state file outranks the idle glyph",
 			stateInput{
 				active:    true,
 				hasWindow: true,
 				title:     "✳ Claude Code",
 				fileState: "working",
 				fileAt:    fresh,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"stale working state file loses to the idle glyph",
+			stateInput{
+				active:    true,
+				hasWindow: true,
+				title:     "✳ Claude Code",
+				fileState: "working",
+				fileAt:    stale,
+				viewedAt:  viewed,
 			},
 			sidebar.StateIdle,
 		},
@@ -210,7 +224,7 @@ func TestResolveState(t *testing.T) {
 }
 
 func TestListMatchesWindowsByTagAndFillsRows(t *testing.T) {
-	b, f, _ := newTestBackend(t, "")
+	b, f, _ := newTestBackend(t)
 	t0 := time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC)
 	states := fakeStates{}
 	b.readState = states.read
@@ -275,12 +289,13 @@ func TestListMatchesWindowsByTagAndFillsRows(t *testing.T) {
 }
 
 func TestListStampsViewedAtAndDropsDoneToIdle(t *testing.T) {
-	b, f, clock := newTestBackend(t, "own")
+	b, f, clock := newTestBackend(t)
 	finished := clock.Add(-time.Minute)
 	states := fakeStates{"own": {"idle", finished}}
 	b.readState = states.read
 
 	own := session.New("own", "/work/own", 0, 0)
+	b.ownID = own.ID
 	f.addTab(own, true)
 	f.find(own.KittyWindowID).Title = "✳ Claude Code"
 	if err := b.l.store.Save(own); err != nil {
@@ -368,8 +383,9 @@ func TestListStampsViewedAtAndDropsDoneToIdle(t *testing.T) {
 }
 
 func TestPinWidth(t *testing.T) {
-	b, f, _ := newTestBackend(t, "own")
+	b, f, _ := newTestBackend(t)
 	own := session.New("own", "/work/own", 0, 0)
+	b.ownID = own.ID
 	f.addTab(own, true)
 	if err := b.l.store.Save(own); err != nil {
 		t.Fatal(err)
@@ -390,15 +406,16 @@ func TestPinWidth(t *testing.T) {
 		t.Errorf("calls = %v, want %s", f.calls, want)
 	}
 
-	home, fh, _ := newTestBackend(t, "")
+	home, fh, _ := newTestBackend(t)
 	if err := home.PinWidth(80); err != nil || len(fh.calls) != 0 {
 		t.Errorf("home tab: err %v, calls %v; want nothing", err, fh.calls)
 	}
 }
 
 func TestShellSplitAndFocusAgentWindow(t *testing.T) {
-	b, f, _ := newTestBackend(t, "own")
+	b, f, _ := newTestBackend(t)
 	own := session.New("own", "/work/own", 0, 0)
+	b.ownID = own.ID
 	f.addTab(own, true)
 	if err := b.l.store.Save(own); err != nil {
 		t.Fatal(err)
@@ -441,7 +458,7 @@ func TestShellSplitAndFocusAgentWindow(t *testing.T) {
 		t.Error("FocusAgentWindow without a claude window returned nil")
 	}
 
-	home, fh, _ := newTestBackend(t, "")
+	home, fh, _ := newTestBackend(t)
 	if err := home.FocusAgentWindow(); err != nil || len(fh.calls) != 0 {
 		t.Errorf("home tab FocusAgentWindow: err %v, calls %v", err, fh.calls)
 	}
@@ -451,7 +468,7 @@ func TestShellSplitAndFocusAgentWindow(t *testing.T) {
 }
 
 func TestSessionActions(t *testing.T) {
-	b, f, _ := newTestBackend(t, "")
+	b, f, _ := newTestBackend(t)
 
 	if err := b.New("", "/work/Fresh Dir"); err != nil {
 		t.Fatalf("New: %v", err)
@@ -521,5 +538,44 @@ func TestHooksSummary(t *testing.T) {
 		if got := hooksSummary(tt.installed); got != tt.want {
 			t.Errorf("hooksSummary(%v) = %q, want %q", tt.installed, got, tt.want)
 		}
+	}
+}
+
+// TestListReflectsRenameByID proves the own session is tracked by id, so a
+// rename shows the new name and keeps the own marker without restarting the
+// sidebar.
+func TestListReflectsRenameByID(t *testing.T) {
+	b, f, _ := newTestBackend(t)
+	own := session.New("before", "/work/own", 0, 0)
+	b.ownID = own.ID
+	f.addTab(own, true)
+	if err := b.l.store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+
+	ownRow := func() (sidebar.Agent, bool) {
+		t.Helper()
+		agents, err := b.List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, a := range agents {
+			if a.Own {
+				return a, true
+			}
+		}
+		return sidebar.Agent{}, false
+	}
+
+	a, ok := ownRow()
+	if !ok || a.Name != "before" {
+		t.Fatalf("own row = %+v, ok %v; want name before", a, ok)
+	}
+	if err := b.Rename("before", "after"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	a, ok = ownRow()
+	if !ok || a.Name != "after" {
+		t.Errorf("after rename own row = %+v, ok %v; want name after and still own", a, ok)
 	}
 }
