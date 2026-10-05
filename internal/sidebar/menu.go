@@ -64,12 +64,16 @@ func (m model) runMenu(i int) (tea.Model, tea.Cmd) {
 	return menuEntries[i].run(m)
 }
 
-// clickMenu runs the entry on content line `line`, or closes the menu when
-// the click lands outside it.
-func (m model) clickMenu(line int) (tea.Model, tea.Cmd) {
-	top := m.popupTop(len(menuEntries) + frameLines)
+// clickMenu runs the entry under a click at terminal column x and content
+// line `line`, or closes the menu when the click lands outside the popup.
+func (m model) clickMenu(x, line int) (tea.Model, tea.Cmd) {
+	labels := menuLabels()
+	inner := m.innerWidth()
+	pw := popupWidth(labels, inner)
+	left := 1 + inner - pw - edgePad // the frame border occupies column 0
+	top := m.popupTop(len(labels) + frameLines)
 	i := line - top - 1 // skip the popup's top border
-	if i < 0 || i >= len(menuEntries) {
+	if x < left || x >= left+pw || i < 0 || i >= len(labels) {
 		m.mode = modeList
 		return m, nil
 	}
@@ -86,16 +90,23 @@ func (m model) popupTop(n int) int {
 	return top
 }
 
-// renderPopup draws a rounded box around lines, each padded to the widest
-// entry, highlighting the line at index highlight (-1 for none). Every
-// returned line is the same width, at most inner cells.
-func renderPopup(lines []string, highlight, inner int) []string {
+// popupWidth is the outer width of a popup around lines: the widest line
+// plus padding and borders, capped so it fits inside the frame with the
+// edge gap, so overlay can always draw it.
+func popupWidth(lines []string, inner int) int {
 	w := 0
 	for _, l := range lines {
 		w = max(w, ansi.StringWidth(l))
 	}
-	w = min(w+2*popupPad, inner-frameCells)
-	w = max(w, 1)
+	w += 2*popupPad + frameCells
+	return max(min(w, inner-edgePad), frameCells+1)
+}
+
+// renderPopup draws a rounded box around lines, each padded to the widest
+// entry, highlighting the line at index highlight (-1 for none). Every
+// returned line is popupWidth cells wide.
+func renderPopup(lines []string, highlight, inner int) []string {
+	w := popupWidth(lines, inner) - frameCells
 	hline := strings.Repeat("─", w)
 	side := borderStyle.Render("│")
 	out := make([]string, 0, len(lines)+frameLines)
@@ -149,8 +160,19 @@ func (m model) confirmPopup(inner int) []string {
 	return renderPopup(lines, -1, inner)
 }
 
-// restorePopup lists the trashed sessions with the cursor on trashIdx.
+// restoreChrome is the lines around the restore popup's names: the popup's
+// borders, its title, and the footer below it.
+const restoreChrome = frameLines + 2
+
+// restorePopup lists the trashed sessions with the cursor on trashIdx,
+// scrolled so the highlighted name is always inside the popup.
 func (m model) restorePopup(inner int) []string {
-	lines := append([]string{popupHintStyle.Render("restore")}, m.trashed...)
-	return renderPopup(lines, m.trashIdx+1, inner)
+	fit := max(m.innerHeight()-restoreChrome, 1)
+	offset := 0
+	if m.trashIdx >= fit {
+		offset = m.trashIdx - fit + 1
+	}
+	end := min(len(m.trashed), offset+fit)
+	lines := append([]string{popupHintStyle.Render("restore")}, m.trashed[offset:end]...)
+	return renderPopup(lines, m.trashIdx-offset+1, inner)
 }

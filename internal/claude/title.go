@@ -21,6 +21,11 @@ const (
 // glyph, with stripped holding the title minus the glyph and the spaces after
 // it. A title without a known leading glyph returns ok false and is passed
 // through unchanged.
+//
+// ✳ means idle: that is herdr's production rule and what Claude Code 2.1.289
+// shows at the prompt. The title lags the hooks when a turn starts, so a
+// backend combining both sources must let a fresh "working" state file
+// override a ✳ title rather than the other way round.
 func ParseTitle(title string) (state State, stripped string, ok bool) {
 	r, size := utf8.DecodeRuneInString(title)
 	switch {

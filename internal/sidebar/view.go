@@ -100,7 +100,7 @@ func (m model) rowLines(inner, n int) []string {
 func (m model) renderRow(a Agent, selected bool, inner int) []string {
 	var bg lipgloss.TerminalColor = lipgloss.NoColor{}
 	marker := " "
-	if m.isOwn(a) {
+	if a.Own {
 		bg = colorOwnBG
 		marker = ownMarker
 	}
@@ -119,7 +119,7 @@ func (m model) renderRow(a Agent, selected bool, inner int) []string {
 
 	title := a.Title
 	if title == "" {
-		title = m.shortenDir(a.Dir)
+		title = ShortenHome(a.Dir, m.home)
 	}
 	second := seg(titleStyle, bg, strings.Repeat(" ", rowIndent)+truncate(title, textWidth))
 

@@ -18,10 +18,12 @@ var sidebarDemoCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		backend := sidebar.NewDemoBackend()
+		backend.SetOwn(sidebarDemoSession)
 		return sidebar.Run(sidebar.Options{
 			Session: sidebarDemoSession,
 			Width:   sidebarDemoWidth,
-			Backend: sidebar.NewDemoBackend(),
+			Backend: backend,
 		})
 	},
 }

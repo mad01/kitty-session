@@ -180,7 +180,11 @@ func (m model) nameLines(inner int) []string {
 		spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render("name")),
 	)
 	lines = append(lines, blank(inner))
-	dir := truncate(m.shortenDir(m.newDir), inner-edgePad-1)
+	dir := "scratch directory"
+	if !m.pending.tmp {
+		dir = ShortenHome(m.pending.dir, m.home)
+	}
+	dir = truncate(dir, inner-edgePad-1)
 	lines = append(lines, fitWidth(titleStyle.Render(" "+dir), inner))
 	lines = append(lines, fitWidth(" "+m.input.View(), inner))
 	for len(lines) < n-2 {

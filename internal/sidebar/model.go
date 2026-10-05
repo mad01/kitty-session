@@ -47,8 +47,12 @@ type (
 	tickMsg   time.Time
 	animMsg   time.Time
 	agentsMsg struct {
+		gen    int // listGen when the List was issued; older results are dropped
 		agents []Agent
 		err    error
+	}
+	pinMsg struct {
+		err error
 	}
 	reposMsg struct {
 		repos []Repo
@@ -68,9 +72,11 @@ type model struct {
 	opts    Options
 	backend Backend
 	home    string
+	now     func() time.Time
 
-	agents []Agent // sorted by priority
-	cursor int     // index into visible()
+	agents  []Agent // sorted by priority
+	listGen int     // generation of the latest List issued
+	cursor  int     // index into visible()
 	width  int     // terminal size from the last WindowSizeMsg; zero before it
 	height int
 	mode   mode
@@ -82,8 +88,8 @@ type model struct {
 	picker picker
 
 	confirm  confirmAction
-	target   string // agent the confirm, rename or restore acts on
-	newDir   string // directory picked for a new agent awaiting a name
+	target   string     // agent the confirm, rename or restore acts on
+	pending  newAttempt // new agent awaiting a name
 	trashed  []string
 	trashIdx int
 	follow   string // agent to put the cursor on after the next List
@@ -97,6 +103,7 @@ func newModel(opts Options, home string) model {
 		opts:    opts,
 		backend: opts.Backend,
 		home:    home,
+		now:     time.Now,
 		filter:  newInput(""),
 		input:   newInput(""),
 		picker:  newPicker(),
@@ -113,8 +120,9 @@ func newInput(prompt string) textinput.Model {
 	return ti
 }
 
+// Init starts the poll and animation tickers; the first tick loads the list.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.listCmd(), tickCmd(), animCmd())
+	return tea.Batch(func() tea.Msg { return tickMsg(time.Now()) }, animCmd())
 }
 
 func tickCmd() tea.Cmd {
@@ -125,12 +133,14 @@ func animCmd() tea.Cmd {
 	return tea.Tick(animInterval, func(t time.Time) tea.Msg { return animMsg(t) })
 }
 
-// listCmd asks the backend for the agents off the update loop.
-func (m model) listCmd() tea.Cmd {
-	backend := m.backend
+// listCmd asks the backend for the agents off the update loop. Each call
+// opens a new generation so a slow older result cannot overwrite a newer one.
+func (m *model) listCmd() tea.Cmd {
+	m.listGen++
+	gen, backend := m.listGen, m.backend
 	return func() tea.Msg {
 		agents, err := backend.List()
-		return agentsMsg{agents: agents, err: err}
+		return agentsMsg{gen: gen, agents: agents, err: err}
 	}
 }
 
@@ -147,14 +157,17 @@ func (m model) reposCmd() tea.Cmd {
 func (m model) pinCmd(cols int) tea.Cmd {
 	backend := m.backend
 	return func() tea.Msg {
-		_ = backend.PinWidth(cols)
-		return nil
+		return pinMsg{err: backend.PinWidth(cols)}
 	}
 }
 
 // applyAgents replaces the list with a freshly sorted copy, keeping the
-// cursor on the same agent when it is still there.
+// cursor on the same agent when it is still there. Results from a List
+// older than the latest issued one are dropped.
 func (m model) applyAgents(msg agentsMsg) model {
+	if msg.gen < m.listGen {
+		return m
+	}
 	if msg.err != nil {
 		m.setError(msg.err)
 		return m
@@ -223,17 +236,22 @@ func (m *model) clampCursor() {
 	}
 }
 
-// isOwn reports whether a is the session this sidebar belongs to.
-func (m model) isOwn(a Agent) bool {
-	return a.Own || (m.opts.Session != "" && a.Name == m.opts.Session)
-}
-
+// setStatus shows the first line of s above the footer until the next key.
 func (m *model) setStatus(s string) {
-	m.status, m.statusErr = s, false
+	m.status, m.statusErr = firstLine(s), false
 }
 
+// setError shows the first line of err in the error color until the next key.
 func (m *model) setError(err error) {
-	m.status, m.statusErr = err.Error(), true
+	m.status, m.statusErr = firstLine(err.Error()), true
+}
+
+// firstLine returns s up to its first newline, trimmed.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 // frameWidth is the width the frame renders at: the configured width, or
@@ -285,10 +303,3 @@ func (m model) rowOffset() int {
 	return m.cursor - fit + 1
 }
 
-// shortenDir replaces the home prefix of dir with ~.
-func (m model) shortenDir(dir string) string {
-	if m.home != "" && strings.HasPrefix(dir, m.home) {
-		return "~" + dir[len(m.home):]
-	}
-	return dir
-}

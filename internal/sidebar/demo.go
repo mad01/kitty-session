@@ -68,6 +68,16 @@ func NewDemoBackend() *DemoBackend {
 	}
 }
 
+// SetOwn marks the named agent as this sidebar's own session and clears
+// the flag on every other agent.
+func (d *DemoBackend) SetOwn(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range d.agents {
+		d.agents[i].Own = d.agents[i].Name == name
+	}
+}
+
 // List returns a copy of the agents.
 func (d *DemoBackend) List() ([]Agent, error) {
 	d.mu.Lock()

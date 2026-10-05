@@ -10,8 +10,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.picker.input.Width = m.inputWidth()
+		m.filter.Width = m.inputWidth()
 		m.clampCursor()
 		return m, m.pinCmd(msg.Width)
+	case pinMsg:
+		if msg.err != nil {
+			m.setError(msg.err)
+		}
+		return m, nil
+	case doneMsg:
+		return m.applyDone(msg)
 	case tickMsg:
 		return m, tea.Batch(m.listCmd(), tickCmd())
 	case animMsg:
@@ -72,6 +80,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.focusAgentWindow()
 	case "/":
 		m.mode = modeFilter
+		m.filter.Width = m.inputWidth()
 		return m, m.filter.Focus()
 	case "esc":
 		m.filter.SetValue("")
@@ -180,9 +189,11 @@ func (m model) updateName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = modePicker
 		m.input.Blur()
-		return m, nil
+		return m, m.picker.input.Focus()
 	case "enter":
-		return m.createAgent(m.input.Value(), m.newDir)
+		a := m.pending
+		a.name = m.input.Value()
+		return m.createAgent(a)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -198,7 +209,7 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	line := msg.Y - 1 // content line index; the top border is y 0
 	switch m.mode {
 	case modeMenu:
-		return m.clickMenu(line)
+		return m.clickMenu(msg.X, line)
 	case modeList:
 		return m.clickList(msg.X, line)
 	}
