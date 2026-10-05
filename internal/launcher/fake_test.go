@@ -19,14 +19,15 @@ const fakeTabColumns = 158
 // fakeKitty is an in-memory instance: it records the call sequence and keeps
 // a window table realistic enough for the launcher's geometry logic.
 type fakeKitty struct {
-	windows    []kitty.Window
-	nextWindow int
-	nextTab    int
-	calls      []string
-	launches   []kitty.Launch
-	errs       map[string]error // method name → error to return
-	onLaunch   func()           // runs inside LaunchTab, standing in for the SessionStart hook
-	slept      time.Duration
+	windows     []kitty.Window
+	nextWindow  int
+	nextTab     int
+	calls       []string
+	launches    []kitty.Launch
+	errs        map[string]error // method name or exact call → error to return
+	onLaunch    func()           // runs inside LaunchTab, standing in for the SessionStart hook
+	claudeExits bool             // a window launched by LaunchVSplit vanishes at once
+	slept       time.Duration
 }
 
 // newFakeKitty returns an instance holding only the home tab.
@@ -70,6 +71,9 @@ func (f *fakeKitty) addTab(sess *session.Session, withClaude bool) {
 func (f *fakeKitty) record(format string, args ...any) error {
 	call := fmt.Sprintf(format, args...)
 	f.calls = append(f.calls, call)
+	if err, ok := f.errs[call]; ok {
+		return err
+	}
 	name, _, _ := strings.Cut(call, "(")
 	return f.errs[name]
 }
@@ -119,6 +123,10 @@ func (f *fakeKitty) LaunchVSplit(l kitty.Launch) (int, error) {
 	f.nextWindow++
 	newCols := target.Columns * l.Bias / 100
 	target.Columns -= newCols
+	if f.claudeExits {
+		target.Columns += newCols // the split collapses again
+		return id, nil
+	}
 	f.windows = append(f.windows, kitty.Window{
 		ID: id, TabID: target.TabID, TabTitle: target.TabTitle,
 		Columns: newCols, SessionID: varValue(l.Vars),
@@ -216,6 +224,7 @@ func newTabLaunch(sidebar, claude int, name string) []string {
 		fmt.Sprintf("SetTabTitle(%d,%s)", sidebar, name),
 		"Windows", // tab id and width
 		fmt.Sprintf("LaunchVSplit(%d,bias=77)", sidebar),
+		fmt.Sprintf("FocusWindow(%d)", sidebar), // layout_action acts on the active window
 		fmt.Sprintf("LayoutAction(%d,move_to_screen_edge left)", sidebar),
 		"Windows", // pin pass 1
 		fmt.Sprintf("ResizeWindow(%d,horizontal,-1)", sidebar),

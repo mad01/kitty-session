@@ -221,7 +221,10 @@ func sessionEnv(sess *session.Session) []string {
 	}
 }
 
-// claudeCmd builds the command that starts claude for sess.
+// claudeCmd builds the command that starts claude for sess: --resume <id>
+// when the record's own transcript still exists, --continue when the
+// directory has any transcript to continue, and a fresh claude otherwise.
+// --continue with nothing to continue makes claude exit at once.
 func claudeCmd(sess *session.Session, mode ResumeMode) []string {
 	cmd := []string{"claude"}
 	if mode == ResumeNone {
@@ -230,7 +233,10 @@ func claudeCmd(sess *session.Session, mode ResumeMode) []string {
 	if sess.ClaudeSessionID != "" && transcriptExists(sess) {
 		return append(cmd, "--resume", sess.ClaudeSessionID)
 	}
-	return append(cmd, "--continue")
+	if claude.HasTranscripts(sess.Dir) {
+		return append(cmd, "--continue")
+	}
+	return cmd
 }
 
 // transcriptExists reports whether Claude Code still has the transcript of

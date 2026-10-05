@@ -146,3 +146,30 @@ func TestTranscriptPath(t *testing.T) {
 		t.Errorf("TranscriptPath = %q, want %q", got, want)
 	}
 }
+
+func TestHasTranscripts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := filepath.Join(home, ".claude", "projects", "-work-demo")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if HasTranscripts("/work/demo") {
+		t.Error("empty project dir reported transcripts")
+	}
+	if err := os.WriteFile(filepath.Join(project, "sessions-index.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if HasTranscripts("/work/demo") {
+		t.Error("an index without transcripts counted")
+	}
+	if err := os.WriteFile(filepath.Join(project, "abc.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !HasTranscripts("/work/demo") {
+		t.Error("a transcript was not found")
+	}
+	if HasTranscripts("/work/never") {
+		t.Error("a dir without a project dir reported transcripts")
+	}
+}

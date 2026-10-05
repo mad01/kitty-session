@@ -65,10 +65,24 @@ func TestClaudeCmd(t *testing.T) {
 			[]string{"--continue"},
 		},
 		{"reopen without id continues", ResumeStored, session.Session{}, []string{"--continue"}},
+		{
+			"reopen in a dir with no transcript starts fresh",
+			ResumeStored,
+			session.Session{Dir: "/work/untouched"},
+			nil,
+		},
+		{
+			"reopen with a purged id in a dir with no transcript starts fresh",
+			ResumeStored,
+			session.Session{Dir: "/work/untouched", ClaudeSessionID: "purged-id"},
+			nil,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.sess.Dir = "/work/demo"
+			if tc.sess.Dir == "" {
+				tc.sess.Dir = "/work/demo" // its project dir holds derived-id.jsonl
+			}
 			cmd := claudeCmd(&tc.sess, tc.mode)
 			if cmd[0] != "claude" {
 				t.Fatalf("cmd %q: want it to start claude", cmd)
@@ -189,7 +203,7 @@ func TestOpenGeometryAndFocusFailuresAreWarnings(t *testing.T) {
 	l, f, store := newTestLauncher(t)
 	f.errs["LayoutAction"] = errors.New("no such action")
 	f.errs["ResizeWindow"] = errors.New("cannot resize")
-	f.errs["FocusWindow"] = errors.New("no focus")
+	f.errs["FocusWindow(3)"] = errors.New("no focus") // claude only; the sidebar focus works
 
 	res, err := l.Open(Request{Name: "demo", Dir: "/work/demo"})
 	if err != nil {
@@ -258,6 +272,7 @@ func relaunchCalls(sidebar, claude int) []string {
 		"Windows", // liveness
 		"GotoLayout(2,splits)",
 		"LaunchVSplit(2,bias=77)",
+		"FocusWindow(2)",
 		"LayoutAction(2,move_to_screen_edge left)",
 		"Windows",
 		"ResizeWindow(2,horizontal,-1)",
@@ -272,6 +287,7 @@ func TestOpenStoredSession(t *testing.T) {
 		stored      session.Session
 		arrange     func(f *fakeKitty, sess *session.Session)
 		closeErr    error
+		transcripts bool // the dir has a transcript, so a relaunch can --continue
 		wantFocused bool
 		wantCalls   []string // nil skips the check
 		wantResume  []string // trailing claude args when launched
@@ -300,9 +316,8 @@ func TestOpenStoredSession(t *testing.T) {
 				s.KittyTabID, s.KittySidebarWindowID, s.KittyWindowID = 2, 2, 3
 			},
 			// No CloseTab: the tab is not ours. A new tab gets windows 4 and 5.
-			wantCalls:  append([]string{"Windows"}, newTabLaunch(4, 5, "demo")...),
-			wantResume: []string{"--continue"},
-			wantIDs:    [3]int{3, 4, 5},
+			wantCalls: append([]string{"Windows"}, newTabLaunch(4, 5, "demo")...),
+			wantIDs:   [3]int{3, 4, 5},
 		},
 		{
 			name: "surviving sidebar gets claude relaunched beside it",
@@ -310,9 +325,10 @@ func TestOpenStoredSession(t *testing.T) {
 				f.addTab(s, false)
 				s.KittyWindowID = 9 // the claude window that exited
 			},
-			wantCalls:  relaunchCalls(2, 3),
-			wantResume: []string{"--continue"},
-			wantIDs:    [3]int{2, 2, 3},
+			transcripts: true,
+			wantCalls:   relaunchCalls(2, 3),
+			wantResume:  []string{"--continue"},
+			wantIDs:     [3]int{2, 2, 3},
 		},
 		{
 			name: "stray owned windows are closed before the relaunch",
@@ -320,9 +336,8 @@ func TestOpenStoredSession(t *testing.T) {
 				f.addTab(s, true)
 				s.KittySidebarWindowID, s.KittyWindowID = 8, 9 // record out of sync
 			},
-			wantCalls:  append([]string{"Windows", "CloseTab(2)"}, newTabLaunch(4, 5, "demo")...),
-			wantResume: []string{"--continue"},
-			wantIDs:    [3]int{3, 4, 5},
+			wantCalls: append([]string{"Windows", "CloseTab(2)"}, newTabLaunch(4, 5, "demo")...),
+			wantIDs:   [3]int{3, 4, 5},
 		},
 		{
 			name: "tab that will not close is a warning, not a failure",
@@ -330,10 +345,9 @@ func TestOpenStoredSession(t *testing.T) {
 				f.addTab(s, true)
 				s.KittySidebarWindowID, s.KittyWindowID = 8, 9
 			},
-			closeErr:   errors.New("kitty says no"),
-			wantResume: []string{"--continue"},
-			wantWarns:  1,
-			wantIDs:    [3]int{3, 4, 5},
+			closeErr:  errors.New("kitty says no"),
+			wantWarns: 1,
+			wantIDs:   [3]int{3, 4, 5},
 		},
 		{
 			name: "dead tab with claude id and transcript resumes by id",
@@ -346,16 +360,21 @@ func TestOpenStoredSession(t *testing.T) {
 			wantIDs:    [3]int{2, 2, 3},
 		},
 		{
-			name:       "dead tab with claude id but no transcript continues",
-			stored:     session.Session{KittyTabID: 3, ClaudeSessionID: "uuid-gone"},
-			wantResume: []string{"--continue"},
-			wantIDs:    [3]int{2, 2, 3},
+			name:        "dead tab with claude id but no own transcript continues",
+			stored:      session.Session{KittyTabID: 3, ClaudeSessionID: "uuid-gone"},
+			transcripts: true,
+			wantResume:  []string{"--continue"},
+			wantIDs:     [3]int{2, 2, 3},
 		},
 		{
-			name:       "legacy record without id gets one and continues",
-			stored:     session.Session{ID: "", KittyTabID: 3, KittyWindowID: 4},
-			wantResume: []string{"--continue"},
-			wantIDs:    [3]int{2, 2, 3},
+			name:    "dead tab in a dir without transcripts starts fresh",
+			stored:  session.Session{KittyTabID: 3, ClaudeSessionID: "uuid-gone"},
+			wantIDs: [3]int{2, 2, 3},
+		},
+		{
+			name:    "legacy record without id gets one and starts fresh",
+			stored:  session.Session{ID: "", KittyTabID: 3, KittyWindowID: 4},
+			wantIDs: [3]int{2, 2, 3},
 		},
 	}
 	for _, tc := range tests {
@@ -363,8 +382,15 @@ func TestOpenStoredSession(t *testing.T) {
 			l, f, store := newTestLauncher(t)
 			sess := tc.stored
 			sess.Name, sess.Dir = "demo", "/work/demo"
-			if tc.name != "legacy record without id gets one and continues" && sess.ID == "" {
+			if tc.name != "legacy record without id gets one and starts fresh" && sess.ID == "" {
 				sess.ID = session.NewID()
+			}
+			if tc.transcripts {
+				other, err := claude.TranscriptPath(sess.Dir, "someone-else")
+				if err != nil {
+					t.Fatal(err)
+				}
+				touch(t, other)
 			}
 			if sess.ClaudeTranscriptPath == "TRANSCRIPT" {
 				sess.ClaudeTranscriptPath = filepath.Join(t.TempDir(), "uuid-1.jsonl")

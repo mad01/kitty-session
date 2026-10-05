@@ -181,15 +181,25 @@ func (l *Launcher) splitClaude(p plan, sidebar kitty.Window) (int, []error, erro
 	if err != nil {
 		return 0, nil, fmt.Errorf("cannot create claude window: %w", err)
 	}
-	var warnings []error
-	if err := l.kitty.LayoutAction(sidebar.ID, "move_to_screen_edge", sidebarEdge); err != nil {
-		warnings = append(warnings, fmt.Errorf("could not move sidebar to the left: %w", err))
-	}
+	warnings := l.moveSidebarLeft(sidebar.ID)
 	warnings = append(warnings, l.pinSidebar(sidebar.ID)...)
 	if err := l.kitty.FocusWindow(claudeID); err != nil {
 		warnings = append(warnings, fmt.Errorf("could not focus claude window: %w", err))
 	}
 	return claudeID, warnings, nil
+}
+
+// moveSidebarLeft puts the sidebar on the tab's left edge. Kitty applies a
+// layout_action to the tab's active window, which right after the split is
+// claude, so the sidebar is focused first; splitClaude hands focus back.
+func (l *Launcher) moveSidebarLeft(sidebarID int) []error {
+	if err := l.kitty.FocusWindow(sidebarID); err != nil {
+		return []error{fmt.Errorf("could not focus sidebar to move it: %w", err)}
+	}
+	if err := l.kitty.LayoutAction(sidebarID, "move_to_screen_edge", sidebarEdge); err != nil {
+		return []error{fmt.Errorf("could not move sidebar to the left: %w", err)}
+	}
+	return nil
 }
 
 // claudeBias returns claude's share of a tab totalColumns wide, in percent,

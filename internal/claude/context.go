@@ -52,6 +52,18 @@ func TranscriptPath(dir, sessionID string) (string, error) {
 	return filepath.Join(project, sessionID+".jsonl"), nil
 }
 
+// HasTranscripts reports whether Claude Code has any transcript for sessions
+// started in dir, which is what claude --continue needs to find one. With
+// none, --continue prints "No conversation found" and exits.
+func HasTranscripts(dir string) bool {
+	project, err := projectDir(dir)
+	if err != nil {
+		return false
+	}
+	matches, err := filepath.Glob(filepath.Join(project, "*.jsonl"))
+	return err == nil && len(matches) > 0
+}
+
 // LatestPrompt returns the firstPrompt from the most recently modified
 // non-sidechain session for the given working directory. Returns "" on any error.
 func LatestPrompt(dir string) string {

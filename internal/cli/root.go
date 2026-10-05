@@ -54,6 +54,9 @@ func runAttach(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	printWarnings(cmd, res.Warnings)
+	for _, name := range res.Exited {
+		fmt.Fprintf(cmd.ErrOrStderr(), "ks: %s exited right after launch\n", name)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "ks: %d resumed, %d already running, %d stopped\n",
 		res.Resumed, res.Running, res.Stopped)
 	return nil

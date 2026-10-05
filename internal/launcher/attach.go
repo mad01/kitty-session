@@ -7,20 +7,30 @@ import (
 	"github.com/mad01/kitty-session/internal/session"
 )
 
-// attachStagger separates consecutive claude launches during an attach, so
-// the instance is not hit with every startup at once.
-const attachStagger = 100 * time.Millisecond
+const (
+	// attachStagger separates consecutive claude launches during an attach,
+	// so the instance is not hit with every startup at once.
+	attachStagger = 100 * time.Millisecond
+	// settleAfterLaunch is how long attach waits before checking that the
+	// claude windows it launched are still there. A claude with nothing to
+	// do (bad flags, missing binary) exits within a second.
+	settleAfterLaunch = 2 * time.Second
+)
 
 // AttachResult summarizes one attach.
 type AttachResult struct {
-	// Resumed counts active sessions whose claude window was relaunched.
+	// Resumed counts active sessions whose claude window was relaunched and
+	// was still there settleAfterLaunch later.
 	Resumed int
 	// Running counts active sessions that were already alive.
 	Running int
 	// Stopped counts records the user stopped; attach leaves them alone.
 	Stopped int
+	// Exited names sessions whose relaunched claude window was gone again
+	// settleAfterLaunch later.
+	Exited []string
 	// Focused is the session brought to the front, "" when it was the home
-	// tab because no active session exists.
+	// tab because no active session exists or the one to focus failed.
 	Focused string
 	// Warnings are per-session problems; the attach went on past them.
 	Warnings []error
@@ -29,8 +39,8 @@ type AttachResult struct {
 // Attach brings the instance back to where the user left it: every active
 // session whose claude window is gone is resumed, stopped records are left
 // alone, and the most recently focused session (first active by name when
-// none was ever focused) ends up in front. With no active session the home
-// tab is focused.
+// none was ever focused) ends up in front. With no active session, or when
+// that session failed to come back, the home tab is focused.
 func (l *Launcher) Attach() (*AttachResult, error) {
 	sessions, err := l.store.List()
 	if err != nil {
@@ -46,8 +56,8 @@ func (l *Launcher) Attach() (*AttachResult, error) {
 		active = append(active, s)
 	}
 	target := focusTarget(active)
-	failed := l.resume(active, res)
-	if target == nil || failed[target.Name] {
+	skip := l.resume(active, res)
+	if target == nil || skip[target.Name] {
 		l.focusHome(res)
 		return res, nil
 	}
@@ -60,29 +70,54 @@ func (l *Launcher) Attach() (*AttachResult, error) {
 }
 
 // resume relaunches every active session without a live claude window,
-// counting into res, and returns the names that failed.
+// counting into res, and returns the names attach must not focus: those that
+// failed to launch or exited right after.
 func (l *Launcher) resume(active []*session.Session, res *AttachResult) map[string]bool {
-	failed := map[string]bool{}
-	launched := 0
+	skip := map[string]bool{}
+	var launched []string
+	attempts := 0
 	for _, s := range active {
 		if l.Alive(s) {
 			res.Running++
 			continue
 		}
-		if launched > 0 {
+		if attempts > 0 {
 			l.sleep(attachStagger)
 		}
-		launched++
+		attempts++
 		r, err := l.Open(Request{Name: s.Name, Resume: ResumeStored})
 		if err != nil {
-			failed[s.Name] = true
+			skip[s.Name] = true
 			res.Warnings = append(res.Warnings, fmt.Errorf("could not resume %s: %w", s.Name, err))
 			continue
 		}
-		res.Resumed++
+		launched = append(launched, s.Name)
 		res.Warnings = append(res.Warnings, r.Warnings...)
 	}
-	return failed
+	for _, name := range l.settle(launched, res) {
+		skip[name] = true
+	}
+	return skip
+}
+
+// settle waits for the launched claude processes to get going, then counts
+// the ones still there as resumed and reports the rest as exited.
+func (l *Launcher) settle(launched []string, res *AttachResult) []string {
+	if len(launched) == 0 {
+		return nil
+	}
+	l.sleep(settleAfterLaunch)
+	var exited []string
+	for _, name := range launched {
+		sess, err := l.store.Load(name)
+		if err != nil || !l.Alive(sess) {
+			exited = append(exited, name)
+			continue
+		}
+		res.Resumed++
+	}
+	res.Exited = exited
+	return exited
 }
 
 // focusHome focuses the instance's first window, the home tab's sidebar.

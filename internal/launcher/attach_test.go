@@ -26,13 +26,16 @@ func TestAttach(t *testing.T) {
 		name         string
 		sessions     []attachSpec
 		launchErr    error
+		claudeExits  bool
 		wantResumed  int
 		wantRunning  int
 		wantStopped  int
+		wantExited   []string
 		wantFocused  string
 		wantWarns    int
 		wantLaunches int // LaunchTab calls
 		wantSleeps   int // attachStagger pauses
+		wantSettle   bool
 		wantHome     bool
 	}{
 		{
@@ -62,6 +65,7 @@ func TestAttach(t *testing.T) {
 			wantFocused:  "bravo",
 			wantLaunches: 2,
 			wantSleeps:   1,
+			wantSettle:   true,
 		},
 		{
 			name: "never focused: the first active by name is focused",
@@ -75,6 +79,7 @@ func TestAttach(t *testing.T) {
 			wantFocused:  "alpha",
 			wantLaunches: 2,
 			wantSleeps:   1,
+			wantSettle:   true,
 		},
 		{
 			name:         "a session that will not launch is a warning, home gets focus",
@@ -89,6 +94,20 @@ func TestAttach(t *testing.T) {
 			sessions:    []attachSpec{{name: "alpha", sidebar: true}},
 			wantResumed: 1,
 			wantFocused: "alpha",
+			wantSettle:  true,
+		},
+		{
+			name: "a claude that exits right after launch is reported, not counted",
+			sessions: []attachSpec{
+				{name: "alpha", focusedAt: time.Hour},
+				{name: "bravo", alive: true},
+			},
+			claudeExits:  true,
+			wantRunning:  1,
+			wantExited:   []string{"alpha"},
+			wantLaunches: 1,
+			wantSettle:   true,
+			wantHome:     true, // alpha was the target; it is not focused
 		},
 	}
 	for _, tc := range tests {
@@ -111,6 +130,7 @@ func TestAttach(t *testing.T) {
 				}
 			}
 			f.errs["LaunchTab"] = tc.launchErr
+			f.claudeExits = tc.claudeExits
 			f.calls = nil
 
 			res, err := l.Attach()
@@ -124,6 +144,9 @@ func TestAttach(t *testing.T) {
 			}
 			if res.Focused != tc.wantFocused {
 				t.Errorf("Focused = %q, want %q", res.Focused, tc.wantFocused)
+			}
+			if !slices.Equal(res.Exited, tc.wantExited) {
+				t.Errorf("Exited = %v, want %v", res.Exited, tc.wantExited)
 			}
 			if len(res.Warnings) != tc.wantWarns {
 				t.Errorf("warnings = %v, want %d", res.Warnings, tc.wantWarns)
@@ -142,8 +165,13 @@ func TestAttach(t *testing.T) {
 					f.calls,
 				)
 			}
-			if f.slept != time.Duration(tc.wantSleeps)*attachStagger {
-				t.Errorf("slept %v, want %d stagger(s)", f.slept, tc.wantSleeps)
+			wantSlept := time.Duration(tc.wantSleeps) * attachStagger
+			if tc.wantSettle {
+				wantSlept += settleAfterLaunch
+			}
+			if f.slept != wantSlept {
+				t.Errorf("slept %v, want %v (%d stagger, settle %v)",
+					f.slept, wantSlept, tc.wantSleeps, tc.wantSettle)
 			}
 			checkAttachFocus(t, f, store, tc.wantFocused, tc.wantHome)
 		})
