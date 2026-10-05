@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/procinfo"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
@@ -27,13 +28,6 @@ type hookPayload struct {
 	// activity still counts as state, but it must not touch the record.
 	AgentID string `json:"agent_id"`
 }
-
-// SessionEnd reasons that mean the user stopped the agent on purpose. The
-// others (clear, resume, other) are restarts or the window going away.
-const (
-	reasonPromptInputExit = "prompt_input_exit"
-	reasonLogout          = "logout"
-)
 
 var hookCmd = &cobra.Command{
 	Use:    "_hook",
@@ -180,7 +174,7 @@ func markSessionStopped(
 	sess *session.Session,
 	reason string,
 ) {
-	if reason != reasonPromptInputExit && reason != reasonLogout {
+	if reason != hooks.ReasonPromptInputExit && reason != hooks.ReasonLogout {
 		return
 	}
 	sess.Status = session.StatusStopped
