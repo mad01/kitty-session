@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,15 +37,6 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if store.Exists(newName) {
-		return fmt.Errorf(
-			"session %q already exists (use 'ks open %s' or 'ks close %s' first)",
-			newName,
-			newName,
-			newName,
-		)
-	}
-
 	dir := newDir
 	if dir == "" {
 		dir, err = os.Getwd()
@@ -60,12 +52,21 @@ func runNew(cmd *cobra.Command, args []string) error {
 	cfg, _ := config.Load()
 	res, err := launcher.Open(store, cfg, launcher.Request{Name: newName, Dir: dir})
 	if err != nil {
-		return err
+		return withExistsHint(err, newName)
 	}
 	printWarnings(cmd, res.Warnings)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", newName, dir)
 	return nil
+}
+
+// withExistsHint tells the user what to do about a taken name; other errors
+// pass through.
+func withExistsHint(err error, name string) error {
+	if !errors.Is(err, launcher.ErrExists) {
+		return err
+	}
+	return fmt.Errorf("%w (use 'ks open %s' or 'ks close %s' first)", err, name, name)
 }
 
 // printWarnings reports the launcher's non-fatal problems on stderr.

@@ -3,6 +3,7 @@ package cli
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -48,23 +49,33 @@ func runTmp(cmd *cobra.Command, args []string) error {
 	}
 
 	name := tmpSessionName
-	if name == "" {
+	auto := name == ""
+	if auto {
 		name = fmt.Sprintf("tmp-%s", time.Now().Format("0102-1504"))
-		if store.Exists(name) {
-			b := make([]byte, 2)
-			_, _ = rand.Read(b)
-			name = name + "-" + hex.EncodeToString(b)
-		}
-	} else if store.Exists(name) {
-		return fmt.Errorf("session %q already exists (use 'ks open %s' or 'ks close %s' first)", name, name, name)
 	}
-
 	res, err := launcher.Open(store, cfg, launcher.Request{Name: name, Dir: tmpDir})
+	if auto && errors.Is(err, launcher.ErrExists) {
+		// Two tmp sessions in the same minute: disambiguate the generated name.
+		name = name + "-" + randomSuffix()
+		res, err = launcher.Open(store, cfg, launcher.Request{Name: name, Dir: tmpDir})
+	}
 	if err != nil {
-		return err
+		return withExistsHint(err, name)
 	}
 	printWarnings(cmd, res.Warnings)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q created in %s\n", name, tmpDir)
 	return nil
+}
+
+// suffixBytes is the length of the random disambiguator before hex encoding.
+const suffixBytes = 2
+
+// randomSuffix returns a short random hex string for a generated name.
+func randomSuffix() string {
+	b := make([]byte, suffixBytes)
+	if _, err := rand.Read(b); err != nil {
+		panic("tmp: crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }

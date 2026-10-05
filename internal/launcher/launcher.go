@@ -8,6 +8,7 @@
 package launcher
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -29,6 +30,10 @@ const (
 	// with --continue when it does not.
 	ResumeStored
 )
+
+// ErrExists is returned by Open when a new session's name is already taken.
+// Callers match it with errors.Is to offer a different name.
+var ErrExists = errors.New("already exists")
 
 // Request describes the session to open.
 type Request struct {
@@ -100,11 +105,15 @@ func open(store *session.Store, cfg *config.Config, b backend, req Request) (*Re
 	return &Result{Session: saved, Warnings: append(warnings, w.warnings...)}, nil
 }
 
-// target returns the record to launch: a new one for ResumeNone, the stored
-// one for ResumeStored. A stored record from before IDs existed gets one now,
-// so the hook can find it by KS_SESSION_ID from this launch on.
+// target returns the record to launch: a new one for ResumeNone (ErrExists
+// when the name is taken), the stored one for ResumeStored. A stored record
+// from before IDs existed gets one now, so the hook can find it by
+// KS_SESSION_ID from this launch on.
 func target(store *session.Store, req Request) (*session.Session, error) {
 	if req.Resume == ResumeNone {
+		if store.Exists(req.Name) {
+			return nil, fmt.Errorf("session %q %w", req.Name, ErrExists)
+		}
 		return session.New(req.Name, req.Dir, 0, 0), nil
 	}
 	sess, err := store.Load(req.Name)

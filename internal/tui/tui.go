@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 )
@@ -348,25 +350,28 @@ func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 
 	name := suggestSessionNameForDir(dir)
 
-	if name != "" && !m.store.Exists(name) {
-		if err := createSession(name, dir, m.store); err != nil {
+	var conflict error
+	if name != "" {
+		err := createSession(name, dir, m.store)
+		if err == nil {
+			m.refreshList()
+			m.mode = modeList
+			m.repoList.ResetFilter()
+			return m, m.list.NewStatusMessage(fmt.Sprintf("created %q", name))
+		}
+		if !errors.Is(err, launcher.ErrExists) {
 			m.mode = modeList
 			m.repoList.ResetFilter()
 			return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 		}
-		m.refreshList()
-		m.mode = modeList
-		m.repoList.ResetFilter()
-		return m, m.list.NewStatusMessage(fmt.Sprintf("created %q", name))
+		conflict = fmt.Errorf("%w — pick a different name", err)
 	}
 
 	// Name conflicts or is empty — let user edit it
 	m.repoDir = dir
 	m.mode = modeInput
 	m.activateTextInput(name)
-	if name != "" {
-		m.err = fmt.Errorf("session %q already exists — pick a different name", name)
-	}
+	m.err = conflict
 	return m, nil
 }
 
@@ -503,10 +508,6 @@ func (m model) handleCreate() (tea.Model, tea.Cmd) {
 		m.err = fmt.Errorf("name cannot be empty")
 		return m, nil
 	}
-	if m.store.Exists(name) {
-		m.err = fmt.Errorf("session %q already exists", name)
-		return m, nil
-	}
 
 	dir := m.repoDir
 	if dir == "" {
@@ -515,6 +516,9 @@ func (m model) handleCreate() (tea.Model, tea.Cmd) {
 
 	if err := createSession(name, dir, m.store); err != nil {
 		m.err = err
+		if errors.Is(err, launcher.ErrExists) {
+			return m, nil // stay in the prompt so the user can pick another name
+		}
 		m.textInput.Blur()
 		m.mode = modeList
 		return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))

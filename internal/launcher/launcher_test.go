@@ -473,6 +473,28 @@ func withStatus(s session.Session, status string) session.Session {
 	return s
 }
 
+func TestOpenNewSessionNameTaken(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.Save(session.New("taken", "/work/old", 1, 2)); err != nil {
+		t.Fatal(err)
+	}
+	b := &fakeBackend{}
+	_, err := open(store, nil, b, Request{Name: "taken", Dir: "/work/new"})
+	if !errors.Is(err, ErrExists) {
+		t.Fatalf("err = %v, want ErrExists", err)
+	}
+	if !strings.Contains(err.Error(), `session "taken" already exists`) {
+		t.Errorf("err = %q, want it to name the session", err)
+	}
+	if len(b.calls) != 0 {
+		t.Errorf("kitty was driven for a rejected name: %v", b.calls)
+	}
+	got, err := store.Load("taken")
+	if err != nil || got.Dir != "/work/old" {
+		t.Errorf("existing record touched: %+v, %v", got, err)
+	}
+}
+
 func TestOpenStoredSessionMissing(t *testing.T) {
 	store := newTestStore(t)
 	_, err := open(store, nil, &fakeBackend{}, Request{Name: "ghost", Resume: ResumeStored})
