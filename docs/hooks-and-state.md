@@ -48,13 +48,13 @@ Both commands are idempotent. Install re-runs remove any stale ks entries (for e
 
 | Event | Matcher | State written | Extra effect |
 |---|---|---|---|
-| `PreToolUse` | `.*` | `working` | On `EnterPlanMode` or `ExitPlanMode`, sends `refresh\n` to the session's summary tab (if any) |
-| `Stop` | *(empty)* | `idle` | Sends `refresh\n` to the summary tab |
+| `PreToolUse` | `.*` | `working` | |
+| `Stop` | *(empty)* | `idle` | |
 | `Notification` | `permission_prompt\|elicitation_dialog` | `input` | — |
 | `SessionStart` | *(empty)* | `waiting` | Stores the payload's `session_id` and `transcript_path` on the record as `claude_session_id` / `claude_transcript_path` and sets `status` to `active` |
 | `SessionEnd` | `prompt_input_exit\|logout` | *(none)* | Sets `status` to `stopped` and removes the state file. The handler checks the reason again, so a `clear`, `resume` or `other` that slips through is still ignored |
 
-Every launch path (`ks new`, `ks open`, `ks tmp`, the TUI) exports two variables into the claude window: `KS_SESSION_NAME=<name>` and `KS_SESSION_ID=<id>`. The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the TUI does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
+Every launch path (`ks new`, `ks open`, `ks tmp`, the TUI) exports two variables into both of the session's windows: `KS_SESSION_NAME=<name>` and `KS_SESSION_ID=<id>`. The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the TUI does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
 
 Two more guards keep the record honest:
 
@@ -99,14 +99,14 @@ Existing non-ks hooks in the file are preserved.
 
 ## 2. Background Haiku agent (optional fallback)
 
-Launched by `ks --agent` from the TUI root command. The agent is a long-running `claude` invocation with a hardened system prompt and a tightly restricted `--allowedTools` list. It loops every five seconds:
+Launched by `ks sidebar --agent`, or by the home sidebar when `ks --agent` starts the instance. The agent is a long-running `claude` invocation with a hardened system prompt and a tightly restricted `--allowedTools` list. It loops every five seconds:
 
 1. List session files in `~/.config/ks/sessions/`.
 2. For each one with a live kitty window ID, run `kitty @ get-text --match=id:<id>`.
 3. Classify the terminal text into `working` / `idle` / `input` / `waiting`.
 4. Write the result to `~/.config/ks/state/<name>.json`.
 
-The agent uses the `haiku` model alias. Its allowed tools are just `Bash(kitty @ get-text *)`, `Bash(ls ...)`, `Bash(sleep *)`, plus read/write access to the session and state directories. The system prompt itself forbids launchd/cron/plist/scripts. When the TUI exits, `ks` kills the agent's process group so nothing lingers.
+The agent uses the `haiku` model alias. Its allowed tools are just `Bash(kitty @ --to <socket> get-text *)`, `Bash(ls ...)`, `Bash(sleep *)`, plus read/write access to the session and state directories. The system prompt itself forbids launchd/cron/plist/scripts. When the TUI exits, `ks` kills the agent's process group so nothing lingers.
 
 Use the agent if you don't want to install the Claude Code hooks, or as a belt-and-braces setup alongside hooks.
 
@@ -129,7 +129,7 @@ This is necessarily fuzzy. Claude's UI changes and a substring match can get tri
 | Accuracy | High — driven by Claude Code internals | Medium — driven by terminal classification |
 | Latency | Immediate (hook fires synchronously) | Up to ~5 seconds |
 | Cost | Zero extra model calls | Ongoing Haiku usage while `ks` runs |
-| Lifespan | Permanent until uninstalled | Only while `ks` (TUI with `--agent`) is running |
+| Lifespan | Permanent until uninstalled | Only while the sidebar that started it runs |
 | Per-session opt-out | Via `KS_SESSION_NAME` being unset | Per-session; skips windows without a kitty ID |
 
 The recommended setup is hooks alone. The agent is there for when you can't or don't want to modify `~/.claude/settings.json`.

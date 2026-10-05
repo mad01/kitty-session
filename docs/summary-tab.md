@@ -1,3 +1,5 @@
+> **Deprecated.** The summary tab belonged to the pre-instance topology (`layout: tab` plus `summary: true`). Since ks runs its own kitty instance with a sidebar per session there is no summary window; both keys still parse and are ignored. This page is kept for the record.
+
 # Summary tab
 
 The summary tab is an opt-in third kitty tab that runs a Haiku-powered agent to read and summarize the session's Claude Code pane. It's useful when Claude is off doing a long refactor and you want a structured view of what it's currently working on without staring at the raw output.

@@ -1,6 +1,6 @@
 # kitty-session
 
-`ks` is a session manager for [kitty](https://sw.kovidgoyal.net/kitty/). It creates named kitty tabs that pair [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) with a shell, tracks their state, and lets you jump between them from an interactive TUI or shell scripts.
+`ks` is a session manager for [kitty](https://sw.kovidgoyal.net/kitty/). It runs a kitty instance of its own in which every [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) session is a tab: a sidebar TUI on the left, claude on the right. It tracks each session's state, brings every session back with one command, and lets you jump between them from the sidebar or shell scripts.
 
 ## Screenshots
 
@@ -19,7 +19,7 @@ Press `n` to open the repository picker. Browse everything `ks` has scanned or t
 
 ### Inside a session
 
-Each session runs Claude Code and a shell in the same tab, either split horizontally (default) or as separate tabs.
+Each session tab pairs the sidebar with Claude Code. (Screenshots predate the sidebar layout.)
 
 ![Running session](images/session.png)
 
@@ -31,7 +31,7 @@ Press `?` for the full keybindings.
 
 ## Install
 
-You need [kitty](https://sw.kovidgoyal.net/kitty/) with remote control enabled and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`. Go 1.25 or later is required to build from source.
+You need [kitty](https://sw.kovidgoyal.net/kitty/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`; `ks` starts its own kitty instance. Go 1.25 or later is required to build from source.
 
 ```bash
 make install
@@ -49,7 +49,7 @@ For everything else — first session, configuration, subcommands, hooks — see
 - [Command reference](docs/commands.md) — every subcommand and flag
 - [Repo finder](docs/repo-finder.md) — `ks repo` and its output formats
 - [Hooks and state detection](docs/hooks-and-state.md) — how `ks` knows what Claude is doing
-- [Summary tab](docs/summary-tab.md) — the optional Haiku-powered session summary
+- [Summary tab](docs/summary-tab.md) — deprecated, kept for the record
 - [Architecture](docs/architecture.md) — package layout, data flow, extending `ks`
 - [Troubleshooting](docs/troubleshooting.md) — common failures and fixes
 

@@ -2,52 +2,53 @@
 
 Things that go wrong and how to fix them.
 
-## `kitty @` commands fail
+## `cannot start ks instance` or `did not answer ... within 10s`
 
-Symptom: `ks new` or `ks open` prints `kitty @ launch tab: ...` errors; the TUI shows errors in the status bar when you press `o`.
+Symptom: `ks`, `ks new` or `ks open` fails before any tab appears.
 
-Cause: kitty doesn't allow remote control by default.
+`ks` starts its own kitty with `kitty --detach --listen-on unix:<socket> ...` and waits up to ten seconds for the socket to answer. Check, in order:
 
-Fix: edit `~/.config/kitty/kitty.conf` and add:
+- `kitty` is on `PATH` in the shell you run `ks` from: `kitty --version`.
+- The socket directory exists and is writable: the default is `~/.config/ks/kitty.sock`; see `kitty_socket` in [Configuration](configuration.md).
+- Nothing else owns that path. `ks` removes a stale socket file before starting, but a foreign process listening there keeps answering `ls` and `ks` will happily talk to it.
+- Your `~/.config/kitty/kitty.conf` loads. The instance reads it; a syntax error there shows up in kitty's own output, not in `ks`. Try `kitty --detach -o allow_remote_control=yes --listen-on unix:/tmp/probe.sock -- sleep 60` and `kitty @ --to unix:/tmp/probe.sock ls` by hand.
 
-```
-allow_remote_control yes
-listen_on unix:/tmp/mykitty
-```
+## `ks instance not running`
 
-Restart kitty. Confirm with:
-
-```bash
-kitty @ ls
-```
-
-It should print JSON. If it prints an auth error, check kitty's [remote control docs](https://sw.kovidgoyal.net/kitty/remote-control/) for token-based setups.
+Printed by `ks list` (after every session, all shown as `stopped`) and by `ks quit`. Nothing is wrong: the instance is down. `ks`, `ks new`, `ks open` and `ks tmp` start it; `ks list`, `ks close`, `ks rename` and `ks quit` never do.
 
 ## `claude: not found`
 
-Symptom: `ks new` creates a tab but Claude never starts; the shell pane shows `claude: command not found`. The `--agent` flag prints `warning: agent failed to start: claude not found in PATH`. Summary tab fails to launch.
+Symptom: a session tab appears, the claude window flashes and closes, the sidebar shows the session as `stopped`.
 
-Fix: install [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) and make sure `claude` is on the `PATH` that kitty itself sees when it launches. `kitty @ launch` uses kitty's environment, not your current shell's, so exporting `PATH` in `~/.zshrc` doesn't automatically apply. The TUI path explicitly forwards your `PATH` via `--env PATH=<current-PATH>`; the `ks new` and `ks open` subcommands do not. If `claude` lives in a shell-only location, create sessions via the TUI or add the directory to kitty's launch environment (`launch_env` in `kitty.conf`).
+Fix: install [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) and make sure `claude` is on the `PATH` of the shell you run `ks` from. Every launch path forwards that `PATH` into the session's windows, so a `claude` under `~/.local/bin` works even though `kitty @ launch` runs with the instance's environment. The `--agent` flag prints `warning: agent failed to start: claude not found in PATH` for the same reason.
 
-## Session shows `stopped` but the kitty tab is still open
+## Claude exits right after `ks` or `ks open`
 
-Cause: the `kitty_tab_id` stored in `~/.config/ks/sessions/<name>.json` no longer matches any live tab. This can happen after a kitty restart — IDs don't survive across `kitty` process boundaries.
+Symptom: the tab comes back with the sidebar only; `ks list` says `stopped`.
 
-Fix: close the orphaned kitty tab manually, then `ks open <name>`. `ks` will see the stored tab ID is stale, launch a new tab via `claude --continue`, and update the session file with the new IDs.
+Cause: the session had no conversation to continue. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists, else `claude --continue`. With nothing to continue Claude prints `No conversation found` and exits, and kitty closes the window. Sessions that never received a message, or whose transcript Claude Code purged (30 days by default), behave like this.
 
-Alternative: open `~/.config/ks/sessions/<name>.json`, read the new tab ID from `kitty @ ls`, and edit it in by hand.
+Fix: `ks open <name>` again puts a fresh claude beside the surviving sidebar. Type something before you `ks quit` next time.
+
+A second cause: the instance was started from inside a Claude Code session and inherited its `CLAUDE_CODE_*` variables, which turns every claude in it into a child session with transcript saving off. `ks quit`, then start the instance from a plain shell.
+
+## Session shows `stopped` but its tab is still open
+
+The sidebar and `ks list` only count a claude window as the session's when the window carries the kitty user variable `KS_SESSION_ID` matching the record's `id` and its id matches `kitty_window_id`. A tab you created by hand in the instance, or a window from an older `ks` version, does not qualify.
+
+Fix: close the orphaned tab by hand, then `ks open <name>`.
 
 ## No sessions after a reboot
 
-Session files are never deleted by `ks` on shutdown — they persist across reboots. If you can't see them:
+Session files are never deleted by `ks` on shutdown; they persist across reboots and across `ks quit`. Run `ks` to bring every active one back. If the sidebar shows nothing:
 
 - Verify the files exist: `ls ~/.config/ks/sessions/`.
-- The TUI shows all files in that directory as sessions. If the directory is empty, you had no saved sessions.
-- Check the trash: `ls ~/.config/ks/sessions/trash/`. Restore them from the TUI with `u`.
+- Check the trash: `ls ~/.config/ks/sessions/trash/`. Restore from the sidebar with `u`.
 
 ## `no config found (checked ~/.config/ks/config.yaml)`
 
-Cause: `ks repo` and the TUI repo picker require a config file with at least one `dirs` entry. `ks new` and `ks open` will work without one (they fall back to the default `split` layout and no summary tab).
+Cause: `ks repo` and the sidebar's repo picker require a config file with at least one `dirs` entry. Every other command works without one.
 
 Fix: create the file. Minimal example:
 
@@ -70,7 +71,7 @@ Check with `ls <configured-dir>` and confirm you expected repos there.
 
 ## State badge is always `waiting`
 
-You haven't installed the Claude Code hooks and you aren't running `ks --agent`. The fallback terminal classifier is conservative — it only returns `working` when it sees one of the specific signal words or a spinner character, and only returns `idle` when the last line is exactly `>`. Anything else becomes `waiting`.
+You haven't installed the Claude Code hooks and you aren't running the `--agent` monitor. The fallback terminal classifier is conservative. It only returns `working` when it sees one of the specific signal words or a spinner character, and only `idle` when the last line is exactly `>`. Anything else becomes `waiting`.
 
 Fix: `ks hooks install`. See [Hooks and state detection](hooks-and-state.md).
 
@@ -90,23 +91,13 @@ If the `state` field isn't `idle` and `updated_at` is older than the last Claude
 
 `ks hooks install` edits `~/.claude/settings.json`. Things to check:
 
-- Claude Code reads this file at start. Running instances won't pick up new hooks — stop and restart `claude`.
+- Claude Code reads this file at start. Running instances won't pick up new hooks; stop and restart `claude` (`ks open` after a `c` in the sidebar does that).
 - The installed command looks like `~/code/bin/ks _hook`. If your `ks` binary lives elsewhere, re-run install after moving it so the path is correct.
-- `KS_SESSION_NAME` must be set in the env. If you launched a session some other way (not via `ks new` or `ks open`), the hook will exit silently.
+- `KS_SESSION_NAME` must be set in the env. If you launched a claude some other way (not via `ks`), the hook exits silently.
 
-## TUI looks cramped or wraps
+## Sidebar is too narrow or wraps
 
-The TUI clamps its inner size to 150×50 and shrinks to a minimum of 40×10. If your terminal is between those, you're in normal territory. If it's smaller, the frame rendering will wrap.
-
-Fix: widen the kitty window, or reduce the font size.
-
-## Summary tab never appears
-
-- Confirm the config actually enables it: `layout: tab` *and* `summary: true`. With `layout: split`, summary is silently disabled.
-- Confirm `claude` is on `PATH` — the summary agent is `claude` with a restricted allow-list.
-- Check for a stderr warning when creating a session: `warning: could not create summary tab: ...`.
-
-If the tab appears but is empty for more than 10 seconds, the `refresh\n` nudge may have been sent before `claude` finished starting up. Close and recreate the session; the 3-second initial delay usually covers it.
+The sidebar is `sidebar_width` cells wide (default 36, minimum 20) and the TUI clamps its inner size to 150×50. Raise `sidebar_width` in [Configuration](configuration.md); it applies when a tab is created or claude is relaunched into it.
 
 ## Scratch session not being cleaned up
 

@@ -1,12 +1,13 @@
 # TUI guide
 
-Running `ks` with no subcommand launches an interactive TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). Every session action the subcommands expose is available from here too.
+The TUI is the sidebar, `ks sidebar`, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). The ks instance runs one in its home tab and one on the left of every session tab (`ks sidebar --session <name>`, which shows the session's name in the title bar). Every session action the subcommands expose is available from here too.
 
 ## Launch
 
 ```bash
-ks            # interactive session manager
-ks --agent    # same, plus start a background Haiku state monitor
+ks                    # attach; the instance opens with a sidebar in its home tab
+ks sidebar            # the TUI in the current terminal, by hand
+ks sidebar --agent    # same, plus the background Haiku state monitor
 ```
 
 The `--agent` flag is a fallback for when you haven't installed the Claude Code hooks. See [Hooks and state detection](hooks-and-state.md).
@@ -36,7 +37,7 @@ The list polls every three seconds and refreshes state. A separate 350 ms animat
 | `u` | Restore a previously deleted session |
 | `/` | Start fuzzy filter over session names |
 | `?` | Toggle full help overlay |
-| `q` / `esc` | Quit (asks for confirmation) |
+| `q` / `esc` | Quit the sidebar (asks for confirmation). In a session tab claude's window then takes the whole tab until the next `ks open`. |
 
 `ctrl+c` and `ctrl+d` show a status-bar hint instead of quitting.
 
@@ -92,6 +93,3 @@ A scrollable viewport overlay listing every keybinding. Any key that's not scrol
 
 Pops a confirmation dialog. Pressing `y` quits; anything else returns to the list. This is also what `ctrl+c`/`ctrl+d` nudge you toward.
 
-## Summary tab refresh
-
-If you have `layout: tab` and `summary: true` in your config, the TUI also fires a `refresh\n` message to every session's summary tab every five minutes. See [Summary tab](summary-tab.md).
