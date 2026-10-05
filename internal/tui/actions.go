@@ -133,14 +133,10 @@ func createSession(name, dir string, store *session.Store) error {
 
 // closeSession closes the session's kitty tabs but keeps the record, marked
 // stopped so a later ks start does not treat it as a session to bring back.
+// Tab-close warnings have nowhere to go in the TUI and are dropped.
 func closeSession(sess *session.Session, store *session.Store) error {
-	sess.Status = session.StatusStopped
-	if err := store.Save(sess); err != nil {
-		return err
-	}
-	state.Clean(sess.Name)
-	closeSessionTabs(sess)
-	return nil
+	_, err := launcher.Close(store, sess, true)
+	return err
 }
 
 func renameSession(sess *session.Session, newName string, store *session.Store) error {
@@ -163,25 +159,11 @@ func renameSession(sess *session.Session, newName string, store *session.Store) 
 	return nil
 }
 
+// deleteSession closes the session's kitty tabs and moves the record to the
+// trash, where the restore action can bring it back.
 func deleteSession(sess *session.Session, store *session.Store) error {
-	state.Clean(sess.Name)
-	closeSessionTabs(sess)
-	return store.Delete(sess.Name)
-}
-
-// closeSessionTabs closes all kitty tabs belonging to a session.
-// For split layout this is just the main tab; for tab layout it also
-// closes the separate shell tab.
-func closeSessionTabs(sess *session.Session) {
-	if kitty.TabExists(sess.KittyTabID) {
-		_ = kitty.CloseTab(sess.KittyTabID)
-	}
-	if sess.KittyShellWindowID != 0 {
-		_ = kitty.CloseTabForWindow(sess.KittyShellWindowID)
-	}
-	if sess.KittySummaryWindowID != 0 {
-		_ = kitty.CloseTabForWindow(sess.KittySummaryWindowID)
-	}
+	_, err := launcher.Close(store, sess, false)
+	return err
 }
 
 func restoreSession(name string, store *session.Store) error {

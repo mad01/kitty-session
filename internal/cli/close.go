@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -30,45 +30,20 @@ func runClose(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
 	sess, err := store.Load(name)
 	if err != nil {
 		return fmt.Errorf("session %q not found", name)
 	}
 
-	// Record the stop before the tab goes away: closing the window ends claude
-	// with SessionEnd reason "other", which the hook deliberately ignores.
+	warnings, err := launcher.Close(store, sess, keepSession)
+	printWarnings(cmd, warnings)
+	if err != nil {
+		return err
+	}
 	if keepSession {
-		sess.Status = session.StatusStopped
-		if err := store.Save(sess); err != nil {
-			return fmt.Errorf("cannot save session: %w", err)
-		}
-	}
-
-	// Close the kitty tab(s) if still running
-	if kitty.TabExists(sess.KittyTabID) {
-		_ = kitty.CloseTab(sess.KittyTabID)
-	}
-	if sess.KittyShellWindowID != 0 {
-		_ = kitty.CloseTabForWindow(sess.KittyShellWindowID)
-	}
-	if sess.KittySummaryWindowID != 0 {
-		_ = kitty.CloseTabForWindow(sess.KittySummaryWindowID)
-	}
-
-	if keepSession {
-		fmt.Fprintf(
-			cmd.OutOrStdout(),
-			"session %q tab closed (session kept for recovery)\n",
-			name,
-		)
+		fmt.Fprintf(cmd.OutOrStdout(), "session %q tab closed (session kept for recovery)\n", name)
 		return nil
 	}
-
-	if err := store.Delete(name); err != nil {
-		return fmt.Errorf("cannot delete session file: %w", err)
-	}
-
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q closed\n", name)
 	return nil
 }
