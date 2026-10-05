@@ -14,6 +14,7 @@ type backend interface {
 	Windows() ([]kitty.Window, error)
 	LaunchTab(kitty.Launch) (int, error)
 	LaunchVSplit(kitty.Launch) (int, error)
+	LaunchHSplit(kitty.Launch) (int, error)
 	GotoLayout(windowID int, layout string) error
 	LayoutAction(windowID int, args ...string) error
 	ResizeWindow(windowID int, axis string, increment int) error
@@ -62,6 +63,16 @@ type live struct {
 	claude  *kitty.Window // nil when the claude window is gone
 	sidebar *kitty.Window // nil when the sidebar window is gone
 	tabs    []int         // every tab holding a window the session owns
+}
+
+// tabActive reports whether the session's tab is the one its OS window shows.
+func (lv live) tabActive() bool {
+	for _, w := range []*kitty.Window{lv.sidebar, lv.claude} {
+		if w != nil && w.TabActive {
+			return true
+		}
+	}
+	return false
 }
 
 // liveWindows takes a snapshot and picks out the session's windows.

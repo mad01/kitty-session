@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/mad01/kitty-session/internal/launcher"
@@ -33,15 +32,9 @@ func runTmp(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	tmpBase := w.cfg.EffectiveTmpDir()
-	if tmpBase != "" {
-		if err := os.MkdirAll(tmpBase, 0o755); err != nil {
-			return fmt.Errorf("cannot create tmpdir: %w", err)
-		}
-	}
-	tmpDir, err := os.MkdirTemp(tmpBase, "ks-*")
+	tmpDir, err := launcher.ScratchDir(w.cfg.EffectiveTmpDir())
 	if err != nil {
-		return fmt.Errorf("cannot create temp directory: %w", err)
+		return err
 	}
 
 	name := tmpSessionName

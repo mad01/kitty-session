@@ -76,6 +76,23 @@ func Connect(cfg *config.Config) (*kitty.Client, error) {
 	return c, nil
 }
 
+// Await returns a client once the instance answers, polling for up to
+// startTimeout. The sidebars inside the instance use it: kitty runs the home
+// sidebar as its first window, and the socket may answer a moment later.
+func Await(cfg *config.Config) (*kitty.Client, error) {
+	c, err := Client(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Ping(); err == nil {
+		return c, nil
+	}
+	if err := awaitPing(c, time.Sleep, startTimeout); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNotRunning, err)
+	}
+	return c, nil
+}
+
 // Ensure returns a client for the instance, starting it when it is not
 // running. A new instance opens with the home tab running `ks sidebar` and is
 // ready once its socket answers.
@@ -119,13 +136,24 @@ func ensure(k kittyInstance, b boot) error {
 	if err := k.Start(b.start); err != nil {
 		return fmt.Errorf("cannot start ks instance: %w", err)
 	}
-	for waited := time.Duration(0); waited < b.timeout; waited += startPoll {
-		b.sleep(startPoll)
-		if k.Ping() == nil {
+	if err := awaitPing(k, b.sleep, b.timeout); err != nil {
+		return fmt.Errorf("ks instance did not answer on %s within %s: %w",
+			b.socketPath, b.timeout, err)
+	}
+	return nil
+}
+
+// awaitPing sleeps startPoll and pings, until k answers or timeout has
+// passed; it returns the last ping error.
+func awaitPing(k kittyInstance, sleep func(time.Duration), timeout time.Duration) error {
+	var err error
+	for waited := time.Duration(0); waited < timeout; waited += startPoll {
+		sleep(startPoll)
+		if err = k.Ping(); err == nil {
 			return nil
 		}
 	}
-	return fmt.Errorf("ks instance did not answer on %s within %s", b.socketPath, b.timeout)
+	return err
 }
 
 // Shutdown closes every window in the instance, which ends it. Session

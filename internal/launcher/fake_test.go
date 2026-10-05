@@ -134,6 +134,24 @@ func (f *fakeKitty) LaunchVSplit(l kitty.Launch) (int, error) {
 	return id, nil
 }
 
+func (f *fakeKitty) LaunchHSplit(l kitty.Launch) (int, error) {
+	if err := f.record("LaunchHSplit(%d,bias=%d)", l.Match, l.Bias); err != nil {
+		return 0, err
+	}
+	f.launches = append(f.launches, l)
+	target := f.find(l.Match)
+	if target == nil {
+		return 0, fmt.Errorf("fake: no window %d", l.Match)
+	}
+	id := f.nextWindow
+	f.nextWindow++
+	f.windows = append(f.windows, kitty.Window{
+		ID: id, TabID: target.TabID, TabTitle: target.TabTitle,
+		Columns: target.Columns, SessionID: varValue(l.Vars),
+	})
+	return id, nil
+}
+
 func (f *fakeKitty) GotoLayout(id int, layout string) error {
 	return f.record("GotoLayout(%d,%s)", id, layout)
 }

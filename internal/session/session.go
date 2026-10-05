@@ -53,6 +53,10 @@ type Session struct {
 	// FocusedAt is when the launcher last created or focused the session.
 	// Attach brings the most recently focused session to the front.
 	FocusedAt time.Time `json:"focused_at,omitzero"`
+	// ViewedAt is when the session's own sidebar last saw its tab as the
+	// active one. A finished turn (state file idle) newer than this shows as
+	// done in the sidebar until the user looks at the tab.
+	ViewedAt time.Time `json:"viewed_at,omitzero"`
 }
 
 // New returns an active session record for name rooted at dir, with a fresh ID.
