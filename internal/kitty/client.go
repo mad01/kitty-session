@@ -70,41 +70,55 @@ var instanceMaps = []string{
 // with transcript saving off; started from the user's kitty, its children
 // would believe they live in that kitty.
 var (
-	// scrubPrefixes name the variables Start drops from the instance's
-	// environment.
-	scrubPrefixes = []string{"CLAUDE", "KS_", "KITTY_"}
-	// keepNames are exempt from scrubPrefixes: the instance must read the
-	// same kitty.conf as the user's kitty.
-	keepNames = []string{"KITTY_CONFIG_DIRECTORY"}
-	// unsetInWindows are removed from every window ks launches (kitty's
-	// `--env NAME` with no value unsets), covering an instance that was
-	// started with them by an older ks or by hand.
-	unsetInWindows = []string{
+	// claudeMarkers are the Claude Code session markers ks must not leak into
+	// the instance or a window: a claude that inherits them believes it is a
+	// nested child session, with transcript saving off. Scrubbing only these,
+	// not every CLAUDE* name, keeps the user's configuration (CLAUDE_CONFIG_DIR,
+	// CLAUDE_CODE_USE_BEDROCK / _VERTEX, auth tokens) intact.
+	claudeMarkers = []string{
 		"CLAUDECODE",
 		"CLAUDE_CODE_CHILD_SESSION",
 		"CLAUDE_CODE_SESSION_ID",
 		"CLAUDE_PID",
 		"CLAUDE_CODE_ENTRYPOINT",
+		"CLAUDE_CODE_SESSION_ATTENDED",
+		"CLAUDE_CODE_MESSAGING_SOCKET",
+		"CLAUDE_CODE_MESSAGING_TOKEN",
+		"CLAUDE_EFFORT",
 	}
+	// keepName is the one KITTY_ variable the instance must inherit, so it
+	// reads the same kitty.conf as the user's kitty.
+	keepName = "KITTY_CONFIG_DIRECTORY"
+	// unsetInWindows are removed from every window ks launches (kitty's
+	// `--env NAME` with no value unsets), covering an instance that was
+	// started with them by an older ks or by hand.
+	unsetInWindows = claudeMarkers
 )
 
 // scrubEnv returns environ without the variables ks must not leak into the
-// instance: every name with one of scrubPrefixes except keepNames.
+// instance: the Claude Code session markers and every KS_ or KITTY_ variable
+// except KITTY_CONFIG_DIRECTORY.
 func scrubEnv(environ []string) []string {
 	out := make([]string, 0, len(environ))
 	for _, kv := range environ {
 		name, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(keepNames, name) || !hasScrubPrefix(name) {
+		if !scrubbed(name) {
 			out = append(out, kv)
 		}
 	}
 	return out
 }
 
-func hasScrubPrefix(name string) bool {
-	return slices.ContainsFunc(scrubPrefixes, func(p string) bool {
-		return strings.HasPrefix(name, p)
-	})
+// scrubbed reports whether a variable must be dropped from the instance's
+// environment.
+func scrubbed(name string) bool {
+	if name == keepName {
+		return false
+	}
+	if strings.HasPrefix(name, "KS_") || strings.HasPrefix(name, "KITTY_") {
+		return true
+	}
+	return slices.Contains(claudeMarkers, name)
 }
 
 // runner executes `kitty @` with args and returns its stdout.
@@ -140,12 +154,26 @@ func runKitty(ctx context.Context, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// spawnDeadline bounds the detached launch. kitty --detach forks and the
+// parent exits at once, so this only fires when kitty fails to detach; it
+// keeps a wedged launch from blocking ks forever.
+const spawnDeadline = 5 * time.Second
+
 func spawnKitty(env []string, args ...string) error {
-	cmd := exec.Command("kitty", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), spawnDeadline)
+	defer cancel()
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, "kitty", args...)
 	cmd.Env = env
-	out, err := cmd.CombinedOutput()
+	cmd.Stdin = nil
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return fmt.Errorf("kitty did not detach within %s", spawnDeadline)
+	}
 	if err != nil {
-		return withStderr(err, out)
+		return withStderr(err, out.Bytes())
 	}
 	return nil
 }
@@ -282,76 +310,6 @@ func parseWindows(data []byte) ([]Window, error) {
 	return windows, nil
 }
 
-// window returns the window with id from a fresh snapshot.
-func (c *Client) window(id int) (Window, error) {
-	windows, err := c.Windows()
-	if err != nil {
-		return Window{}, err
-	}
-	i := slices.IndexFunc(windows, func(w Window) bool { return w.ID == id })
-	if i < 0 {
-		return Window{}, fmt.Errorf("window %d: %w", id, ErrNotFound)
-	}
-	return windows[i], nil
-}
-
-// AnyWindow returns the id of the first window in the instance, the anchor
-// for creating tabs in its OS window.
-func (c *Client) AnyWindow() (int, error) {
-	windows, err := c.Windows()
-	if err != nil {
-		return 0, err
-	}
-	if len(windows) == 0 {
-		return 0, fmt.Errorf("instance has no windows: %w", ErrNotFound)
-	}
-	return windows[0].ID, nil
-}
-
-// TabExists reports whether a tab with the given id is in the instance. An
-// unreachable instance counts as no.
-func (c *Client) TabExists(tabID int) bool {
-	windows, err := c.Windows()
-	if err != nil {
-		return false
-	}
-	return slices.ContainsFunc(windows, func(w Window) bool { return w.TabID == tabID })
-}
-
-// WindowExists reports whether a window with the given id is in the instance.
-// An unreachable instance counts as no.
-func (c *Client) WindowExists(windowID int) bool {
-	_, err := c.window(windowID)
-	return err == nil
-}
-
-// FindTabForWindow returns the id of the tab containing the window.
-func (c *Client) FindTabForWindow(windowID int) (int, error) {
-	w, err := c.window(windowID)
-	if err != nil {
-		return 0, err
-	}
-	return w.TabID, nil
-}
-
-// WindowColumns returns the window's width in cells.
-func (c *Client) WindowColumns(windowID int) (int, error) {
-	w, err := c.window(windowID)
-	if err != nil {
-		return 0, err
-	}
-	return w.Columns, nil
-}
-
-// WindowTitle returns the window's current title.
-func (c *Client) WindowTitle(windowID int) (string, error) {
-	w, err := c.window(windowID)
-	if err != nil {
-		return "", err
-	}
-	return w.Title, nil
-}
-
 // Launch describes a window to create.
 type Launch struct {
 	// Match is the id of an existing window: any window in the target OS
@@ -430,8 +388,11 @@ func (c *Client) launch(args []string, l Launch) (int, error) {
 }
 
 // GotoLayout switches the tab containing the window to the named layout.
+// goto-layout is tab-scoped, so the window is selected with window_id:, which
+// matches the tab that holds it; a bare id: would match a tab whose id equals
+// the window id, a different tab.
 func (c *Client) GotoLayout(windowID int, layout string) error {
-	_, err := c.at("goto-layout", matchID(windowID), layout)
+	_, err := c.at("goto-layout", matchWindowID(windowID), layout)
 	return err
 }
 
@@ -461,21 +422,16 @@ func (c *Client) FocusWindow(windowID int) error {
 }
 
 // SetTabTitleForWindow sets the title of the tab containing the window
-// without changing focus.
+// without changing focus. set-tab-title is tab-scoped, so the window is
+// selected with window_id: (see GotoLayout).
 func (c *Client) SetTabTitleForWindow(title string, windowID int) error {
-	_, err := c.at("set-tab-title", matchID(windowID), title)
+	_, err := c.at("set-tab-title", matchWindowID(windowID), title)
 	return err
 }
 
 // CloseTab closes a tab by its id.
 func (c *Client) CloseTab(tabID int) error {
 	_, err := c.at("close-tab", "--match=id:"+strconv.Itoa(tabID))
-	return err
-}
-
-// CloseWindow closes a window by its id.
-func (c *Client) CloseWindow(windowID int) error {
-	_, err := c.at("close-window", matchID(windowID))
 	return err
 }
 
@@ -494,6 +450,14 @@ func (c *Client) GetText(windowID int) (string, error) {
 	return string(out), nil
 }
 
-func matchID(windowID int) string {
-	return "--match=id:" + strconv.Itoa(windowID)
+// matchID selects a window by its id, for window-scoped commands, and a tab
+// by its id, for tab-scoped commands.
+func matchID(id int) string {
+	return "--match=id:" + strconv.Itoa(id)
+}
+
+// matchWindowID selects the tab that holds the given window, for tab-scoped
+// commands (goto-layout, set-tab-title) that otherwise read id: as a tab id.
+func matchWindowID(windowID int) string {
+	return "--match=window_id:" + strconv.Itoa(windowID)
 }

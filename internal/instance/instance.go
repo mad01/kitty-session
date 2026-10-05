@@ -8,11 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
+	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/repo/config"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -20,6 +24,8 @@ const (
 	startPoll = 100 * time.Millisecond
 	// startTimeout bounds the wait for a freshly started instance to answer.
 	startTimeout = 10 * time.Second
+	// dialTimeout bounds the stale-socket probe.
+	dialTimeout = 500 * time.Millisecond
 	// windowTitle is the OS window title of the instance.
 	windowTitle = "ks"
 	// sidebarCommand is the ks subcommand the home tab runs: a sidebar with
@@ -27,6 +33,9 @@ const (
 	sidebarCommand = "sidebar"
 	// agentFlag makes that home sidebar run the Haiku state monitor.
 	agentFlag = "--agent"
+	// lockFile guards the start sequence so two ks invocations cannot start
+	// two instances on the same socket.
+	lockFile = "instance.lock"
 )
 
 // ErrNotRunning is returned by Connect when the instance does not answer.
@@ -51,6 +60,10 @@ type boot struct {
 	start      kitty.StartOptions
 	sleep      func(time.Duration)
 	timeout    time.Duration
+	// stale reports whether the socket file is safe to remove (gone or
+	// refused, not a live or wedged listener). A nil stale means "assume
+	// stale", which is what the hermetic tests want.
+	stale func(socketPath string) bool
 }
 
 // Client returns a client for the configured socket without checking that
@@ -109,7 +122,7 @@ func Ensure(cfg *config.Config, opts Options) (*kitty.Client, error) {
 	if opts.Agent {
 		command = append(command, agentFlag)
 	}
-	err = ensure(c, boot{
+	b := boot{
 		socketPath: config.SocketPath(c.Socket()),
 		start: kitty.StartOptions{
 			Overrides: cfg.Overrides(),
@@ -118,8 +131,9 @@ func Ensure(cfg *config.Config, opts Options) (*kitty.Client, error) {
 		},
 		sleep:   time.Sleep,
 		timeout: startTimeout,
-	})
-	if err != nil {
+		stale:   staleSocket,
+	}
+	if err := withInstanceLock(b.socketPath, func() error { return ensure(c, b) }); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -129,9 +143,15 @@ func ensure(k kittyInstance, b boot) error {
 	if k.Ping() == nil {
 		return nil
 	}
-	// The instance is not answering, so whatever socket file is left is stale.
-	if err := os.Remove(b.socketPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("cannot remove stale socket %s: %w", b.socketPath, err)
+	if b.stale == nil || b.stale(b.socketPath) {
+		if err := os.Remove(b.socketPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("cannot remove stale socket %s: %w", b.socketPath, err)
+		}
+		// A concurrent ks may have finished starting the instance while we held
+		// the lock; one more ping before we spend a kitty launch.
+		if k.Ping() == nil {
+			return nil
+		}
 	}
 	if err := k.Start(b.start); err != nil {
 		return fmt.Errorf("cannot start ks instance: %w", err)
@@ -141,6 +161,36 @@ func ensure(k kittyInstance, b boot) error {
 			b.socketPath, b.timeout, err)
 	}
 	return nil
+}
+
+// staleSocket reports whether the socket file is safe to remove: it is gone
+// (ENOENT) or nothing listens (ECONNREFUSED). A dial that connects means a
+// live instance; a dial that times out means a wedged one. Neither is
+// removed, so ks never clobbers an instance that might still be serving.
+func staleSocket(path string) bool {
+	conn, err := net.DialTimeout("unix", path, dialTimeout)
+	if err == nil {
+		_ = conn.Close()
+		return false
+	}
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// withInstanceLock runs fn while holding an exclusive flock on the instance
+// lock file beside the socket, so two ks invocations serialize their start
+// sequence instead of racing to launch two instances.
+func withInstanceLock(socketPath string, fn func() error) error {
+	path := filepath.Join(filepath.Dir(socketPath), lockFile)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("cannot open instance lock %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
+		return fmt.Errorf("cannot lock the ks instance: %w", err)
+	}
+	defer func() { _ = unix.Flock(int(f.Fd()), unix.LOCK_UN) }()
+	return fn()
 }
 
 // awaitPing sleeps startPoll and pings, until k answers or timeout has

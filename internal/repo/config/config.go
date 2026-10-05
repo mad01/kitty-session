@@ -127,11 +127,14 @@ func loadFrom(path string) (*Config, error) {
 	}
 	cfg.TmpDir = expandTilde(cfg.TmpDir)
 	if cfg.KittySocket != "" {
-		sock, err := filepath.Abs(expandTilde(cfg.KittySocket))
-		if err != nil {
-			return nil, fmt.Errorf("resolving kitty_socket: %w", err)
+		// A relative socket path resolves against the config file's directory
+		// (~/.config/ks), never the process working directory, so ks reaches
+		// the same instance whatever directory it is run from.
+		sock := expandTilde(cfg.KittySocket)
+		if !filepath.IsAbs(sock) {
+			sock = filepath.Join(filepath.Dir(path), sock)
 		}
-		cfg.KittySocket = sock
+		cfg.KittySocket = filepath.Clean(sock)
 	}
 	for i, o := range cfg.KittyOverrides {
 		if !strings.Contains(o, "=") {

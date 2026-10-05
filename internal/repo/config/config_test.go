@@ -212,3 +212,24 @@ func TestLoadFromGlobalConfig(t *testing.T) {
 		t.Errorf("expected /global/repos from global config, got %s", cfg.Dirs[0])
 	}
 }
+
+func TestRelativeSocketResolvesAgainstConfigDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("kitty_socket: ks.sock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	got, err := cfg.Socket()
+	if err != nil {
+		t.Fatalf("Socket: %v", err)
+	}
+	want := "unix:" + filepath.Join(dir, "ks.sock")
+	if got != want {
+		t.Errorf("Socket() = %q, want %q (not resolved against cwd)", got, want)
+	}
+}

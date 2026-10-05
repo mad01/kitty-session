@@ -95,11 +95,31 @@ func TestEnsureStartsAndWaitsForTheSocket(t *testing.T) {
 	if _, err := os.Stat(sock); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stale socket not removed before Start (stat err %v)", err)
 	}
-	if f.pings != 5 { // 1 before Start + 4 polls
+	if f.pings != 5 { // 1 before Start + 1 re-ping after unlink + 3 polls
 		t.Errorf("pings = %d, want 5", f.pings)
 	}
-	if f.slept != 4*startPoll {
-		t.Errorf("slept %v, want %v", f.slept, 4*startPoll)
+	if f.slept != 3*startPoll {
+		t.Errorf("slept %v, want %v", f.slept, 3*startPoll)
+	}
+}
+
+func TestEnsureKeepsAWedgedSocket(t *testing.T) {
+	// A socket that is not stale (a live or wedged listener) must never be
+	// unlinked, even when the first Ping fails.
+	f := &fakeKitty{untilUp: 0}
+	b, sock := newBoot(t, f, time.Second)
+	b.stale = func(string) bool { return false }
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensure(f, b); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if _, err := os.Stat(sock); err != nil {
+		t.Errorf("non-stale socket removed: %v", err)
+	}
+	if len(f.started) != 1 {
+		t.Errorf("Start called %d times, want 1", len(f.started))
 	}
 }
 

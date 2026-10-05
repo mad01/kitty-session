@@ -53,6 +53,10 @@ var unsetArgs = []string{
 	"--env", "CLAUDE_CODE_SESSION_ID",
 	"--env", "CLAUDE_PID",
 	"--env", "CLAUDE_CODE_ENTRYPOINT",
+	"--env", "CLAUDE_CODE_SESSION_ATTENDED",
+	"--env", "CLAUDE_CODE_MESSAGING_SOCKET",
+	"--env", "CLAUDE_CODE_MESSAGING_TOKEN",
+	"--env", "CLAUDE_EFFORT",
 }
 
 func TestEveryCallTargetsTheSocket(t *testing.T) {
@@ -63,9 +67,9 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 	}{
 		{"Ping", func(c *Client) error { return c.Ping() }, []string{"ls"}},
 		{
-			"GotoLayout",
+			"GotoLayout matches the tab by window_id",
 			func(c *Client) error { return c.GotoLayout(2, LayoutSplits) },
-			[]string{"goto-layout", "--match=id:2", "splits"},
+			[]string{"goto-layout", "--match=window_id:2", "splits"},
 		},
 		{
 			"LayoutAction",
@@ -83,19 +87,14 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 			[]string{"focus-window", "--match=id:3"},
 		},
 		{
-			"SetTabTitleForWindow",
+			"SetTabTitleForWindow matches the tab by window_id",
 			func(c *Client) error { return c.SetTabTitleForWindow("demo", 2) },
-			[]string{"set-tab-title", "--match=id:2", "demo"},
+			[]string{"set-tab-title", "--match=window_id:2", "demo"},
 		},
 		{
 			"CloseTab",
 			func(c *Client) error { return c.CloseTab(2) },
 			[]string{"close-tab", "--match=id:2"},
-		},
-		{
-			"CloseWindow",
-			func(c *Client) error { return c.CloseWindow(3) },
-			[]string{"close-window", "--match=id:3"},
 		},
 		{
 			"CloseAll",
@@ -206,6 +205,7 @@ func TestStart(t *testing.T) {
 	t.Setenv("PATH", "/opt/bin")
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+	t.Setenv("CLAUDE_CONFIG_DIR", "/home/me/.claude")
 	t.Setenv("KS_SESSION_NAME", "demo")
 	t.Setenv("KITTY_WINDOW_ID", "4")
 	t.Setenv("KITTY_CONFIG_DIRECTORY", "/cfg")
@@ -221,14 +221,16 @@ func TestStart(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Errorf("Start went through the remote-control protocol: %q", *calls)
 	}
-	for _, want := range []string{"PATH=/opt/bin", "KITTY_CONFIG_DIRECTORY=/cfg"} {
+	for _, want := range []string{
+		"PATH=/opt/bin", "KITTY_CONFIG_DIRECTORY=/cfg", "CLAUDE_CONFIG_DIR=/home/me/.claude",
+	} {
 		if !slices.Contains(sp.env, want) {
 			t.Errorf("instance env lacks %s", want)
 		}
 	}
 	for _, kv := range sp.env {
 		name, _, _ := strings.Cut(kv, "=")
-		if name != "KITTY_CONFIG_DIRECTORY" && hasScrubPrefix(name) {
+		if scrubbed(name) {
 			t.Errorf("instance env leaks %s", kv)
 		}
 	}
@@ -263,16 +265,21 @@ func TestScrubEnv(t *testing.T) {
 		"CLAUDECODE=1",
 		"CLAUDE_CODE_ENTRYPOINT=cli",
 		"CLAUDE_PID=7",
+		"CLAUDE_CODE_MESSAGING_TOKEN=secret",
 		"KS_SESSION_ID=abc",
 		"KS_SESSION_NAME=demo",
 		"KITTY_LISTEN_ON=unix:/tmp/k",
 		"KITTY_PID=9",
 		"KITTY_CONFIG_DIRECTORY=/cfg",
+		// Kept: user configuration, not a session marker.
+		"CLAUDE_CONFIG_DIR=/home/me/.claude",
+		"CLAUDE_CODE_USE_BEDROCK=1",
 		"TERM=xterm-kitty",
 		"NOEQUALS",
 	}
 	want := []string{
 		"PATH=/usr/bin", "HOME=/Users/me", "KITTY_CONFIG_DIRECTORY=/cfg",
+		"CLAUDE_CONFIG_DIR=/home/me/.claude", "CLAUDE_CODE_USE_BEDROCK=1",
 		"TERM=xterm-kitty", "NOEQUALS",
 	}
 	if got := scrubEnv(in); !slices.Equal(got, want) {
@@ -299,38 +306,5 @@ func TestWindows(t *testing.T) {
 	}
 	if !slices.Equal(windows, want) {
 		t.Errorf("Windows() = %+v, want %+v", windows, want)
-	}
-}
-
-func TestSnapshotQueries(t *testing.T) {
-	c, _ := newFake(lsFixture, nil)
-	if id, err := c.AnyWindow(); err != nil || id != 1 {
-		t.Errorf("AnyWindow() = %d, %v; want 1", id, err)
-	}
-	if !c.TabExists(2) || c.TabExists(9) {
-		t.Error("TabExists wrong for tab 2 / 9")
-	}
-	if !c.WindowExists(3) || c.WindowExists(9) {
-		t.Error("WindowExists wrong for window 3 / 9")
-	}
-	if tab, err := c.FindTabForWindow(3); err != nil || tab != 2 {
-		t.Errorf("FindTabForWindow(3) = %d, %v; want 2", tab, err)
-	}
-	if cols, err := c.WindowColumns(2); err != nil || cols != 36 {
-		t.Errorf("WindowColumns(2) = %d, %v; want 36", cols, err)
-	}
-	if title, err := c.WindowTitle(3); err != nil || title != "✳ claude" {
-		t.Errorf("WindowTitle(3) = %q, %v", title, err)
-	}
-	if _, err := c.WindowColumns(9); !errors.Is(err, ErrNotFound) {
-		t.Errorf("WindowColumns(9) err = %v, want ErrNotFound", err)
-	}
-
-	down, _ := newFake("", errors.New("connection refused"))
-	if down.TabExists(1) || down.WindowExists(1) {
-		t.Error("an unreachable instance reported live windows")
-	}
-	if _, err := down.AnyWindow(); err == nil {
-		t.Error("AnyWindow on an unreachable instance returned nil error")
 	}
 }
