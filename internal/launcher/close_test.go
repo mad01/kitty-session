@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"testing"
@@ -14,66 +15,76 @@ import (
 // state.Dir pins HOME on first use, so every case shares one HOME and store
 // and a second test with its own HOME would write into a removed directory.
 func TestClose(t *testing.T) {
-	store := newTestStore(t)
+	l, f, store := newTestLauncher(t)
 	tests := []struct {
 		name      string
 		session   string
 		keep      bool
 		tabAlive  bool
 		closeErr  error
-		wantCalls []string
+		lsErr     error
+		wantClose bool // a CloseTab call is expected
 		wantWarns int
 	}{
 		{
-			name:     "keep marks stopped and closes live tabs",
-			session:  "kept",
-			keep:     true,
-			tabAlive: true,
-			wantCalls: []string{
-				"TabExists", "CloseTab", "WindowExists", "CloseTabForWindow",
-				"WindowExists", "CloseTabForWindow",
-			},
+			name:      "keep marks stopped and closes the live tab",
+			session:   "kept",
+			keep:      true,
+			tabAlive:  true,
+			wantClose: true,
 		},
 		{
-			name:      "delete trashes the record and skips dead tabs",
-			session:   "deleted",
-			tabAlive:  false,
-			wantCalls: []string{"TabExists", "WindowExists", "WindowExists"},
+			name:    "delete trashes the record and skips a dead tab",
+			session: "deleted",
 		},
 		{
-			name:      "tabs that will not close are warnings",
+			name:      "a tab that will not close is a warning",
 			session:   "stubborn",
 			keep:      true,
 			tabAlive:  true,
 			closeErr:  errors.New("kitty says no"),
-			wantWarns: 3,
+			wantClose: true,
+			wantWarns: 1,
+		},
+		{
+			name:      "an unreachable instance is a warning, the record still stops",
+			session:   "offline",
+			keep:      true,
+			tabAlive:  true,
+			lsErr:     errors.New("connection refused"),
+			wantWarns: 1,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sess := session.New(tc.session, "/work/demo", 3, 9)
-			sess.KittyShellWindowID, sess.KittySummaryWindowID = 5, 6
+			sess := session.New(tc.session, "/work/demo", 0, 0)
+			if tc.tabAlive {
+				f.addTab(sess, true)
+			} else {
+				sess.KittyTabID, sess.KittyWindowID = 70, 71 // stale ids, nothing in kitty
+			}
 			if err := store.Save(sess); err != nil {
 				t.Fatal(err)
 			}
 			if err := state.Write(tc.session, "idle"); err != nil {
 				t.Fatal(err)
 			}
-			b := &fakeBackend{
-				tabAlive:    tc.tabAlive,
-				windowAlive: tc.tabAlive,
-				closeErr:    tc.closeErr,
-			}
+			f.calls = nil
+			f.errs["CloseTab"], f.errs["Windows"] = tc.closeErr, tc.lsErr
 
-			warnings, err := closeWith(store, b, sess, tc.keep)
+			warnings, err := l.Close(sess, tc.keep)
 			if err != nil {
-				t.Fatalf("closeWith: %v", err)
+				t.Fatalf("Close: %v", err)
 			}
 			if len(warnings) != tc.wantWarns {
 				t.Errorf("warnings = %v, want %d", warnings, tc.wantWarns)
 			}
-			if tc.wantCalls != nil && !slices.Equal(b.calls, tc.wantCalls) {
-				t.Errorf("calls = %v, want %v", b.calls, tc.wantCalls)
+			wantCalls := []string{"Windows"}
+			if tc.wantClose {
+				wantCalls = append(wantCalls, fmt.Sprintf("CloseTab(%d)", sess.KittyTabID))
+			}
+			if !slices.Equal(f.calls, wantCalls) {
+				t.Errorf("calls = %v, want %v", f.calls, wantCalls)
 			}
 			if _, _, err := state.Read(tc.session); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("state file still present (err %v), want removed", err)

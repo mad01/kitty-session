@@ -1,0 +1,109 @@
+package launcher
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/mad01/kitty-session/internal/session"
+)
+
+// attachStagger separates consecutive claude launches during an attach, so
+// the instance is not hit with every startup at once.
+const attachStagger = 100 * time.Millisecond
+
+// AttachResult summarizes one attach.
+type AttachResult struct {
+	// Resumed counts active sessions whose claude window was relaunched.
+	Resumed int
+	// Running counts active sessions that were already alive.
+	Running int
+	// Stopped counts records the user stopped; attach leaves them alone.
+	Stopped int
+	// Focused is the session brought to the front, "" when it was the home
+	// tab because no active session exists.
+	Focused string
+	// Warnings are per-session problems; the attach went on past them.
+	Warnings []error
+}
+
+// Attach brings the instance back to where the user left it: every active
+// session whose claude window is gone is resumed, stopped records are left
+// alone, and the most recently focused session (first active by name when
+// none was ever focused) ends up in front. With no active session the home
+// tab is focused.
+func (l *Launcher) Attach() (*AttachResult, error) {
+	sessions, err := l.store.List()
+	if err != nil {
+		return nil, err
+	}
+	res := &AttachResult{}
+	var active []*session.Session
+	for _, s := range sessions {
+		if !s.IsActive() {
+			res.Stopped++
+			continue
+		}
+		active = append(active, s)
+	}
+	target := focusTarget(active)
+	failed := l.resume(active, res)
+	if target == nil || failed[target.Name] {
+		l.focusHome(res)
+		return res, nil
+	}
+	if _, err := l.Open(Request{Name: target.Name, Resume: ResumeStored}); err != nil {
+		res.Warnings = append(res.Warnings, fmt.Errorf("could not focus %s: %w", target.Name, err))
+		return res, nil
+	}
+	res.Focused = target.Name
+	return res, nil
+}
+
+// resume relaunches every active session without a live claude window,
+// counting into res, and returns the names that failed.
+func (l *Launcher) resume(active []*session.Session, res *AttachResult) map[string]bool {
+	failed := map[string]bool{}
+	launched := 0
+	for _, s := range active {
+		if l.Alive(s) {
+			res.Running++
+			continue
+		}
+		if launched > 0 {
+			l.sleep(attachStagger)
+		}
+		launched++
+		r, err := l.Open(Request{Name: s.Name, Resume: ResumeStored})
+		if err != nil {
+			failed[s.Name] = true
+			res.Warnings = append(res.Warnings, fmt.Errorf("could not resume %s: %w", s.Name, err))
+			continue
+		}
+		res.Resumed++
+		res.Warnings = append(res.Warnings, r.Warnings...)
+	}
+	return failed
+}
+
+// focusHome focuses the instance's first window, the home tab's sidebar.
+func (l *Launcher) focusHome(res *AttachResult) {
+	anchor, err := l.anyWindow()
+	if err == nil {
+		err = l.kitty.FocusWindow(anchor)
+	}
+	if err != nil {
+		res.Warnings = append(res.Warnings, fmt.Errorf("could not focus the home tab: %w", err))
+	}
+}
+
+// focusTarget picks the session with the latest FocusedAt; with no stamps
+// anywhere that is the first one.
+func focusTarget(active []*session.Session) *session.Session {
+	var best *session.Session
+	for _, s := range active {
+		if best == nil || s.FocusedAt.After(best.FocusedAt) {
+			best = s
+		}
+	}
+	return best
+}

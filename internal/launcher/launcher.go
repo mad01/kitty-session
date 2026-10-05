@@ -1,18 +1,23 @@
-// Package launcher creates, reopens and closes ks sessions in kitty.
+// Package launcher creates, reopens, renames and closes ks sessions in the ks
+// kitty instance, and attaches to the instance as a whole.
 //
-// It owns the steps every entry point (ks new, ks open, ks tmp, ks close, the
-// TUI) used to carry its own copy of: building the claude command line, laying
-// out the session's kitty windows, tearing them down, and recording the result
-// in the session store. The kitty layout is confined to launchTopology so it
-// can be replaced without touching argument building or store bookkeeping.
+// It owns the steps every entry point (ks, ks new, ks open, ks tmp, ks close,
+// ks rename, the sidebar TUI) used to carry its own copy of: building the
+// claude command line, laying out the session's tab, telling the session's
+// windows apart from everything else in the instance, tearing them down, and
+// recording the result in the session store. The kitty layout is confined to
+// topology.go so it can change without touching argument building or store
+// bookkeeping.
 package launcher
 
 import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/claude"
+	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 )
@@ -24,10 +29,11 @@ const (
 	// ResumeNone starts a fresh conversation for a new session record.
 	ResumeNone ResumeMode = iota
 	// ResumeStored reopens the stored session named in the Request. If its
-	// claude window is still alive it is focused; otherwise any leftover
-	// tabs are closed and claude is relaunched with --resume <id> when the
-	// record carries a Claude session ID whose transcript still exists, and
-	// with --continue when it does not.
+	// claude window is still alive it is focused. If only its sidebar is
+	// left, claude is relaunched beside it. Otherwise any leftover tab is
+	// closed and the whole tab is recreated. A relaunch uses --resume <id>
+	// when the record carries a Claude session ID whose transcript still
+	// exists, and --continue when it does not.
 	ResumeStored
 )
 
@@ -49,56 +55,88 @@ type Request struct {
 
 // Result reports what Open did.
 type Result struct {
-	// Session is the record as saved, carrying the new kitty IDs unless
-	// Focused is set.
+	// Session is the record as saved.
 	Session *session.Session
 	// Focused is true when the stored session's claude window was still
-	// alive and was focused instead of relaunched. Nothing was saved then.
+	// alive and was focused instead of relaunched.
 	Focused bool
-	// Warnings are non-fatal problems (summary tab, focus, or closing a
+	// Warnings are non-fatal problems (geometry, focus, or closing a
 	// leftover tab). The session is usable regardless.
 	Warnings []error
 }
 
-// Open creates a new session or focuses/reopens a stored one, then saves the
-// record. It drives the real kitty.
-func Open(store *session.Store, cfg *config.Config, req Request) (*Result, error) {
-	return open(store, cfg, kittyBackend{}, req)
+// Launcher drives one kitty instance on behalf of one session store.
+type Launcher struct {
+	store        *session.Store
+	kitty        backend
+	sidebarWidth int
+	exe          string // the ks binary each tab's sidebar runs
+	now          func() time.Time
+	sleep        func(time.Duration)
 }
 
-func open(store *session.Store, cfg *config.Config, b backend, req Request) (*Result, error) {
-	sess, err := target(store, req)
+// New returns a launcher for the instance behind client. cfg may be nil.
+func New(store *session.Store, client *kitty.Client, cfg *config.Config) (*Launcher, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("cannot locate the ks binary: %w", err)
+	}
+	return newLauncher(store, client, cfg.EffectiveSidebarWidth(), exe), nil
+}
+
+func newLauncher(store *session.Store, b backend, sidebarWidth int, exe string) *Launcher {
+	return &Launcher{
+		store:        store,
+		kitty:        b,
+		sidebarWidth: sidebarWidth,
+		exe:          exe,
+		now:          time.Now,
+		sleep:        time.Sleep,
+	}
+}
+
+// Open creates a new session or focuses/reopens a stored one, then saves the
+// record.
+func (l *Launcher) Open(req Request) (*Result, error) {
+	sess, err := l.target(req)
 	if err != nil {
 		return nil, err
 	}
-	var warnings []error
+	var (
+		warnings []error
+		sidebar  *kitty.Window // the stored session's surviving sidebar, if any
+	)
 	if req.Resume == ResumeStored {
-		if claudeAlive(b, sess) {
-			if err := focus(b, sess); err != nil {
-				return nil, err
-			}
-			return &Result{Session: sess, Focused: true}, nil
+		lv, err := l.liveWindows(sess)
+		if err != nil {
+			return nil, fmt.Errorf("cannot list kitty windows: %w", err)
 		}
-		warnings = closeTabs(b, sess)
+		if lv.claude != nil {
+			return l.focus(sess, lv.claude.ID)
+		}
+		sidebar = lv.sidebar
+		if sidebar == nil {
+			warnings = l.closeTabs(lv)
+		}
 	}
 
 	// Save before the first kitty call: claude fires SessionStart as soon as
 	// it starts, and that hook must find the record it updates.
 	sess.Status = session.StatusActive
-	if err := store.Save(sess); err != nil {
+	if err := l.store.Save(sess); err != nil {
 		return nil, fmt.Errorf("cannot save session: %w", err)
 	}
-	w, err := launchTopology(b, plan{
-		name:       sess.Name,
-		dir:        sess.Dir,
-		layout:     cfg.EffectiveLayout(),
-		summary:    cfg.SummaryEnabled(),
-		claudeArgs: claudeArgs(sess, req.Resume),
-	})
+	p := l.plan(sess, req.Resume)
+	var w windows
+	if sidebar != nil {
+		w, err = l.relaunchClaude(p, *sidebar)
+	} else {
+		w, err = l.launchTopology(p)
+	}
 	if err != nil {
 		return nil, err
 	}
-	saved, err := recordWindows(store, sess.Name, w)
+	saved, err := l.recordWindows(sess.Name, w)
 	if err != nil {
 		return nil, err
 	}
@@ -109,14 +147,14 @@ func open(store *session.Store, cfg *config.Config, b backend, req Request) (*Re
 // when the name is taken), the stored one for ResumeStored. A stored record
 // from before IDs existed gets one now, so the hook can find it by
 // KS_SESSION_ID from this launch on.
-func target(store *session.Store, req Request) (*session.Session, error) {
+func (l *Launcher) target(req Request) (*session.Session, error) {
 	if req.Resume == ResumeNone {
-		if store.Exists(req.Name) {
+		if l.store.Exists(req.Name) {
 			return nil, fmt.Errorf("session %q %w", req.Name, ErrExists)
 		}
 		return session.New(req.Name, req.Dir, 0, 0), nil
 	}
-	sess, err := store.Load(req.Name)
+	sess, err := l.store.Load(req.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -126,36 +164,73 @@ func target(store *session.Store, req Request) (*session.Session, error) {
 	return sess, nil
 }
 
-// claudeAlive reports whether the stored session still has its claude window:
-// the tab must exist and the claude window must be in it. A record from
-// before the window ID was stored can only check the tab.
-func claudeAlive(b backend, sess *session.Session) bool {
-	if !b.TabExists(sess.KittyTabID) {
-		return false
-	}
-	if sess.KittyWindowID == 0 {
-		return true
-	}
-	return b.WindowExists(sess.KittyWindowID)
+// Alive reports whether the session's claude window is in the instance. An
+// unreachable instance counts as no.
+func (l *Launcher) Alive(sess *session.Session) bool {
+	lv, err := l.liveWindows(sess)
+	return err == nil && lv.claude != nil
 }
 
-// claudeArgs builds the kitty launch arguments that start claude for sess.
-// PATH is forwarded because kitty @ launch runs with kitty's own environment,
-// which may not include the directory claude is installed in.
-func claudeArgs(sess *session.Session, mode ResumeMode) []string {
-	args := []string{
-		"--env", "PATH=" + os.Getenv("PATH"),
-		"--env", "KS_SESSION_NAME=" + sess.Name,
-		"--env", "KS_SESSION_ID=" + sess.ID,
-		"--", "claude",
+// focus brings a live session to the front and stamps FocusedAt.
+func (l *Launcher) focus(sess *session.Session, claudeWindow int) (*Result, error) {
+	if err := l.kitty.FocusWindow(claudeWindow); err != nil {
+		return nil, fmt.Errorf("cannot focus window: %w", err)
 	}
+	saved, err := l.stampFocus(sess.Name)
+	if err != nil {
+		return nil, err
+	}
+	return &Result{Session: saved, Focused: true}, nil
+}
+
+// stampFocus reloads the record and sets FocusedAt, so a hook update made in
+// the meantime is kept.
+func (l *Launcher) stampFocus(name string) (*session.Session, error) {
+	sess, err := l.store.Load(name)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reload session: %w", err)
+	}
+	sess.FocusedAt = l.now()
+	if err := l.store.Save(sess); err != nil {
+		return nil, fmt.Errorf("cannot save session: %w", err)
+	}
+	return sess, nil
+}
+
+// plan gathers what the topology needs to lay out sess.
+func (l *Launcher) plan(sess *session.Session, mode ResumeMode) plan {
+	return plan{
+		name:       sess.Name,
+		dir:        sess.Dir,
+		env:        sessionEnv(sess),
+		vars:       []string{kitty.SessionVar + "=" + sess.ID},
+		sidebarCmd: []string{l.exe, "sidebar", "--session", sess.Name},
+		claudeCmd:  claudeCmd(sess, mode),
+	}
+}
+
+// sessionEnv is exported into both of the session's windows. PATH is
+// forwarded because kitty @ launch runs with kitty's own environment, which
+// may not include the directory claude is installed in; the two KS variables
+// let the ks hook find the record.
+func sessionEnv(sess *session.Session) []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"KS_SESSION_NAME=" + sess.Name,
+		"KS_SESSION_ID=" + sess.ID,
+	}
+}
+
+// claudeCmd builds the command that starts claude for sess.
+func claudeCmd(sess *session.Session, mode ResumeMode) []string {
+	cmd := []string{"claude"}
 	if mode == ResumeNone {
-		return args
+		return cmd
 	}
 	if sess.ClaudeSessionID != "" && transcriptExists(sess) {
-		return append(args, "--resume", sess.ClaudeSessionID)
+		return append(cmd, "--resume", sess.ClaudeSessionID)
 	}
-	return append(args, "--continue")
+	return append(cmd, "--continue")
 }
 
 // transcriptExists reports whether Claude Code still has the transcript of
@@ -175,19 +250,22 @@ func transcriptExists(sess *session.Session) bool {
 	return err == nil
 }
 
-// recordWindows reloads the record and applies only the kitty IDs before
-// saving, so a SessionStart hook that updated the record while claude was
-// starting is not overwritten.
-func recordWindows(store *session.Store, name string, w windows) (*session.Session, error) {
-	sess, err := store.Load(name)
+// recordWindows reloads the record and applies only the kitty IDs and the
+// focus stamp before saving, so a SessionStart hook that updated the record
+// while claude was starting is not overwritten. The pre-instance shell and
+// summary IDs are cleared: this topology has neither.
+func (l *Launcher) recordWindows(name string, w windows) (*session.Session, error) {
+	sess, err := l.store.Load(name)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reload session after launch: %w", err)
 	}
 	sess.KittyTabID = w.tabID
-	sess.KittyWindowID = w.claudeWindowID
-	sess.KittyShellWindowID = w.shellWindowID
-	sess.KittySummaryWindowID = w.summaryWindowID
-	if err := store.Save(sess); err != nil {
+	sess.KittyWindowID = w.claudeID
+	sess.KittySidebarWindowID = w.sidebarID
+	sess.KittyShellWindowID = 0
+	sess.KittySummaryWindowID = 0
+	sess.FocusedAt = l.now()
+	if err := l.store.Save(sess); err != nil {
 		return nil, fmt.Errorf("cannot save session: %w", err)
 	}
 	return sess, nil

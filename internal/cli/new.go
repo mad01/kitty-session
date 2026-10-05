@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/mad01/kitty-session/internal/launcher"
-	"github.com/mad01/kitty-session/internal/repo/config"
-	"github.com/mad01/kitty-session/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -19,8 +17,8 @@ var (
 
 var newCmd = &cobra.Command{
 	Use:   "new",
-	Short: "Create a new kitty session",
-	Long:  "Create a named kitty tab with Claude on top and a shell on bottom.",
+	Short: "Create a new session",
+	Long:  "Create a session tab in the ks instance: a sidebar on the left, claude on the right.",
 	RunE:  runNew,
 }
 
@@ -32,25 +30,24 @@ func init() {
 }
 
 func runNew(cmd *cobra.Command, args []string) error {
-	store, err := session.NewStore()
-	if err != nil {
-		return err
-	}
-
 	dir := newDir
 	if dir == "" {
+		var err error
 		dir, err = os.Getwd()
 		if err != nil {
 			return fmt.Errorf("cannot determine working directory: %w", err)
 		}
 	}
-	dir, err = filepath.Abs(dir)
+	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("cannot resolve directory: %w", err)
 	}
 
-	cfg, _ := config.Load()
-	res, err := launcher.Open(store, cfg, launcher.Request{Name: newName, Dir: dir})
+	w, err := ensureWiring(false)
+	if err != nil {
+		return err
+	}
+	res, err := w.launcher.Open(launcher.Request{Name: newName, Dir: dir})
 	if err != nil {
 		return withExistsHint(err, newName)
 	}

@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	"github.com/mad01/kitty-session/internal/claude"
+	"github.com/mad01/kitty-session/internal/instance"
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
 	"github.com/spf13/cobra"
@@ -13,7 +15,7 @@ import (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all sessions",
-	Long:  "Show all sessions with running/stopped status.",
+	Long:  "Show all sessions with their state. Without a running ks instance every session is stopped.",
 	RunE:  runList,
 }
 
@@ -22,45 +24,48 @@ func init() {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	store, err := session.NewStore()
+	w, err := offlineWiring()
 	if err != nil {
 		return err
 	}
-
-	sessions, err := store.List()
+	sessions, err := w.store.List()
 	if err != nil {
 		return err
 	}
-
 	if len(sessions) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "no sessions")
 		return nil
 	}
 
+	c, err := instance.Client(w.cfg)
+	if err != nil {
+		return err
+	}
+	down := c.Ping() != nil
 	for _, sess := range sessions {
-		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, listState(sess), sess.Dir)
+		st := claude.StateStopped
+		if !down {
+			st = listState(w.launcher, c, sess)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
+	}
+	if down {
+		fmt.Fprintln(cmd.OutOrStdout(), "ks instance not running")
 	}
 	return nil
 }
 
 // listState resolves a session's state: the record's own status first, then
-// the kitty tab, then a fresh state file, then the terminal text.
-func listState(sess *session.Session) claude.State {
-	if !sess.IsActive() || !kitty.TabExists(sess.KittyTabID) {
+// whether its claude window is in the instance, then a fresh state file, then
+// the terminal text.
+func listState(l *launcher.Launcher, c *kitty.Client, sess *session.Session) claude.State {
+	if !sess.IsActive() || !l.Alive(sess) {
 		return claude.StateStopped
 	}
 	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
 		return claude.ParseState(s)
 	}
-	winID := sess.KittyWindowID
-	if winID == 0 {
-		id, err := kitty.FirstWindowInTab(sess.KittyTabID)
-		if err != nil {
-			return claude.StateWorking
-		}
-		winID = id
-	}
-	text, err := kitty.GetText(winID)
+	text, err := c.GetText(sess.KittyWindowID)
 	if err != nil {
 		return claude.StateWorking
 	}

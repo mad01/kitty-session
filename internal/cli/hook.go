@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/procinfo"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
@@ -16,13 +15,12 @@ import (
 
 // hookPayload is the subset of the JSON object Claude Code pipes to hook
 // commands on stdin. Every event carries hook_event_name, session_id and
-// transcript_path. tool_name is set for PreToolUse, notification_type for
-// Notification and reason for SessionEnd; other events leave them empty.
+// transcript_path. notification_type is set for Notification and reason for
+// SessionEnd; other events leave them empty.
 type hookPayload struct {
 	HookEventName    string `json:"hook_event_name"`
 	SessionID        string `json:"session_id"`
 	TranscriptPath   string `json:"transcript_path"`
-	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
 	Reason           string `json:"reason"`
 	// AgentID is set when an in-process subagent fired the event. Its
@@ -70,7 +68,7 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	isEnd := payload.HookEventName == "SessionEnd"
-	s, refreshSummary := stateForEvent(payload)
+	s := stateForEvent(payload)
 	if !isEnd && s == "" {
 		return nil
 	}
@@ -94,9 +92,6 @@ func runHook(cmd *cobra.Command, args []string) error {
 	if payload.HookEventName == "SessionStart" && payload.AgentID == "" {
 		recordClaudeSession(stderr, store, sess, payload)
 	}
-	if refreshSummary {
-		refreshSummaryTab(stderr, sess)
-	}
 	return nil
 }
 
@@ -113,25 +108,23 @@ func readHookPayload(r io.Reader) (hookPayload, error) {
 }
 
 // stateForEvent maps a hook event to the state ks records for it, or "" when
-// ks ignores the event. The bool says whether the summary tab should refresh.
-func stateForEvent(p hookPayload) (string, bool) {
+// ks ignores the event.
+func stateForEvent(p hookPayload) string {
 	switch p.HookEventName {
 	case "PreToolUse":
-		// Refresh summary on plan mode transitions
-		planMode := p.ToolName == "EnterPlanMode" || p.ToolName == "ExitPlanMode"
-		return "working", planMode
+		return "working"
 	case "Stop":
-		return "idle", true
+		return "idle"
 	case "Notification":
 		switch p.NotificationType {
 		case "permission_prompt", "elicitation_dialog":
-			return "input", false
+			return "input"
 		}
-		return "", false
+		return ""
 	case "SessionStart":
-		return "waiting", false
+		return "waiting"
 	}
-	return "", false
+	return ""
 }
 
 // loadHookSession returns the record the event belongs to, or a nil session
@@ -195,16 +188,6 @@ func markSessionStopped(
 		hookWarn(stderr, err)
 	}
 	state.Clean(sess.Name)
-}
-
-// refreshSummaryTab nudges the session's Haiku summary tab, if it has one.
-func refreshSummaryTab(stderr io.Writer, sess *session.Session) {
-	if sess.KittySummaryWindowID == 0 {
-		return
-	}
-	if err := kitty.SendText(sess.KittySummaryWindowID, "refresh\n"); err != nil {
-		hookWarn(stderr, err)
-	}
 }
 
 // hookWarn reports a non-fatal hook problem on stderr.

@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/mad01/kitty-session/internal/launcher"
-	"github.com/mad01/kitty-session/internal/repo/config"
-	"github.com/mad01/kitty-session/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +17,7 @@ var tmpSessionName string
 var tmpCmd = &cobra.Command{
 	Use:   "tmp",
 	Short: "Create a temporary Claude session",
-	Long:  "Create a named kitty tab with Claude in a temporary directory.",
+	Long:  "Create a session tab with claude in a temporary directory.",
 	RunE:  runTmp,
 }
 
@@ -30,14 +28,12 @@ func init() {
 }
 
 func runTmp(cmd *cobra.Command, args []string) error {
-	store, err := session.NewStore()
+	w, err := ensureWiring(false)
 	if err != nil {
 		return err
 	}
 
-	cfg, _ := config.Load()
-
-	tmpBase := cfg.EffectiveTmpDir()
+	tmpBase := w.cfg.EffectiveTmpDir()
 	if tmpBase != "" {
 		if err := os.MkdirAll(tmpBase, 0o755); err != nil {
 			return fmt.Errorf("cannot create tmpdir: %w", err)
@@ -53,11 +49,11 @@ func runTmp(cmd *cobra.Command, args []string) error {
 	if auto {
 		name = fmt.Sprintf("tmp-%s", time.Now().Format("0102-1504"))
 	}
-	res, err := launcher.Open(store, cfg, launcher.Request{Name: name, Dir: tmpDir})
+	res, err := w.launcher.Open(launcher.Request{Name: name, Dir: tmpDir})
 	if auto && errors.Is(err, launcher.ErrExists) {
 		// Two tmp sessions in the same minute: disambiguate the generated name.
 		name = name + "-" + randomSuffix()
-		res, err = launcher.Open(store, cfg, launcher.Request{Name: name, Dir: tmpDir})
+		res, err = w.launcher.Open(launcher.Request{Name: name, Dir: tmpDir})
 	}
 	if err != nil {
 		return withExistsHint(err, name)

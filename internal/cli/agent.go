@@ -16,6 +16,8 @@ func init() {
 		BoolVar(&agentFlag, "agent", false, "run background Haiku agent for state detection")
 }
 
+// agentPrompt is the monitor's system prompt. %[1]s is the instance socket:
+// the agent must read windows from the ks instance, not the user's kitty.
 const agentPrompt = `You are a session monitor for the "ks" kitty session manager.
 Your job is to continuously read terminal output from running Claude Code sessions
 and classify their state.
@@ -34,7 +36,7 @@ Loop forever:
 1. List session files: ls ~/.config/ks/sessions/
 2. For each *.json file, read it to get the kitty_window_id.
 3. For each session with a valid window ID, run:
-   kitty @ get-text --match=id:<windowID>
+   kitty @ --to %[1]s get-text --match=id:<windowID>
 4. Classify the terminal text into one of these states:
    - "working" — Claude is actively processing (tool use, spinners, reading/writing/editing)
    - "idle" — The prompt ">" is on the last non-empty line
@@ -48,9 +50,10 @@ Loop forever:
 If kitty @ get-text fails for a window, skip that session (tab may have closed).
 Never stop looping. Always process all sessions each cycle.`
 
-// startAgent spawns a background claude haiku process that monitors sessions.
-// Returns the exec.Cmd so the caller can kill it later.
-func startAgent() (*exec.Cmd, error) {
+// startAgent spawns a background claude haiku process that monitors the
+// sessions in the instance behind socket. Returns the exec.Cmd so the caller
+// can kill it later.
+func startAgent(socket string) (*exec.Cmd, error) {
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return nil, fmt.Errorf("claude not found in PATH: %w", err)
@@ -67,10 +70,10 @@ func startAgent() (*exec.Cmd, error) {
 
 	sessDir := filepath.Join(home, ".config", "ks", "sessions")
 	args := []string{
-		"-p", agentPrompt,
+		"-p", fmt.Sprintf(agentPrompt, socket),
 		"--model", "haiku",
 		"--allowedTools",
-		"Bash(kitty @ get-text *)",
+		"Bash(kitty @ --to " + socket + " get-text *)",
 		"Bash(ls " + sessDir + ")",
 		"Bash(sleep *)",
 		"Read(//" + sessDir + "/*)",

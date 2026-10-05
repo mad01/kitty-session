@@ -16,11 +16,18 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/instance"
 	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 )
+
+// Options configure one TUI run.
+type Options struct {
+	// Session names the session whose tab this sidebar sits in; empty in
+	// the home tab or when run by hand.
+	Session string
+}
 
 type mode int
 
@@ -47,7 +54,8 @@ type model struct {
 	repoList      list.Model
 	trashList     list.Model
 	helpViewport  viewport.Model
-	store         *session.Store
+	backend       backend
+	session       string // see Options.Session
 	keys          *delegateKeyMap
 	mode          mode
 	width         int
@@ -60,7 +68,7 @@ type model struct {
 	quitting      bool
 }
 
-func newModel(store *session.Store, items []sessionItem, repoItems []repoItem) model {
+func newModel(b backend, session string, items []sessionItem, repoItems []repoItem) model {
 	delegate := newItemDelegate()
 	keys := newDelegateKeyMap()
 
@@ -118,7 +126,8 @@ func newModel(store *session.Store, items []sessionItem, repoItems []repoItem) m
 		list:      l,
 		repoList:  rl,
 		textInput: ti,
-		store:     store,
+		backend:   b,
+		session:   session,
 		keys:      keys,
 		mode:      modeList,
 	}
@@ -161,15 +170,6 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-// summaryTickMsg triggers periodic refresh of summary tabs.
-type summaryTickMsg time.Time
-
-func summaryTickCmd() tea.Cmd {
-	return tea.Tick(5*time.Minute, func(t time.Time) tea.Msg {
-		return summaryTickMsg(t)
-	})
-}
-
 // animTickMsg drives the pulsing animation for the working badge.
 type animTickMsg time.Time
 
@@ -180,7 +180,7 @@ func animTickCmd() tea.Cmd {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), animTickCmd(), summaryTickCmd())
+	return tea.Batch(tickCmd(), animTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -200,14 +200,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case animTickMsg:
 		animFrame = (animFrame + 1) % len(workingPulseColors)
 		return m, animTickCmd()
-	case summaryTickMsg:
-		// Refresh all active summary tabs
-		for _, item := range m.list.Items() {
-			if si, ok := item.(sessionItem); ok && si.session.KittySummaryWindowID != 0 {
-				_ = kitty.SendText(si.session.KittySummaryWindowID, "refresh\n")
-			}
-		}
-		return m, summaryTickCmd()
 	case tickMsg:
 		if m.mode == modeList {
 			m.refreshList()
@@ -352,7 +344,7 @@ func (m model) handleRepoSelect(item repoItem) (tea.Model, tea.Cmd) {
 
 	var conflict error
 	if name != "" {
-		err := createSession(name, dir, m.store)
+		err := m.backend.createSession(name, dir)
 		if err == nil {
 			m.refreshList()
 			m.mode = modeList
@@ -433,7 +425,7 @@ func (m model) updateHelp(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) startRestore() (tea.Model, tea.Cmd) {
-	items, err := loadTrashedSessions(m.store)
+	items, err := m.backend.loadTrashedSessions()
 	if err != nil || len(items) == 0 {
 		return m, m.list.NewStatusMessage(helpBarStyle.Render("no deleted sessions to restore"))
 	}
@@ -472,7 +464,7 @@ func (m model) updateRestore(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			if err := restoreSession(item.session.Name, m.store); err != nil {
+			if err := m.backend.restoreSession(item.session.Name); err != nil {
 				m.mode = modeList
 				return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 			}
@@ -494,7 +486,7 @@ func (m model) handleOpen() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if err := openSession(item.session, m.store); err != nil {
+	if err := m.backend.openSession(item.session); err != nil {
 		m.err = err
 		return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 	}
@@ -514,7 +506,7 @@ func (m model) handleCreate() (tea.Model, tea.Cmd) {
 		dir, _ = os.Getwd()
 	}
 
-	if err := createSession(name, dir, m.store); err != nil {
+	if err := m.backend.createSession(name, dir); err != nil {
 		m.err = err
 		if errors.Is(err, launcher.ErrExists) {
 			return m, nil // stay in the prompt so the user can pick another name
@@ -571,7 +563,7 @@ func (m model) handleRename() (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	}
-	if err := renameSession(item.session, newName, m.store); err != nil {
+	if err := m.backend.renameSession(item.session, newName); err != nil {
 		m.err = err
 		return m, nil
 	}
@@ -607,13 +599,13 @@ func (m model) executeConfirm() (tea.Model, tea.Cmd) {
 
 	switch m.confirmAction {
 	case actionClose:
-		if err := closeSession(item.session, m.store); err != nil {
+		if err := m.backend.closeSession(item.session); err != nil {
 			m.mode = modeList
 			return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 		}
 		statusMsg = fmt.Sprintf("session %q tab closed", item.session.Name)
 	case actionDelete:
-		if err := deleteSession(item.session, m.store); err != nil {
+		if err := m.backend.deleteSession(item.session); err != nil {
 			m.mode = modeList
 			return m, m.list.NewStatusMessage(errorStyle.Render(err.Error()))
 		}
@@ -627,7 +619,7 @@ func (m model) executeConfirm() (tea.Model, tea.Cmd) {
 
 // refreshList reloads sessions from disk and updates the list items.
 func (m *model) refreshList() {
-	items, err := loadSessions(m.store)
+	items, err := m.backend.loadSessions()
 	if err != nil {
 		return
 	}
@@ -676,7 +668,7 @@ func (m model) View() string {
 			title = titleBarStyle.Render("restore deleted session")
 			help = helpKeyInlineStyle.Render("enter restore · esc back")
 		default:
-			title = titleBarStyle.Render("ks · kitty claude session manager")
+			title = titleBarStyle.Render(m.titleText())
 			help = helpKeyInlineStyle.Render("k/j navigate · o open · n new · d delete · ? help")
 		}
 
@@ -700,6 +692,15 @@ func (m model) View() string {
 			body,
 		)
 	}
+}
+
+// titleText names the session this sidebar belongs to, or ks itself in the
+// home tab.
+func (m model) titleText() string {
+	if m.session != "" {
+		return "ks · " + m.session
+	}
+	return "ks · kitty claude session manager"
 }
 
 // renderFramedView draws a rounded box around title, help and body.
@@ -876,21 +877,35 @@ func suggestSessionNameForDir(dir string) string {
 	return name
 }
 
-// Run starts the TUI and blocks until it exits.
-func Run() error {
+// Run starts the TUI and blocks until it exits. It talks to the ks instance
+// on the configured socket without starting it: a sidebar runs inside the
+// instance, and run by hand elsewhere it shows every session as stopped.
+func Run(opts Options) error {
 	store, err := session.NewStore()
 	if err != nil {
 		return err
 	}
-
-	items, err := loadSessions(store)
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = nil // the repo picker reports a missing config itself
+	}
+	c, err := instance.Client(cfg)
 	if err != nil {
 		return err
 	}
+	l, err := launcher.New(store, c, cfg)
+	if err != nil {
+		return err
+	}
+	b := backend{store: store, launcher: l, kitty: c}
 
+	items, err := b.loadSessions()
+	if err != nil {
+		return err
+	}
 	repoItems := loadRepos()
 
-	m := newModel(store, items, repoItems)
+	m := newModel(b, opts.Session, items, repoItems)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err

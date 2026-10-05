@@ -3,15 +3,13 @@ package cli
 import (
 	"fmt"
 
-	"github.com/mad01/kitty-session/internal/kitty"
-	"github.com/mad01/kitty-session/internal/session"
-	"github.com/mad01/kitty-session/internal/state"
 	"github.com/spf13/cobra"
 )
 
 var renameCmd = &cobra.Command{
 	Use:   "rename <old-name> <new-name>",
 	Short: "Rename a session",
+	Long:  "Rename the session record and its state file, and retitle its tab when it is open.",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runRename,
 }
@@ -23,29 +21,15 @@ func init() {
 func runRename(cmd *cobra.Command, args []string) error {
 	oldName, newName := args[0], args[1]
 
-	store, err := session.NewStore()
+	w, err := offlineWiring()
 	if err != nil {
 		return err
 	}
-
-	sess, err := store.Rename(oldName, newName)
+	_, warnings, err := w.launcher.Rename(oldName, newName)
 	if err != nil {
 		return err
 	}
-
-	state.Rename(oldName, newName)
-
-	if kitty.TabExists(sess.KittyTabID) {
-		winID := sess.KittyWindowID
-		if winID == 0 {
-			if id, err := kitty.FirstWindowInTab(sess.KittyTabID); err == nil {
-				winID = id
-			}
-		}
-		if winID != 0 {
-			_ = kitty.SetTabTitleForWindow(newName, winID)
-		}
-	}
+	printWarnings(cmd, warnings)
 
 	fmt.Fprintf(cmd.OutOrStdout(), "session %q renamed to %q\n", oldName, newName)
 	return nil

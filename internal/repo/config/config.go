@@ -157,25 +157,3 @@ func expandTilde(p string) string {
 	}
 	return p
 }
-
-// Layout values of the pre-instance topology, kept until the launcher stops
-// reading them.
-const (
-	LayoutSplit = "split"
-	LayoutTab   = "tab"
-)
-
-// SummaryEnabled reports the legacy summary setting. Deprecated: the instance
-// topology has no summary window.
-func (c *Config) SummaryEnabled() bool {
-	return c != nil && c.Summary && c.EffectiveLayout() == LayoutTab
-}
-
-// EffectiveLayout reports the legacy layout. Deprecated: the instance topology
-// has one layout.
-func (c *Config) EffectiveLayout() string {
-	if c != nil && c.Layout == LayoutTab {
-		return LayoutTab
-	}
-	return LayoutSplit
-}
