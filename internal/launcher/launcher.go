@@ -244,7 +244,7 @@ func (l *Launcher) plan(sess *session.Session, mode ResumeMode) plan {
 		env:        sessionEnv(sess),
 		vars:       []string{kitty.SessionVar + "=" + sess.ID},
 		sidebarCmd: []string{l.exe, "sidebar", "--session-id", sess.ID},
-		claudeCmd:  claudeCmd(sess, mode),
+		claudeCmd:  ClaudeCmd(sess, mode),
 	}
 }
 
@@ -260,11 +260,11 @@ func sessionEnv(sess *session.Session) []string {
 	}
 }
 
-// claudeCmd builds the command that starts claude for sess: --resume <id>
+// ClaudeCmd builds the command that starts claude for sess: --resume <id>
 // when the record's own transcript still exists, --continue when the
 // directory has any transcript to continue, and a fresh claude otherwise.
 // --continue with nothing to continue makes claude exit at once.
-func claudeCmd(sess *session.Session, mode ResumeMode) []string {
+func ClaudeCmd(sess *session.Session, mode ResumeMode) []string {
 	cmd := []string{"claude"}
 	if mode == ResumeNone {
 		return cmd

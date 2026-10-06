@@ -21,6 +21,13 @@ var (
 	importDryRun bool
 	importFrom   string
 	importNoOpen bool
+	importTo     string
+)
+
+// Import targets for --to.
+const (
+	targetKs   = "ks"
+	targetCmux = "cmux"
 )
 
 var importCmd = &cobra.Command{
@@ -29,7 +36,12 @@ var importCmd = &cobra.Command{
 	Long: `Import the claude agents herdr runs into ks, so the next ks brings them back
 as sessions. Reads herdr's default session file (~/.config/herdr/session.json),
 writes one active ks record per claude pane with its Claude session id, and
-attaches unless herdr is still running the agents.`,
+attaches unless herdr is still running the agents.
+
+With --to cmux, opens one cmux workspace per claude agent instead, resuming
+its conversation; cmux saves and restores those workspaces itself, so no ks
+records are written. Run it from a cmux terminal: cmux only takes commands
+from processes it started.`,
 	Args: cobra.NoArgs,
 	RunE: runImport,
 }
@@ -40,6 +52,8 @@ func init() {
 		StringVar(&importFrom, "from", "", "herdr session.json to read (default: herdr's default session)")
 	importCmd.Flags().
 		BoolVar(&importNoOpen, "no-open", false, "write the records, do not start the instance")
+	importCmd.Flags().
+		StringVar(&importTo, "to", targetKs, "where the agents go: ks or cmux")
 	rootCmd.AddCommand(importCmd)
 }
 
@@ -81,6 +95,13 @@ type importItem struct {
 }
 
 func runImport(cmd *cobra.Command, args []string) error {
+	switch importTo {
+	case targetKs:
+	case targetCmux:
+		return runImportToCmux(cmd)
+	default:
+		return fmt.Errorf("unknown --to %q: want %s or %s", importTo, targetKs, targetCmux)
+	}
 	path, snap, err := loadHerdrSnapshot()
 	if err != nil {
 		return err
