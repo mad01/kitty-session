@@ -28,7 +28,7 @@ The footer has two labels, `new` and `menu`, and the line above it shows the res
 
 | Dot | State | Meaning |
 |---|---|---|
-| `●` pulsing red | `input` | Claude is waiting on you: a permission prompt or a question |
+| `●` pulsing red | `input` | Claude is waiting on you: a permission prompt or a question. It stays until you answer; after a minute the title line leads with how long (`waiting 12m`) |
 | `●` | `done` | Claude finished a turn and you have not looked at the tab since |
 | `●` pulsing amber | `working` | Claude is processing |
 | `○` | `idle` | Claude is at its prompt and the result has been seen |
@@ -40,8 +40,9 @@ Each row's state comes from one `kitty @ ls` snapshot plus the session's state f
 2. State file says `input` and is less than 10 s old: `input`.
 3. State file says `working` and is less than 10 s old: `working`. A fresh working file outranks the `✳` title below, because `✳` is also one of Claude's spinner frames, so a snapshot mid-turn can catch it.
 4. Claude's title starts with a spinner glyph: `working`.
-5. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
-6. No glyph: the state file's `working` or `input` as is; `idle`, `waiting`, or no file at all: `idle`.
+5. State file says `input`, however old: `input`. The hooks write `input` when a prompt appears. Nothing replaces it until the next event (your next message, a tool call, the end of the turn, the session ending), so an unanswered prompt keeps its row red for hours. The spinner title of rule 4 is the one thing that outranks it. It means you have answered and Claude is mid-turn, which the hooks do not report until its next tool call.
+6. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
+7. No glyph: the state file's `working` as is; `idle`, `waiting`, or no file at all: `idle`.
 
 `viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. Without the hooks there is no state file, and `done` and `input` never appear; the title glyph still gives `working` and `idle`.
 
@@ -99,7 +100,7 @@ A popup lists the trashed sessions; `j`/`k` move, `enter` restores, `esc` cancel
 A popup above the footer: `new agent`, `rename`, `close (keep)`, `delete`, `restore`, `shell split`, `hooks status`, `keys`, `quit ks`. `j`/`k` move, `enter` runs the entry, `esc`, `m` or `q` close it.
 
 - `shell split` opens a shell below this tab's claude window, in the session directory, taking roughly a third of the height. The home tab has no agent, so there the entry reports that instead.
-- `hooks status` says whether the five Claude Code hook events are registered in `~/.claude/settings.json`, or which are missing.
+- `hooks status` says whether the six Claude Code hook events are registered in `~/.claude/settings.json`, or which are missing. An event missing from an older install is added by `ks hooks install`.
 - `quit ks` closes every window of the instance, like `ks quit`. Records stay active and come back on the next `ks`.
 
 ## Width

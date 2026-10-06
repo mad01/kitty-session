@@ -75,7 +75,7 @@ Fix: `ks hooks install`. See [Hooks and state detection](hooks-and-state.md).
 
 ## State badge stuck on `working`
 
-The state file says `working` and is less than five minutes old. `ks` trusts that until the terminal clearly shows `idle` or `input`.
+A `working` state file is trusted for 10 seconds. After that `ks list` classifies the pane text and the sidebar follows the title glyph. A badge stuck on `working` past that means the pane still reads as busy, or a spinner glyph is still in the title.
 
 If Claude actually finished and the hooks were installed, the `Stop` hook should have overwritten the state file with `idle`. Check:
 

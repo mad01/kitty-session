@@ -85,7 +85,7 @@ The sidebar shows a live state for each session: `input`, `done`, `working`, `id
 ks hooks install
 ```
 
-This edits `~/.claude/settings.json` to register `ks _hook` for `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`. Remove them with `ks hooks uninstall`.
+This edits `~/.claude/settings.json` to register `ks _hook` for `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`. Remove them with `ks hooks uninstall`.
 
 See [Hooks and state detection](hooks-and-state.md) for what each event maps to and the fallback chain when hooks aren't installed.
 

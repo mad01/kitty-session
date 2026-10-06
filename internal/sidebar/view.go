@@ -1,8 +1,10 @@
 package sidebar
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -146,13 +148,45 @@ func (m model) renderRow(a Agent, selected bool, inner int) []string {
 	}
 	first := seg(markerStyle, bg, marker) + m.dot(a.State, bg) + seg(plainStyle, bg, " ") + head
 
+	second := m.titleLine(a, bg, textWidth)
+
+	return []string{padRow(first, inner, bg), padRow(second, inner, bg)}
+}
+
+// titleLine is a row's second line: Claude's title, or the session directory
+// with $HOME shortened, indented under the name. An input row whose prompt
+// has waited a minute or more leads with how long, so a prompt left behind
+// stands out from one that just appeared.
+func (m model) titleLine(a Agent, bg lipgloss.TerminalColor, textWidth int) string {
 	title := a.Title
 	if title == "" {
 		title = ShortenHome(a.Dir, m.home)
 	}
-	second := seg(titleStyle, bg, strings.Repeat(" ", rowIndent)+truncate(title, textWidth))
+	line := seg(titleStyle, bg, strings.Repeat(" ", rowIndent))
+	if label := waitLabel(a); label != "" {
+		label += " · "
+		line += seg(waitStyle, bg, label)
+		textWidth -= ansi.StringWidth(label)
+	}
+	return line + seg(titleStyle, bg, truncate(title, textWidth))
+}
 
-	return []string{padRow(first, inner, bg), padRow(second, inner, bg)}
+// waitLabel is the "waiting 12m" label of an input row that has waited at
+// least a minute; every other row gets none.
+func waitLabel(a Agent) string {
+	if a.State != StateInput || a.Waiting < time.Minute {
+		return ""
+	}
+	return "waiting " + shortDuration(a.Waiting)
+}
+
+// shortDuration formats d to the minute: 12m under an hour, 1h05m past it.
+func shortDuration(d time.Duration) string {
+	minutes := int(d.Minutes())
+	if minutes < 60 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%dh%02dm", minutes/60, minutes%60)
 }
 
 // dot returns the styled state glyph; working and input pulse with the frame.

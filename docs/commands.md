@@ -274,7 +274,7 @@ Usage: ks hooks install
 
 Register `ks _hook` with Claude Code by editing `~/.claude/settings.json`. Creates the file (and directory) if missing. Writes back pretty-printed JSON with a trailing newline.
 
-For each of `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`, `ks` installs a matcher group that invokes `<ks-binary> _hook`. The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
+For each of `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`, `ks` installs a matcher group that invokes `<ks-binary> _hook`. The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
 
 Re-running `install` is idempotent: existing `ks` matcher groups are removed before new ones are written, so stale entries from an older binary path get cleaned up. Any non-`ks` hook entries are preserved.
 

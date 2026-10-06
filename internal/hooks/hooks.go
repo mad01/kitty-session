@@ -26,10 +26,13 @@ const (
 const hookSuffix = " _hook"
 
 // Events are the Claude Code hook events ks registers, in reporting order.
-var Events = []string{"PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd"}
+var Events = []string{
+	"UserPromptSubmit", "PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd",
+}
 
 // matchers is the matcher each event's ks group carries.
 var matchers = map[string]string{
+	"UserPromptSubmit": "",
 	"PreToolUse":   ".*",
 	"Stop":         "",
 	"Notification": "permission_prompt|elicitation_dialog",

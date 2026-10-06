@@ -1,6 +1,9 @@
 package sidebar
 
-import "sort"
+import (
+	"sort"
+	"time"
+)
 
 // State is an agent's state as the sidebar shows it. The constants run from
 // the state that needs the user most to the one that needs them least.
@@ -43,6 +46,9 @@ type Agent struct {
 	Dir   string
 	Title string // Claude's tab title, already stripped of its state glyph; empty falls back to Dir
 	State State
+	// Waiting is how long Claude has been waiting on the user: the age of the
+	// prompt behind StateInput. Zero for every other state.
+	Waiting time.Duration
 	// Tab is the 1-based position of the agent's tab in the ks instance, the N
 	// of kitty's goto_tab N (cmd+N on macOS). Zero means no tab: the session
 	// is stopped or its tab is gone.

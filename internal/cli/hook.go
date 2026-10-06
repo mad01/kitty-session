@@ -105,7 +105,7 @@ func readHookPayload(r io.Reader) (hookPayload, error) {
 // ks ignores the event.
 func stateForEvent(p hookPayload) string {
 	switch p.HookEventName {
-	case "PreToolUse":
+	case "UserPromptSubmit", "PreToolUse":
 		return "working"
 	case "Stop":
 		return "idle"
