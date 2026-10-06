@@ -83,7 +83,7 @@ func TestClaudeCmd(t *testing.T) {
 			if tc.sess.Dir == "" {
 				tc.sess.Dir = "/work/demo" // its project dir holds derived-id.jsonl
 			}
-			cmd := claudeCmd(&tc.sess, tc.mode)
+			cmd := ClaudeCmd(&tc.sess, tc.mode)
 			if cmd[0] != "claude" {
 				t.Fatalf("cmd %q: want it to start claude", cmd)
 			}

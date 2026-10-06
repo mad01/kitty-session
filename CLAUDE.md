@@ -12,6 +12,7 @@ internal/cli/               cobra subcommands (attach = bare ks, new, open, clos
 internal/sidebar/           Bubble Tea agent list, run as `ks sidebar`; every side effect behind sidebar.Backend
 internal/hooks/             the ks matcher groups in ~/.claude/settings.json (install, uninstall, installed)
 internal/herdr/             reader for herdr's session.json (Load, Agents, Running); `ks import` is its only caller
+internal/cmux/              the ONLY place that runs the cmux CLI (new-workspace); used by `ks import --to cmux`
 internal/instance/          the ks kitty instance: Ensure (ping or start), Connect, Client, Shutdown
 internal/launcher/          Launcher: Open/Close/Rename/Attach/Alive; tab topology behind a backend interface
 internal/kitty/client.go    the ONLY place that runs `kitty`: Client (every `kitty @ --to <socket>` call) and Start

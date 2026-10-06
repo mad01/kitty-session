@@ -104,6 +104,7 @@ func resetImportFlags() {
 	importDryRun = false
 	importFrom = ""
 	importNoOpen = false
+	importTo = targetKs
 }
 
 // row returns the whitespace-split fields of the output line whose first

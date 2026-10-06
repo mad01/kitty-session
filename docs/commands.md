@@ -175,7 +175,7 @@ When invoked in a non-TTY context (for example piped into `read`) the interactiv
 ## `ks import`
 
 ```
-Usage: ks import [--dry-run] [--from <session.json>] [--no-open]
+Usage: ks import [--to ks|cmux] [--dry-run] [--from <session.json>] [--no-open]
 ```
 
 Bring the claude agents that [herdr](https://github.com/herdrdev/herdr) runs into ks. herdr is another session manager; it keeps its layout in `~/.config/herdr/session.json` (or `$XDG_CONFIG_HOME/herdr/session.json`), one entry per pane with the agent's Claude session id. `ks import` reads that file and writes one active ks record per claude pane, so the next `ks` resumes each conversation with `claude --resume <id>`. herdr's file is never modified.
@@ -216,6 +216,13 @@ A missing session file is an error naming the path and `--from`. A file of anoth
 | `--dry-run` | Print the plan with `import` in place of `imported`, write nothing, start nothing. |
 | `--from <path>` | Read this herdr session file instead of the default session's. |
 | `--no-open` | Write the records, do not start the instance; the next `ks` brings them up. |
+| `--to <target>` | `ks` (default) or `cmux`. See below. |
+
+### Importing into cmux
+
+`ks import --to cmux` sends the agents to [cmux](https://cmux.com) instead of the ks instance. Each claude pane becomes one cmux workspace with the same name `ks import` would give the record, started in the pane's directory and running the command a ks relaunch would: `claude --resume <id>` while the transcript exists, else `--continue` when the directory has transcripts, else a plain `claude`. No ks records are written; cmux saves and restores its own workspaces.
+
+Run it from a terminal inside cmux. cmux only takes CLI commands from processes it started, so from anywhere else the command stops with an error before opening anything. The herdr-still-running check applies as it does for ks. `--dry-run` prints one `open` row per workspace with its command; `--no-open` has no effect. A workspace that fails to open is reported and the rest still open.
 
 ## `ks version`
 
