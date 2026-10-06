@@ -124,19 +124,14 @@ func stateForEvent(p hookPayload) string {
 // loadHookSession returns the record the event belongs to, or a nil session
 // with the reason on stderr. Lookup is by KS_SESSION_ID first, so a renamed
 // session still finds its record, then by KS_SESSION_NAME for records that
-// predate the id.
+// predate the id (findSession).
 func loadHookSession(stderr io.Writer, id, name string) (*session.Store, *session.Session) {
 	store, err := session.NewStore()
 	if err != nil {
 		hookWarn(stderr, err)
 		return nil, nil
 	}
-	if id != "" {
-		if sess, err := store.FindByID(id); err == nil {
-			return store, sess
-		}
-	}
-	sess, err := store.Load(name)
+	sess, err := findSession(store, id, name)
 	if err != nil {
 		hookWarn(stderr, err)
 		return store, nil

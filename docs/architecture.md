@@ -36,7 +36,7 @@ cmd/ks
 | Package | Responsibility |
 |---|---|
 | `internal/instance` | `Ensure(cfg, opts)` pings the configured socket. When nothing answers it removes the stale socket file, runs `kitty --detach --listen-on <socket> -o ...` with `ks sidebar` as the first window, and polls until the socket answers (100 ms, up to 10 s). `Connect` for commands that must not start it; `Client` for commands that must work while it is down; `Shutdown` closes every window. |
-| `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Attach()`, `Alive(sess)`. `SuggestName(dir)` (base name plus git branch) and `ScratchDir(base)`. `SidebarBackend` maps the sidebar's actions onto all of that and resolves each row's state (below). Layout and teardown sit behind a small backend interface so tests run without kitty. |
+| `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Move(name, where)` (focus the tab, step it with `move_tab_forward`/`move_tab_backward`, refocus, then rank every open session's `position` by the new tab order), `Attach()`, `Alive(sess)`. `SuggestName(dir)` (base name plus git branch) and `ScratchDir(base)`. `SidebarBackend` maps the sidebar's actions onto all of that and resolves each row's state (below). Layout and teardown sit behind a small backend interface so tests run without kitty. |
 | `internal/sidebar` | The agent list: model, view, key and mouse handling, menu, picker, demo backend. `Run(Options{Session, Width, Backend})`. Polls `Backend.List` every 3 s. |
 | `internal/hooks` | `Install`, `Uninstall` and `Installed` for the five ks matcher groups in `~/.claude/settings.json`; other tools' entries are kept. |
 | `internal/herdr` | `Load(path)` parses herdr's `session.json` (format version 3 only), `Agents()` flattens workspaces, tabs and panes into the claude panes ks can import plus the skipped ones with a reason, `Running(dir)` dials `herdr.sock` to tell whether herdr still owns them. Stdlib only; `ks import` does the wiring. |
@@ -87,7 +87,7 @@ The `kitty_*` IDs are ephemeral. Kitty numbers tabs and windows from 1 in every 
 
 `id` is random and stable across renames (also exported as the `KS_SESSION_ID` environment variable, found with `Store.FindByID`). `status` is `active` or `stopped` (absent in files from older versions, which read as `active`). `claude_session_id` and `claude_transcript_path` are what Claude Code reported on its last `SessionStart` hook; together they let a reopen bring back a conversation with `claude --resume <id>` while the transcript file still exists.
 
-`focused_at` is stamped whenever the launcher creates or focuses the session; attach brings the newest one to the front. `viewed_at` is stamped by the session's own sidebar while its tab is the active one (at most every 10 s); a state file `idle` newer than it shows the row as `done`. Files written by older `ks` versions may still carry `kitty_shell_window_id` and `kitty_summary_window_id`; the launcher clears them on the next reopen. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
+`focused_at` is stamped whenever the launcher creates or focuses the session; attach brings the newest one to the front. `viewed_at` is stamped by the session's own sidebar while its tab is the active one (at most every 10 s); a state file `idle` newer than it shows the row as `done`. `position` is the session's rank among the sessions with a tab, counted from 1: written by `ks move`, and from then on refreshed by every tab launch, so a reopened session takes the bottom rank. Absent until a move; attach opens ranked sessions first, by rank, then the rest by creation. Files written by older `ks` versions may still carry `kitty_shell_window_id` and `kitty_summary_window_id`; the launcher clears them on the next reopen. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
 
 State files are even smaller, see [Hooks and state detection](hooks-and-state.md#state-file).
 
@@ -132,9 +132,9 @@ Bare `ks`.
 cli.runAttach
     └── instance.Ensure(cfg)                 start the instance if needed
     └── launcher.Attach()
-          ├── store.List()                   sorted by file name
+          ├── store.List()                   sorted for resume: position (ks move) first, then creation
           ├── stopped records → counted, untouched
-          ├── target = the active record with the newest focused_at (first by name if none)
+          ├── target = the active record with the newest focused_at (the first in that order if none)
           ├── for each active record: Alive? → counted as running
           │                           else  → Open(ResumeStored), 100 ms apart
           ├── wait 2 s, re-check every launched claude window: gone again → Exited, else Resumed

@@ -26,6 +26,7 @@ type fakeKitty struct {
 	launches    []kitty.Launch
 	errs        map[string]error // method name or exact call → error to return
 	onLaunch    func()           // runs inside LaunchTab, standing in for the SessionStart hook
+	onWindows   func() error     // runs inside Windows, to fail one snapshot among several
 	claudeExits bool             // a window launched by LaunchVSplit vanishes at once
 	slept       time.Duration
 }
@@ -89,6 +90,11 @@ func (f *fakeKitty) find(id int) *kitty.Window {
 func (f *fakeKitty) Windows() ([]kitty.Window, error) {
 	if err := f.record("Windows"); err != nil {
 		return nil, err
+	}
+	if f.onWindows != nil {
+		if err := f.onWindows(); err != nil {
+			return nil, err
+		}
 	}
 	return slices.Clone(f.windows), nil
 }
@@ -180,7 +186,62 @@ func (f *fakeKitty) SetTabTitleForWindow(title string, id int) error {
 	return nil
 }
 
-func (f *fakeKitty) FocusWindow(id int) error { return f.record("FocusWindow(%d)", id) }
+func (f *fakeKitty) FocusWindow(id int) error {
+	if err := f.record("FocusWindow(%d)", id); err != nil {
+		return err
+	}
+	f.focus(id)
+	return nil
+}
+
+// focus gives window id the keyboard and shows its tab, as kitty does after
+// focus-window; an unknown id changes nothing. Nothing is recorded.
+func (f *fakeKitty) focus(id int) {
+	w := f.find(id)
+	if w == nil {
+		return
+	}
+	tab := w.TabID
+	for i := range f.windows {
+		f.windows[i].Focused = f.windows[i].ID == id
+		f.windows[i].TabActive = f.windows[i].TabID == tab
+	}
+}
+
+// MoveActiveTab moves the showing tab by steps in the tab order, clamped to
+// the ends, by regrouping the window table in the new order.
+func (f *fakeKitty) MoveActiveTab(steps int) error {
+	if err := f.record("MoveActiveTab(%d)", steps); err != nil {
+		return err
+	}
+	var order []int
+	active := -1
+	for _, w := range f.windows {
+		if slices.Contains(order, w.TabID) {
+			continue
+		}
+		if w.TabActive {
+			active = len(order)
+		}
+		order = append(order, w.TabID)
+	}
+	if active < 0 {
+		return fmt.Errorf("fake: no tab is showing")
+	}
+	to := min(max(active+steps, 0), len(order)-1)
+	tab := order[active]
+	order = slices.Insert(slices.Delete(order, active, active+1), to, tab)
+	var regrouped []kitty.Window
+	for _, t := range order {
+		for _, w := range f.windows {
+			if w.TabID == t {
+				regrouped = append(regrouped, w)
+			}
+		}
+	}
+	f.windows = regrouped
+	return nil
+}
 
 func (f *fakeKitty) CloseTab(tab int) error {
 	if err := f.record("CloseTab(%d)", tab); err != nil {

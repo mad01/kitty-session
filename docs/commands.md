@@ -4,7 +4,7 @@ Every subcommand exposed by the `ks` CLI, with flags and exit behavior.
 
 `ks` uses [cobra](https://github.com/spf13/cobra) for argument parsing. Exit code is `0` on success and `1` on any error. Errors print to stderr; `SilenceUsage` is on, so cobra won't spam the usage block on error.
 
-`ks` keeps its sessions in a kitty instance of its own, listening on the socket from `kitty_socket` in the config (default `~/.config/ks/kitty.sock`). Commands that create or focus tabs start that instance when it is not running; `close`, `rename`, `list` and `quit` never start it.
+`ks` keeps its sessions in a kitty instance of its own, listening on the socket from `kitty_socket` in the config (default `~/.config/ks/kitty.sock`). Commands that create or focus tabs start that instance when it is not running; `close`, `rename`, `move`, `list` and `quit` never start it.
 
 ## `ks`
 
@@ -12,7 +12,7 @@ Every subcommand exposed by the `ks` CLI, with flags and exit behavior.
 Usage: ks [--agent]
 ```
 
-Attach. Starts the instance if its socket does not answer. Resumes every active session whose claude window is gone, 100 ms apart, and leaves stopped sessions alone. Then focuses the session you used last: the newest `focused_at`, the oldest active one, which is tab 1, if none was ever focused, the home tab when there is no active session. Prints one line:
+Attach. Starts the instance if its socket does not answer. Resumes every active session whose claude window is gone, 100 ms apart, and leaves stopped sessions alone. Then focuses the session you used last: the newest `focused_at`, the first active one in tab order (tab 1) if none was ever focused, the home tab when there is no active session. Prints one line:
 
 ```
 ks: 2 resumed, 1 already running, 1 stopped
@@ -46,7 +46,7 @@ Create a new session. Fails if a session with the same name already exists.
 Behavior:
 
 1. Reads `~/.config/ks/config.yaml` (a missing file is fine).
-2. Starts the instance if needed. A fresh instance first brings every active session back, oldest first and out of sight, so the new session becomes the last tab, the same order bare `ks` produces.
+2. Starts the instance if needed. A fresh instance first brings every active session back, in sidebar order (the order `ks move` left behind, then creation order) and out of sight, so the new session becomes the last tab, the same order bare `ks` produces.
 3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
 4. Creates a tab in the instance running `ks sidebar --session-id <id>`, switches it to the `splits` layout and titles it `<name>`.
 5. Splits claude in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
@@ -69,7 +69,7 @@ Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, u
 Usage: ks open <name>
 ```
 
-Focus or recreate the named session. Starts the instance if needed; a fresh instance first brings every active session back, oldest first, before this one is opened.
+Focus or recreate the named session. Starts the instance if needed; a fresh instance first brings every active session back, in sidebar order, before this one is opened.
 
 - If the claude window is alive, focus it.
 - If only the sidebar is left (claude exited or was closed), relaunch claude beside it in the same tab.
@@ -115,13 +115,47 @@ When the instance is not running every active session prints `stopped` and a las
 
 See [Hooks and state detection](hooks-and-state.md) for the full flow.
 
-## `ks rename <old> <new>`
+## `ks rename [<old>] <new>`
 
 ```
 Usage: ks rename <old-name> <new-name>
+       ks rename <new-name>
 ```
 
 Rename a session. Renames the session file, renames the state file if one exists, and retitles the tab when the session has one. Fails if `<new-name>` already exists. A tab title that cannot be set (instance down) is a warning. The sidebar in that tab keeps the old `--session` argument until the session is recreated.
+
+With one argument the command renames the session it runs in. This form is for a Claude Code session inside a ks tab: the launcher exports `KS_SESSION_ID` into both windows of every session, so `ks rename <new-name>` from that claude finds its own record, however many times it was renamed before. Outside a session (no `KS_SESSION_ID` or `KS_SESSION_NAME` in the environment) the command fails with `not inside a ks session: pass the session name`.
+
+## `ks move [<name>] <where>`
+
+```
+Usage: ks move <name> <where>
+       ks move <where>
+```
+
+Move a session's tab to another place in the sidebar's agent list. `<where>` is one of:
+
+| Value | Meaning |
+|---|---|
+| `top` | First tab. |
+| `bottom` | Last tab. |
+| `up` | One place towards the top. |
+| `down` | One place towards the bottom. |
+| `N` | The tab at position N, counted from 1. |
+
+Positions are the numbers the sidebar shows, which is the instance's tab order: the tab you reach with `cmd+N`. A position past either end means that end, and a tab already where it was asked to go is left alone. Anything else is a usage error listing the accepted values. The command prints where the tab went:
+
+```
+session "demo" moved from 3 to 1
+```
+
+With one argument the command moves the session it runs in. It finds that session through `KS_SESSION_ID`, the same way the one-argument `ks rename` does, so a Claude Code session in a ks tab can run `ks move top` on itself. The number of arguments decides which form it is, so a session named `top` or `up` is not ambiguous.
+
+Only a session with an open tab can move; a stopped session, or an active one whose tab is gone, fails with `session "<name>" has no open tab`. The instance must be running, since there is nothing to move otherwise; a down instance surfaces as the kitty error.
+
+kitty can only reorder the tab that is showing. When the moved session is not the one in front, its tab is brought up, moved, and the tab you were on is put back in front. That shows the moved tab for a moment. From inside the session itself nothing changes on screen but the sidebar numbers.
+
+After a move every open session is ranked by the new tab order and the rank is written to its session file as `position`. Bare `ks` and any command that has to start the instance open tabs in that order (ranked sessions first, then the rest by creation), so the order survives `ks quit`. Once any session is ranked, every tab launch ranks the open sessions again, so a new session, or a stopped one you reopen, takes the bottom rank. A store that never saw a move is left as it is.
 
 ## `ks quit`
 

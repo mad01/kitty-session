@@ -87,8 +87,8 @@ func noteAgentOnRunningInstance(cmd *cobra.Command) {
 
 // resumeOnFreshStart brings every active session back when the command had
 // to start the instance, before the command adds its own tab: the tabs then
-// keep creation order and the new session comes last. Problems are reported
-// as warnings; the command's own work goes on.
+// keep their order and the new session comes last. Problems are reported as
+// warnings; the command's own work goes on.
 func resumeOnFreshStart(cmd *cobra.Command, w wiring) {
 	if !w.started {
 		return

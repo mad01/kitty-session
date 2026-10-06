@@ -215,6 +215,48 @@ func checkAttachFocus(t *testing.T, f *fakeKitty, store *session.Store, focused 
 	}
 }
 
+// TestResumeRankedSessionsFirst covers the order a ks move leaves behind:
+// ranked records come back by rank, the unranked ones after them oldest
+// first, whatever the creation stamps or names say; stopped ones stay down.
+func TestResumeRankedSessionsFirst(t *testing.T) {
+	l, f, store := newTestLauncher(t)
+	t0 := time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)
+	specs := []struct {
+		name string
+		rank int
+	}{
+		{"oldest-unranked", 0},
+		{"second", 2},
+		{"first", 1},
+		{"stopped-third", 3},
+		{"newest-unranked", 0},
+	}
+	for i, spec := range specs {
+		sess := session.New(spec.name, "/work/"+spec.name, 70, 71)
+		sess.CreatedAt = t0.Add(time.Duration(i) * time.Minute).Format(time.RFC3339Nano)
+		sess.Position = spec.rank
+		if spec.name == "stopped-third" {
+			sess.Status = session.StatusStopped
+		}
+		if err := store.Save(sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.Resume(); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	var titles []string
+	for _, c := range f.calls {
+		if rest, ok := strings.CutPrefix(c, "SetTabTitle("); ok {
+			titles = append(titles, rest[strings.Index(rest, ",")+1:len(rest)-1])
+		}
+	}
+	want := []string{"first", "second", "oldest-unranked", "newest-unranked"}
+	if !slices.Equal(titles, want) {
+		t.Errorf("tab order = %v, want %v", titles, want)
+	}
+}
+
 // TestResumeLaunchesOldestFirstWithoutFocus covers the cold-start path of
 // new, open and tmp: every active session comes back in creation order,
 // hidden, and nothing is focused.

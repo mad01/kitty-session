@@ -59,6 +59,13 @@ type Session struct {
 	// active one. A finished turn (state file idle) newer than this shows as
 	// done in the sidebar until the user looks at the tab.
 	ViewedAt time.Time `json:"viewed_at,omitzero"`
+	// Position is the session's rank in the sidebar order, 1-based and dense
+	// over the sessions with a tab. ks move writes it, and once any session
+	// carries one every tab launch ranks the open sessions again, so a
+	// reopened or new session takes the bottom rank. Zero means no ks move
+	// has run yet; attach puts ranked sessions first, by rank, and the rest
+	// after them in creation order.
+	Position int `json:"position,omitempty"`
 }
 
 // New returns an active session record for name rooted at dir, with a fresh ID.

@@ -180,6 +180,35 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 	}
 }
 
+func TestMoveActiveTabRunsOneActionPerStep(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps int
+		want  [][]string
+	}{
+		{"forward two", 2, [][]string{
+			{"action", "move_tab_forward"}, {"action", "move_tab_forward"},
+		}},
+		{"backward one", -1, [][]string{{"action", "move_tab_backward"}}},
+		{"zero touches nothing", 0, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, calls := newFake("", nil)
+			if err := c.MoveActiveTab(tc.steps); err != nil {
+				t.Fatalf("MoveActiveTab: %v", err)
+			}
+			var got [][]string
+			for _, call := range *calls {
+				got = append(got, call[3:]) // after `@ --to <sock>`
+			}
+			if !slices.EqualFunc(got, tc.want, slices.Equal) {
+				t.Errorf("calls = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLaunchParsesTheWindowID(t *testing.T) {
 	c, _ := newFake("42\n", nil)
 	id, err := c.LaunchTab(Launch{Match: 1, Command: []string{"sh"}})

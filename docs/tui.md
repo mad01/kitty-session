@@ -47,7 +47,7 @@ Each row's state comes from one `kitty @ ls` snapshot plus the session's state f
 
 ### Sort
 
-Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order the sessions were created before adding anything new, so the numbering survives a restart. A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
+Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order `ks move` last left them, then the rest in the order the sessions were created, before adding anything new, so the numbering survives a restart. `ks move <name> <where>` (or `ks move <where>` from inside a session) reorders the tabs; see the [command reference](commands.md#ks-move-name-where). A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
 
 ## Keys
 

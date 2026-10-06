@@ -439,6 +439,25 @@ func (c *Client) SetUserVars(windowID int, vars ...string) error {
 	return err
 }
 
+// MoveActiveTab moves the active tab of the visible OS window by steps
+// positions in the tab order: towards the end for positive steps, towards
+// the front for negative, one move_tab_forward or move_tab_backward action
+// per step. The two actions act on the active tab whatever --match names
+// (probed on kitty 0.48.2), so no match is passed and the caller focuses the
+// tab to move first.
+func (c *Client) MoveActiveTab(steps int) error {
+	action := "move_tab_forward"
+	if steps < 0 {
+		action, steps = "move_tab_backward", -steps
+	}
+	for range steps {
+		if _, err := c.at("action", action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CloseTab closes a tab by its id.
 func (c *Client) CloseTab(tabID int) error {
 	_, err := c.at("close-tab", "--match=id:"+strconv.Itoa(tabID))

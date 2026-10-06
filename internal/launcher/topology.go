@@ -20,6 +20,7 @@ type backend interface {
 	ResizeWindow(windowID int, axis string, increment int) error
 	SetTabTitleForWindow(title string, windowID int) error
 	FocusWindow(windowID int) error
+	MoveActiveTab(steps int) error
 	CloseTab(tabID int) error
 }
 
