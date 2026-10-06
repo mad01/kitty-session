@@ -67,7 +67,7 @@ Rows follow the tab order of the ks instance: the top row is the first tab, whic
 | `m` | Open the menu |
 | `?` | Show the keys popup; `esc`, `?` or `q` closes it |
 
-`ctrl+c` does nothing: the sidebar never exits on its own. To end ks use the menu's `quit ks` or `ks quit`.
+`ctrl+c` does nothing: the sidebar never exits on its own. Its tab closes once its claude is gone, see [When claude exits](#when-claude-exits). To end ks use the menu's `quit ks` or `ks quit`.
 
 ### Between the sidebar and claude
 
@@ -90,6 +90,12 @@ The cursor row turns into an input pre-filled with the current name. `enter` sav
 ## Close and delete (`c`, `d`)
 
 Both pop a confirmation with the agent's name. `y` or `enter` confirms, `n` or `esc` cancels. Close removes the tab and marks the record `stopped`; `enter` on the row later brings it back. Delete also moves the record to `~/.config/ks/sessions/trash/`.
+
+## When claude exits
+
+A session tab closes on its own once its claude window is gone, whether claude ended with `/exit`, crashed, or was killed. The tab's sidebar checks its claude window on every refresh. Once it has seen the window and then finds it missing, it closes its own tab the way `c` does. The home tab is recreated first when it was the last session tab. A claude that never shows up within 30 seconds of the sidebar's first refresh (bad flags, a missing binary) closes the tab as well. Another window of the session still in the tab, a shell split for one, holds the tab open until it exits too.
+
+The record is not touched. `/exit` is marked `stopped` by the SessionEnd hook, and the row sits at the bottom until `enter` reopens it. A crash leaves the record `active`, so the next `ks` brings the session back. The home tab's sidebar never closes anything.
 
 ## Trash and restore (`u`)
 

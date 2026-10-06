@@ -46,6 +46,7 @@ type SidebarBackend struct {
 
 	mu         sync.Mutex // guards lastViewed; List runs off the UI loop
 	lastViewed time.Time
+	reap       reaper // closes the own tab once its claude is gone; see reapIfGone
 }
 
 // NewSidebarBackend returns the backend for the instance behind client.
@@ -85,6 +86,8 @@ func newSidebarBackend(l *Launcher, cfg *config.Config, ownID string) *SidebarBa
 // instance snapshot. Windows are matched to records by their session tag.
 // When the own session's tab is the active one, its record is stamped as
 // viewed (at most once per viewedDebounce) before its state is resolved.
+// Once the own session's claude window is gone, its tab is closed from the
+// same snapshot (reapIfGone).
 func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	sessions, err := b.l.store.List()
 	if err != nil {
@@ -105,6 +108,9 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 			}
 		}
 		agents = append(agents, b.agent(sess, lv, own, pos[lv.tabID()]))
+		if own {
+			b.reapIfGone(all, lv)
+		}
 	}
 	return agents, nil
 }

@@ -122,7 +122,7 @@ cli.runNew / cli.runTmp / cli.runOpen / SidebarBackend.New / SidebarBackend.Focu
 
 The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. Every launch also passes `--env NAME` without a value for the agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`), which unsets them in the child; `Client.Start` already drops the Claude Code session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_EFFORT`) and every `KS_*` and `KITTY_*` variable except `KITTY_CONFIG_DIRECTORY` from the instance's own environment, leaving the user's `CLAUDE_CONFIG_DIR`, Bedrock and Vertex flags and auth tokens in place. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the sidebar backend drops them, since the UI has one status line and the action itself succeeded.
 
-Closing is the mirror image. `ks close` and the sidebar's close/delete actions call `Launcher.Close(sess, keep)`. It removes the state file, closes every tab holding a window tagged with the session id, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`. An instance that cannot be reached is a warning; the record is handled regardless.
+Closing is the mirror image. `ks close` and the sidebar's close/delete actions call `Launcher.Close(sess, keep)`. It removes the state file, closes every tab holding a window tagged with the session id, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`. An instance that cannot be reached is a warning; the record is handled regardless. A session's own sidebar also closes its tab by itself once its claude window is gone, through the same `closeTabs`, from the snapshot its `List` tick already holds; the record and the state file are left alone (`internal/launcher/reap.go`).
 
 ## Flow: attach
 
@@ -165,6 +165,8 @@ SidebarBackend.List():
             no glyph: state file working / input      → working / input
             otherwise                                 → idle
         Title = title minus glyph, or ~-shortened dir; Tab = position of the session's tab in kitty's order
+        if sess is the own session:
+            reapIfGone(all, lv)                        # claude seen then gone, or never seen for 30 s → closeTabs (reap.go)
 ```
 
 `ks list` has its own, older chain: `stopped` when the record is stopped or `Launcher.Alive` says no, a fresh state file's value if there is one, else `DetectState(kitty.GetText(...))` on the pane text. It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.
