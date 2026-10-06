@@ -7,10 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"text/tabwriter"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/herdr"
+	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/sidebar"
@@ -37,6 +40,10 @@ var importCmd = &cobra.Command{
 as sessions. Reads herdr's default session file (~/.config/herdr/session.json),
 writes one active ks record per claude pane with its Claude session id, and
 attaches unless herdr is still running the agents.
+
+A record that already carries an agent's Claude session id is left alone. A
+record for the agent's directory whose id herdr no longer lists gets the new
+id instead of a second record, unless its claude window is open in ks.
 
 With --to cmux, opens one cmux workspace per claude agent instead, resuming
 its conversation; cmux saves and restores those workspaces itself, so no ks
@@ -69,18 +76,39 @@ const (
 	// actionExists leaves alone a record that already has the agent's
 	// Claude session id.
 	actionExists
+	// actionUpdate gives the record for the agent's directory the agent's
+	// Claude session id, in place of one herdr no longer lists.
+	actionUpdate
+	// actionOpen leaves alone the record actionUpdate would have changed,
+	// because its claude window is open: a new id under a running session
+	// would make the next resume open another conversation.
+	actionOpen
 )
 
-// label is the row prefix: in a dry run "import" says what would happen.
+// label is the row prefix: in a dry run "import" and "update" say what would
+// happen.
 func (a importAction) label(dryRun bool) string {
-	switch {
-	case a == actionExists:
+	switch a {
+	case actionExists:
 		return "exists"
-	case dryRun:
-		return "import"
+	case actionOpen:
+		return "skipped"
+	case actionUpdate:
+		if dryRun {
+			return "update"
+		}
+		return "updated"
 	default:
+		if dryRun {
+			return "import"
+		}
 		return "imported"
 	}
+}
+
+// writes reports whether the action saves a record.
+func (a importAction) writes() bool {
+	return a == actionImport || a == actionUpdate
 }
 
 // importItem is one herdr agent with the ks name it maps to.
@@ -88,10 +116,27 @@ type importItem struct {
 	action importAction
 	name   string
 	agent  herdr.Agent
+	// record is the existing record the agent maps onto, for actionUpdate
+	// and actionOpen; nil for a new one.
+	record *session.Session
 	// transcriptPath is where Claude Code keeps the agent's conversation;
 	// transcriptOK says whether the file is there, so --resume will work.
 	transcriptPath string
 	transcriptOK   bool
+}
+
+// detail is the row's last column: the Claude session id, or the reason a
+// record was left alone.
+func (it importItem) detail() string {
+	if it.action == actionOpen {
+		return it.name + " is open in ks, not updated"
+	}
+	return shortID(it.agent.SessionID)
+}
+
+// importCounts is how many agents each action took.
+type importCounts struct {
+	imports, updates, exists, open int
 }
 
 func runImport(cmd *cobra.Command, args []string) error {
@@ -120,24 +165,14 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 	printWarnings(cmd, transcriptWarnings(items))
 
-	toImport := countAction(items, actionImport)
-	if importDryRun {
-		fmt.Fprintf(
-			cmd.OutOrStdout(),
-			"ks: dry run, nothing written: %d to import, %d already present, %d skipped\n",
-			toImport,
-			len(items)-toImport,
-			len(skipped),
-		)
-		return nil
+	counts := countActions(items)
+	if !importDryRun {
+		if err := writeImports(store, items); err != nil {
+			return err
+		}
 	}
-	imported, err := writeImports(store, items)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "ks: %d imported, %d already present, %d skipped\n",
-		imported, len(items)-imported, len(skipped))
-	if imported == 0 {
+	printSummary(cmd.OutOrStdout(), counts, counts.open+len(skipped), importDryRun)
+	if importDryRun || counts.imports+counts.updates == 0 {
 		return nil
 	}
 	return openImported(cmd, filepath.Dir(path))
@@ -171,59 +206,163 @@ func importSource() (string, error) {
 	return herdr.DefaultPath()
 }
 
-// planAgainstStore opens the session store and plans the import against the
-// records already in it.
+// planAgainstStore opens the store and plans the import against the records
+// in it. One snapshot of the instance says which records are open; with the
+// instance down, none is.
 func planAgainstStore(agents []herdr.Agent) (*session.Store, []importItem, error) {
-	store, err := session.NewStore()
+	w, err := offlineWiring()
 	if err != nil {
 		return nil, nil, err
 	}
-	existing, err := store.List()
+	existing, err := w.store.List()
 	if err != nil {
 		return nil, nil, err
 	}
-	items, err := planImport(agents, existing)
+	items, err := planImport(agents, existing, openIn(w.kitty))
 	if err != nil {
 		return nil, nil, err
 	}
-	return store, items, nil
+	return w.store, items, nil
 }
 
-// planImport maps every herdr agent to a ks record: the one that already
-// carries its Claude session id, or a new name free of collisions with the
-// existing records and with the other agents of this import.
-func planImport(agents []herdr.Agent, existing []*session.Session) ([]importItem, error) {
-	byClaudeID := map[string]string{}
-	taken := map[string]bool{}
-	for _, s := range existing {
-		taken[s.Name] = true
-		if s.ClaudeSessionID != "" {
-			byClaudeID[s.ClaudeSessionID] = s.Name
-		}
+// openIn takes one snapshot of the instance and reports from it whether a
+// record's claude window is open. A failed snapshot means the instance is
+// down, so no record is.
+func openIn(c *kitty.Client) func(*session.Session) bool {
+	all, err := c.Windows()
+	if err != nil {
+		return func(*session.Session) bool { return false }
 	}
+	return func(s *session.Session) bool {
+		_, ok := launcher.ClaudeWindow(all, s)
+		return ok
+	}
+}
+
+// planImport maps every herdr agent to a ks record. The record that already
+// carries the agent's Claude session id wins and is left alone. Else the
+// record for the agent's directory whose own id herdr no longer lists gets
+// the agent's, an active one before a stopped one, unless open says its
+// claude window is open. Else a new
+// record gets a name free of collisions with the existing records and with
+// the other agents of this import.
+func planImport(
+	agents []herdr.Agent,
+	existing []*session.Session,
+	open func(*session.Session) bool,
+) ([]importItem, error) {
+	p := newImportPlan(agents, existing)
 	items := make([]importItem, 0, len(agents))
 	for _, a := range agents {
-		if name, ok := byClaudeID[a.SessionID]; ok {
+		if name, ok := p.byClaudeID[a.SessionID]; ok {
 			items = append(items, importItem{action: actionExists, name: name, agent: a})
 			continue
 		}
-		name := freeName(importName(a), taken)
-		taken[name] = true
-		byClaudeID[a.SessionID] = name
-		transcript, err := claude.TranscriptPath(a.Dir, a.SessionID)
+		it, err := p.place(a, open)
 		if err != nil {
 			return nil, err
 		}
-		_, statErr := os.Stat(transcript)
-		items = append(items, importItem{
-			action:         actionImport,
-			name:           name,
-			agent:          a,
-			transcriptPath: transcript,
-			transcriptOK:   statErr == nil,
-		})
+		items = append(items, it)
 	}
 	return items, nil
+}
+
+// importPlan is what planImport knows about the store while it maps agents:
+// the name each Claude session id belongs to, the names in use, and the
+// stale records a directory match may still claim.
+type importPlan struct {
+	byClaudeID map[string]string
+	taken      map[string]bool
+	// stale holds the records whose Claude session id herdr no longer lists,
+	// in candidateOrder. claimStale removes each one it hands out, so an
+	// import touches a record at most once.
+	stale []*session.Session
+}
+
+// newImportPlan indexes the existing records against the agents' ids.
+func newImportPlan(agents []herdr.Agent, existing []*session.Session) *importPlan {
+	current := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		current[a.SessionID] = true
+	}
+	p := &importPlan{byClaudeID: map[string]string{}, taken: map[string]bool{}}
+	for _, s := range existing {
+		p.taken[s.Name] = true
+		if s.ClaudeSessionID != "" {
+			p.byClaudeID[s.ClaudeSessionID] = s.Name
+		}
+		if !current[s.ClaudeSessionID] {
+			p.stale = append(p.stale, s)
+		}
+	}
+	slices.SortStableFunc(p.stale, candidateOrder)
+	return p
+}
+
+// candidateOrder puts active records before stopped ones, then the most
+// recently focused first, then the newest created when the focus stamps tie.
+func candidateOrder(a, b *session.Session) int {
+	if a.IsActive() != b.IsActive() {
+		if a.IsActive() {
+			return -1
+		}
+		return 1
+	}
+	if c := b.FocusedAt.Compare(a.FocusedAt); c != 0 {
+		return c
+	}
+	createdA, _ := time.Parse(time.RFC3339Nano, a.CreatedAt)
+	createdB, _ := time.Parse(time.RFC3339Nano, b.CreatedAt)
+	return createdB.Compare(createdA)
+}
+
+// place maps an agent no record carries the id of: onto the stale record for
+// its directory when there is one, else onto a new record.
+func (p *importPlan) place(
+	a herdr.Agent,
+	open func(*session.Session) bool,
+) (importItem, error) {
+	transcript, ok, err := transcriptFor(a)
+	if err != nil {
+		return importItem{}, err
+	}
+	it := importItem{agent: a, transcriptPath: transcript, transcriptOK: ok}
+	if rec := p.claimStale(a.Dir); rec != nil {
+		it.name, it.record, it.action = rec.Name, rec, actionUpdate
+		if open(rec) {
+			it.action = actionOpen
+		}
+	} else {
+		it.name, it.action = freeName(importName(a), p.taken), actionImport
+		p.taken[it.name] = true
+	}
+	if it.action.writes() {
+		p.byClaudeID[a.SessionID] = it.name
+	}
+	return it, nil
+}
+
+// claimStale hands out the stale record for dir, the most recently focused
+// one when several, or nil.
+func (p *importPlan) claimStale(dir string) *session.Session {
+	for i, s := range p.stale {
+		if filepath.Clean(s.Dir) == filepath.Clean(dir) {
+			p.stale = slices.Delete(p.stale, i, i+1)
+			return s
+		}
+	}
+	return nil
+}
+
+// transcriptFor is where Claude Code keeps the agent's conversation, and
+// whether the file is still there.
+func transcriptFor(a herdr.Agent) (path string, ok bool, err error) {
+	path, err = claude.TranscriptPath(a.Dir, a.SessionID)
+	if err != nil {
+		return "", false, err
+	}
+	_, statErr := os.Stat(path)
+	return path, statErr == nil, nil
 }
 
 // importName is the ks name for a herdr agent: the workspace or tab name
@@ -268,7 +407,7 @@ func printImportRows(w io.Writer, items []importItem, skipped []herdr.Skip, dryR
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, it := range items {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", it.action.label(dryRun), it.name,
-			sidebar.ShortenHome(it.agent.Dir, home), shortID(it.agent.SessionID))
+			sidebar.ShortenHome(it.agent.Dir, home), it.detail())
 	}
 	for _, s := range skipped {
 		fmt.Fprintf(tw, "skipped\t\t%s\t%s\n", sidebar.ShortenHome(s.Dir, home), s.Reason)
@@ -279,13 +418,13 @@ func printImportRows(w io.Writer, items []importItem, skipped []herdr.Skip, dryR
 	return nil
 }
 
-// transcriptWarnings names the new records whose transcript is gone. The
-// launcher then falls back to --continue or a bare claude, so the session
-// comes back without its conversation.
+// transcriptWarnings names the records to write whose transcript is gone.
+// The launcher then falls back to --continue or a bare claude, so the
+// session comes back without its conversation.
 func transcriptWarnings(items []importItem) []error {
 	var warnings []error
 	for _, it := range items {
-		if it.action == actionImport && !it.transcriptOK {
+		if it.action.writes() && !it.transcriptOK {
 			warnings = append(warnings,
 				fmt.Errorf("%s: transcript missing, will start fresh", it.name))
 		}
@@ -293,36 +432,62 @@ func transcriptWarnings(items []importItem) []error {
 	return warnings
 }
 
-func countAction(items []importItem, action importAction) int {
-	n := 0
+func countActions(items []importItem) importCounts {
+	var c importCounts
 	for _, it := range items {
-		if it.action == action {
-			n++
+		switch it.action {
+		case actionImport:
+			c.imports++
+		case actionUpdate:
+			c.updates++
+		case actionExists:
+			c.exists++
+		case actionOpen:
+			c.open++
 		}
 	}
-	return n
+	return c
+}
+
+// printSummary writes the closing count line; skipped counts the herdr panes
+// left out together with the records left alone because they are open.
+func printSummary(w io.Writer, c importCounts, skipped int, dryRun bool) {
+	if dryRun {
+		fmt.Fprintf(w,
+			"ks: dry run, nothing written: %d to import, %d to update, %d already present, %d skipped\n",
+			c.imports, c.updates, c.exists, skipped)
+		return
+	}
+	fmt.Fprintf(w, "ks: %d imported, %d updated, %d already present, %d skipped\n",
+		c.imports, c.updates, c.exists, skipped)
 }
 
 // writeImports saves an active record with no kitty ids for every item to
-// import, which is exactly what attach resumes. It returns how many it wrote.
-func writeImports(store *session.Store, items []importItem) (int, error) {
-	written := 0
+// import, which is exactly what attach resumes, and rewrites the record of
+// every item to update with the agent's Claude session id and transcript,
+// active again if it was stopped: an imported record is there to be resumed.
+func writeImports(store *session.Store, items []importItem) error {
 	for _, it := range items {
-		if it.action != actionImport {
+		var sess *session.Session
+		switch it.action {
+		case actionImport:
+			sess = session.New(it.name, it.agent.Dir, 0, 0)
+		case actionUpdate:
+			sess = it.record
+			sess.Status = session.StatusActive
+		default:
 			continue
 		}
-		sess := session.New(it.name, it.agent.Dir, 0, 0)
 		sess.ClaudeSessionID = it.agent.SessionID
 		sess.ClaudeTranscriptPath = it.transcriptPath
 		if err := store.Save(sess); err != nil {
-			return written, fmt.Errorf("cannot save %s: %w", it.name, err)
+			return fmt.Errorf("cannot save %s: %w", it.name, err)
 		}
-		written++
 	}
-	return written, nil
+	return nil
 }
 
-// openImported attaches, bringing the new records up, unless herdr still
+// openImported attaches, bringing the written records up, unless herdr still
 // runs the agents (a second claude on the same transcript would clash) or
 // --no-open asked for the records only. herdrDir holds herdr's socket.
 func openImported(cmd *cobra.Command, herdrDir string) error {

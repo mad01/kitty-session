@@ -220,16 +220,19 @@ For each pane:
 
 - A pane without an agent is a shell and is skipped. Panes running another agent (codex, pi) are skipped: ks only hosts claude. A claude pane herdr knows by transcript path rather than id is skipped too.
 - A claude pane whose Claude session id a ks record already carries is reported as `exists` and left alone, so rerunning the command is safe.
+- Otherwise ks looks for a record for the pane's directory whose own Claude session id herdr no longer lists. That record is updated in place: it gets the pane's id and transcript path, a stopped record is reactivated, and the row says `updated`. This is what a restart of the agent in herdr looks like. A record whose id herdr still lists is never the candidate, so two records the user made for one directory on purpose stay apart. When several records qualify, an active one is preferred over a stopped one, then the most recently focused, then the most recently created.
+- A record that would be updated but whose claude window is open in the ks instance is left alone. The row says `skipped` with `<name> is open in ks, not updated`, since a new id under a running session would make its next resume open another conversation. With the instance down no record counts as open.
 - Otherwise a record is written. Its name is the herdr workspace name, else the tab name, sanitized the way `ks new` would. With neither it is the directory's base name plus git branch, the same name the sidebar's repo picker suggests. A taken name gets `-2`, `-3`, and so on, the lowest free suffix.
 - The transcript path is derived from the directory and id. When the file is gone the record is still written, with a `warning: <name>: transcript missing, will start fresh` line, since the launcher then falls back to `--continue` or a bare `claude`.
 
 Output is one aligned line per pane, the skipped ones last, then a summary:
 
 ```
-imported  migraine-me-main  ~/code/src/github.com/mad01/migraine-me  b75ee90c
+imported  migraine-me-main  ~/code/src/github.com/mad01/migraine-me    b75ee90c
+updated   kitty-session     ~/code/src/github.com/mad01/kitty-session  7c0a41d2
 exists    dropbrain-app     ~/code/src/github.com/mad01/dropbrain-app  211b8c21
 skipped                     ~/code/src/github.com/mad01/thismoon       shell, no agent
-ks: 1 imported, 1 already present, 1 skipped
+ks: 1 imported, 1 updated, 1 already present, 1 skipped
 ```
 
 **herdr still running.** After writing, `ks import` checks whether a herdr daemon answers on `herdr.sock` beside the session file. If it does, nothing is opened: starting claude on a transcript herdr's own claude is still writing to would run two sessions on one conversation. Instead stderr says:
@@ -239,7 +242,7 @@ ks: herdr is still running these agents; not opening them.
     Stop it with: herdr session stop default   then run: ks
 ```
 
-When herdr is not running and something was imported, the command attaches the same way bare `ks` does and prints its `ks: N resumed, ...` line. When nothing was imported the instance is not started.
+When herdr is not running and something was imported or updated, the command attaches the same way bare `ks` does and prints its `ks: N resumed, ...` line. When nothing was written the instance is not started.
 
 A missing session file is an error naming the path and `--from`. A file of another format version than 3 is rejected with the version found. A file with no panes at all prints `ks: no agents found` and exits 0.
 
@@ -247,7 +250,7 @@ A missing session file is an error naming the path and `--from`. A file of anoth
 
 | Flag | Description |
 |---|---|
-| `--dry-run` | Print the plan with `import` in place of `imported`, write nothing, start nothing. |
+| `--dry-run` | Print the plan with `import` and `update` in place of `imported` and `updated`, write nothing, start nothing. |
 | `--from <path>` | Read this herdr session file instead of the default session's. |
 | `--no-open` | Write the records, do not start the instance; the next `ks` brings them up. |
 | `--to <target>` | `ks` (default) or `cmux`. See below. |

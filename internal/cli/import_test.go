@@ -6,10 +6,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/claude"
+	"github.com/mad01/kitty-session/internal/herdr"
 	"github.com/mad01/kitty-session/internal/session"
 )
 
@@ -140,7 +143,7 @@ func TestImportDryRunWritesNothing(t *testing.T) {
 	}
 	if !strings.Contains(
 		out,
-		"ks: dry run, nothing written: 2 to import, 0 already present, 2 skipped",
+		"ks: dry run, nothing written: 2 to import, 0 to update, 0 already present, 2 skipped",
 	) {
 		t.Errorf("summary missing in:\n%s", out)
 	}
@@ -174,7 +177,7 @@ func TestImportWritesActiveRecords(t *testing.T) {
 	if !strings.Contains(out, "codex is not claude") {
 		t.Errorf("codex skip missing in:\n%s", out)
 	}
-	if !strings.Contains(out, "ks: 2 imported, 0 already present, 2 skipped") {
+	if !strings.Contains(out, "ks: 2 imported, 0 updated, 0 already present, 2 skipped") {
 		t.Errorf("summary missing in:\n%s", out)
 	}
 	if !strings.Contains(errOut, "warning: beta-work: transcript missing, will start fresh") {
@@ -227,19 +230,22 @@ func TestImportSecondRunReportsExisting(t *testing.T) {
 			t.Errorf("%s exists row = %v in:\n%s", name, got, out)
 		}
 	}
-	if !strings.Contains(out, "ks: 0 imported, 2 already present, 2 skipped") {
+	if !strings.Contains(out, "ks: 0 imported, 0 updated, 2 already present, 2 skipped") {
 		t.Errorf("summary missing in:\n%s", out)
 	}
 }
 
+// The taken names belong to records in another directory, so they are name
+// collisions only and no directory match updates one of them.
 func TestImportSuffixesTakenNames(t *testing.T) {
-	_, fixture, alphaDir, _ := importFixture(t)
+	home, fixture, _, _ := importFixture(t)
+	otherDir := filepath.Join(home, "code", "elsewhere")
 	store, err := session.NewStore()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"alpha", "alpha-2"} {
-		other := session.New(name, alphaDir, 0, 0)
+		other := session.New(name, otherDir, 0, 0)
 		other.ClaudeSessionID = "another-" + name
 		if err := store.Save(other); err != nil {
 			t.Fatal(err)
@@ -313,5 +319,261 @@ func TestImportWarnsWhileHerdrRuns(t *testing.T) {
 	}
 	if !strings.Contains(out, "ks: 2 imported") {
 		t.Errorf("records should still be written:\n%s", out)
+	}
+}
+
+// saveRecord stores an active record for dir carrying claudeID, as a
+// previous import or a ks new with hooks would have left it.
+func saveRecord(t *testing.T, store *session.Store, name, dir, claudeID string) *session.Session {
+	t.Helper()
+	sess := session.New(name, dir, 0, 0)
+	sess.ClaudeSessionID = claudeID
+	sess.ClaudeTranscriptPath = "/old/" + claudeID + ".jsonl"
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	return sess
+}
+
+func TestImportUpdatesRecordForDirectory(t *testing.T) {
+	home, fixture, alphaDir, _ := importFixture(t)
+	transcript := writeTranscript(t, alphaDir, alphaID)
+	store, err := session.NewStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := saveRecord(t, store, "alpha", alphaDir, "stale-alpha")
+
+	out, errOut, err := runImportCmd(t, "--from", fixture, "--no-open")
+	if err != nil {
+		t.Fatalf("execute: %v\n%s%s", err, out, errOut)
+	}
+	if got := row(out, "updated", "alpha"); len(got) != 4 || got[3] != alphaID[:8] {
+		t.Errorf("alpha row = %v in:\n%s", got, out)
+	}
+	if !strings.Contains(out, "ks: 1 imported, 1 updated, 0 already present, 2 skipped") {
+		t.Errorf("summary missing in:\n%s", out)
+	}
+	if strings.Contains(errOut, "alpha") {
+		t.Errorf("alpha has a transcript and should not warn:\n%s", errOut)
+	}
+	got, err := store.Load("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != old.ID || got.ClaudeSessionID != alphaID ||
+		got.ClaudeTranscriptPath != transcript || !got.IsActive() {
+		t.Errorf("alpha record = %+v", got)
+	}
+	if files := sessionFiles(t, home); len(files) != 2 {
+		t.Errorf("expected alpha and beta-work only, got %v", files)
+	}
+}
+
+func TestImportDryRunShowsUpdateWithoutWriting(t *testing.T) {
+	_, fixture, alphaDir, _ := importFixture(t)
+	store, err := session.NewStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveRecord(t, store, "alpha", alphaDir, "stale-alpha")
+
+	out, _, err := runImportCmd(t, "--dry-run", "--from", fixture, "--no-open")
+	if err != nil {
+		t.Fatalf("execute: %v\n%s", err, out)
+	}
+	if got := row(out, "update", "alpha"); len(got) != 4 || got[3] != alphaID[:8] {
+		t.Errorf("alpha row = %v in:\n%s", got, out)
+	}
+	if !strings.Contains(out,
+		"ks: dry run, nothing written: 1 to import, 1 to update, 0 already present, 2 skipped") {
+		t.Errorf("summary missing in:\n%s", out)
+	}
+	got, err := store.Load("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClaudeSessionID != "stale-alpha" || got.ClaudeTranscriptPath != "/old/stale-alpha.jsonl" {
+		t.Errorf("dry run changed the record: %+v", got)
+	}
+}
+
+func TestPlanImportMatchesByIDThenDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const alphaDir, betaDir = "/code/alpha", "/code/beta"
+	alpha := herdr.Agent{Dir: alphaDir, SessionID: alphaID}
+	alphaAgain := herdr.Agent{Dir: alphaDir, SessionID: betaID}
+	early, late := time.Unix(100, 0).UTC(), time.Unix(200, 0).UTC()
+	rec := func(name, dir, claudeID string) *session.Session {
+		s := session.New(name, dir, 0, 0)
+		s.ClaudeSessionID = claudeID
+		return s
+	}
+	focused := func(s *session.Session, at time.Time) *session.Session {
+		s.FocusedAt = at
+		return s
+	}
+	created := func(s *session.Session, at string) *session.Session {
+		s.CreatedAt = at
+		return s
+	}
+	stopped := rec("alpha", alphaDir, "stale")
+	stopped.Status = session.StatusStopped
+
+	tests := []struct {
+		name     string
+		agents   []herdr.Agent
+		existing []*session.Session
+		// open names the records whose claude window is open.
+		open map[string]bool
+		// want is "<label> <name>" per agent, in agent order.
+		want []string
+	}{
+		{
+			name:     "id match wins over the directory",
+			agents:   []herdr.Agent{alpha},
+			existing: []*session.Session{rec("alpha", alphaDir, alphaID)},
+			want:     []string{"exists alpha"},
+		},
+		{
+			name:     "directory match with a new id updates",
+			agents:   []herdr.Agent{alpha},
+			existing: []*session.Session{rec("alpha", alphaDir, "stale")},
+			want:     []string{"updated alpha"},
+		},
+		{
+			name:     "open record is skipped",
+			agents:   []herdr.Agent{alpha},
+			existing: []*session.Session{rec("alpha", alphaDir, "stale")},
+			open:     map[string]bool{"alpha": true},
+			want:     []string{"skipped alpha"},
+		},
+		{
+			name:   "record matched by id is never the directory candidate",
+			agents: []herdr.Agent{alpha, alphaAgain},
+			existing: []*session.Session{
+				focused(rec("alpha", alphaDir, alphaID), late),
+				focused(rec("alpha-2", alphaDir, "stale"), early),
+			},
+			want: []string{"exists alpha", "updated alpha-2"},
+		},
+		{
+			name:   "most recently focused candidate wins",
+			agents: []herdr.Agent{alpha},
+			existing: []*session.Session{
+				focused(rec("alpha-2", alphaDir, "stale-2"), late),
+				focused(rec("alpha", alphaDir, "stale-1"), early),
+			},
+			want: []string{"updated alpha-2"},
+		},
+		{
+			name:   "newest created wins a focus tie",
+			agents: []herdr.Agent{alpha},
+			existing: []*session.Session{
+				created(rec("alpha", alphaDir, "stale-1"), "2026-10-01T00:00:00Z"),
+				created(rec("alpha-2", alphaDir, "stale-2"), "2026-10-02T00:00:00.5Z"),
+			},
+			want: []string{"updated alpha-2"},
+		},
+		{
+			name:     "stopped record for the directory is updated",
+			agents:   []herdr.Agent{alpha},
+			existing: []*session.Session{stopped},
+			want:     []string{"updated alpha"},
+		},
+		{
+			name:   "active record is preferred over a stopped one",
+			agents: []herdr.Agent{alpha},
+			existing: []*session.Session{
+				focused(stopped, late),
+				focused(rec("alpha-2", alphaDir, "stale-2"), early),
+			},
+			want: []string{"updated alpha-2"},
+		},
+		{
+			name:     "each stale record is claimed once",
+			agents:   []herdr.Agent{alpha, alphaAgain},
+			existing: []*session.Session{rec("alpha", alphaDir, "stale")},
+			want:     []string{"updated alpha", "imported alpha-2"},
+		},
+		{
+			name:     "a record for another directory is not a match",
+			agents:   []herdr.Agent{alpha},
+			existing: []*session.Session{rec("beta", betaDir, "stale")},
+			want:     []string{"imported alpha"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			open := func(s *session.Session) bool { return tc.open[s.Name] }
+			items, err := planImport(tc.agents, tc.existing, open)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, it := range items {
+				got = append(got, it.action.label(false)+" "+it.name)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("plan = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestImportOpenRecordRowNamesTheReason(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	alpha := herdr.Agent{Dir: "/code/alpha", SessionID: alphaID}
+	existing := session.New("alpha", alpha.Dir, 0, 0)
+	existing.ClaudeSessionID = "stale"
+	items, err := planImport(
+		[]herdr.Agent{alpha},
+		[]*session.Session{existing},
+		func(*session.Session) bool { return true },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := printImportRows(&out, items, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "alpha is open in ks, not updated") {
+		t.Errorf("rows = %q", out.String())
+	}
+	if warnings := transcriptWarnings(items); len(warnings) != 0 {
+		t.Errorf("a record left alone should not warn: %v", warnings)
+	}
+}
+
+func TestImportReactivatesStoppedRecord(t *testing.T) {
+	_, fixture, alphaDir, _ := importFixture(t)
+	store, err := session.NewStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := saveRecord(t, store, "alpha", alphaDir, "stale-alpha")
+	old.Status = session.StatusStopped
+	if err := store.Save(old); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _, err := runImportCmd(t, "--from", fixture, "--no-open")
+	if err != nil {
+		t.Fatalf("execute: %v\n%s", err, out)
+	}
+	if got := row(out, "updated", "alpha"); len(got) != 4 || got[3] != alphaID[:8] {
+		t.Errorf("alpha row = %v in:\n%s", got, out)
+	}
+	got, err := store.Load("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != old.ID || got.ClaudeSessionID != alphaID || got.Status != session.StatusActive {
+		t.Errorf("alpha record = %+v", got)
+	}
+	if store.Exists("alpha-2") {
+		t.Error("a stopped record for the directory must not get a -2 twin")
 	}
 }
