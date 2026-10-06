@@ -26,15 +26,17 @@ type fakeKitty struct {
 	launches    []kitty.Launch
 	errs        map[string]error // method name or exact call → error to return
 	onLaunch    func()           // runs inside LaunchTab, standing in for the SessionStart hook
+	onWindows   func() error     // runs inside Windows, to fail one snapshot among several
 	claudeExits bool             // a window launched by LaunchVSplit vanishes at once
 	slept       time.Duration
 }
 
-// newFakeKitty returns an instance holding only the home tab.
+// newFakeKitty returns an instance holding only the home tab, its sidebar
+// tagged as the real one tags itself at startup.
 func newFakeKitty() *fakeKitty {
 	return &fakeKitty{
 		windows: []kitty.Window{
-			{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: fakeTabColumns},
+			{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: fakeTabColumns, Home: true},
 		},
 		nextWindow: 2,
 		nextTab:    2,
@@ -68,6 +70,23 @@ func (f *fakeKitty) addTab(sess *session.Session, withClaude bool) {
 	f.windows = append(f.windows, sidebar)
 }
 
+// addUserTab registers a plain shell tab the user opened in the instance
+// (cmd+t): one window with no ks tag. It returns the tab id.
+func (f *fakeKitty) addUserTab() int {
+	tab := f.nextTab
+	f.nextTab++
+	f.windows = append(f.windows, kitty.Window{
+		ID: f.nextWindow, TabID: tab, TabTitle: "zsh", Title: "zsh", Columns: fakeTabColumns,
+	})
+	f.nextWindow++
+	return tab
+}
+
+// hasTab reports whether any window of the tab is still in the instance.
+func (f *fakeKitty) hasTab(tab int) bool {
+	return slices.ContainsFunc(f.windows, func(w kitty.Window) bool { return w.TabID == tab })
+}
+
 func (f *fakeKitty) record(format string, args ...any) error {
 	call := fmt.Sprintf(format, args...)
 	f.calls = append(f.calls, call)
@@ -90,6 +109,11 @@ func (f *fakeKitty) Windows() ([]kitty.Window, error) {
 	if err := f.record("Windows"); err != nil {
 		return nil, err
 	}
+	if f.onWindows != nil {
+		if err := f.onWindows(); err != nil {
+			return nil, err
+		}
+	}
 	return slices.Clone(f.windows), nil
 }
 
@@ -104,7 +128,9 @@ func (f *fakeKitty) LaunchTab(l kitty.Launch) (int, error) {
 	id := f.nextWindow
 	f.nextWindow++
 	f.windows = append(f.windows, kitty.Window{
-		ID: id, TabID: f.nextTab, Columns: fakeTabColumns, SessionID: varValue(l.Vars),
+		ID: id, TabID: f.nextTab, Columns: fakeTabColumns,
+		SessionID: varValue(l.Vars, kitty.SessionVar),
+		Home:      varValue(l.Vars, kitty.HomeVar) != "",
 	})
 	f.nextTab++
 	return id, nil
@@ -129,7 +155,7 @@ func (f *fakeKitty) LaunchVSplit(l kitty.Launch) (int, error) {
 	}
 	f.windows = append(f.windows, kitty.Window{
 		ID: id, TabID: target.TabID, TabTitle: target.TabTitle,
-		Columns: newCols, SessionID: varValue(l.Vars),
+		Columns: newCols, SessionID: varValue(l.Vars, kitty.SessionVar),
 	})
 	return id, nil
 }
@@ -147,7 +173,7 @@ func (f *fakeKitty) LaunchHSplit(l kitty.Launch) (int, error) {
 	f.nextWindow++
 	f.windows = append(f.windows, kitty.Window{
 		ID: id, TabID: target.TabID, TabTitle: target.TabTitle,
-		Columns: target.Columns, SessionID: varValue(l.Vars),
+		Columns: target.Columns, SessionID: varValue(l.Vars, kitty.SessionVar),
 	})
 	return id, nil
 }
@@ -180,7 +206,62 @@ func (f *fakeKitty) SetTabTitleForWindow(title string, id int) error {
 	return nil
 }
 
-func (f *fakeKitty) FocusWindow(id int) error { return f.record("FocusWindow(%d)", id) }
+func (f *fakeKitty) FocusWindow(id int) error {
+	if err := f.record("FocusWindow(%d)", id); err != nil {
+		return err
+	}
+	f.focus(id)
+	return nil
+}
+
+// focus gives window id the keyboard and shows its tab, as kitty does after
+// focus-window; an unknown id changes nothing. Nothing is recorded.
+func (f *fakeKitty) focus(id int) {
+	w := f.find(id)
+	if w == nil {
+		return
+	}
+	tab := w.TabID
+	for i := range f.windows {
+		f.windows[i].Focused = f.windows[i].ID == id
+		f.windows[i].TabActive = f.windows[i].TabID == tab
+	}
+}
+
+// MoveActiveTab moves the showing tab by steps in the tab order, clamped to
+// the ends, by regrouping the window table in the new order.
+func (f *fakeKitty) MoveActiveTab(steps int) error {
+	if err := f.record("MoveActiveTab(%d)", steps); err != nil {
+		return err
+	}
+	var order []int
+	active := -1
+	for _, w := range f.windows {
+		if slices.Contains(order, w.TabID) {
+			continue
+		}
+		if w.TabActive {
+			active = len(order)
+		}
+		order = append(order, w.TabID)
+	}
+	if active < 0 {
+		return fmt.Errorf("fake: no tab is showing")
+	}
+	to := min(max(active+steps, 0), len(order)-1)
+	tab := order[active]
+	order = slices.Insert(slices.Delete(order, active, active+1), to, tab)
+	var regrouped []kitty.Window
+	for _, t := range order {
+		for _, w := range f.windows {
+			if w.TabID == t {
+				regrouped = append(regrouped, w)
+			}
+		}
+	}
+	f.windows = regrouped
+	return nil
+}
 
 func (f *fakeKitty) CloseTab(tab int) error {
 	if err := f.record("CloseTab(%d)", tab); err != nil {
@@ -190,10 +271,11 @@ func (f *fakeKitty) CloseTab(tab int) error {
 	return nil
 }
 
-// varValue returns the session id from a launch's user variables.
-func varValue(vars []string) string {
+// varValue returns the value of the named user variable in a launch, empty
+// when it is not set.
+func varValue(vars []string, name string) string {
 	for _, v := range vars {
-		if value, ok := strings.CutPrefix(v, kitty.SessionVar+"="); ok {
+		if value, ok := strings.CutPrefix(v, name+"="); ok {
 			return value
 		}
 	}

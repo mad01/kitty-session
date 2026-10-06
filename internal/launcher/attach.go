@@ -39,8 +39,8 @@ type AttachResult struct {
 
 // Attach brings the instance back to where the user left it: every active
 // session whose claude window is gone is resumed, stopped records are left
-// alone, and the most recently focused session (the oldest active one when
-// none was ever focused, which is the first tab) ends up in front. With no
+// alone, and the most recently focused session (the first in tab order when
+// none was ever focused) ends up in front. With no
 // active session, or when that session failed to come back, the home tab is
 // focused.
 func (l *Launcher) Attach() (*AttachResult, error) {
@@ -61,18 +61,18 @@ func (l *Launcher) Attach() (*AttachResult, error) {
 	return res, nil
 }
 
-// Resume brings back every active session whose claude window is gone,
-// oldest first and out of sight, without focusing anything. A command that
-// had to start the instance calls it before adding its own tab, so the tabs
-// keep creation order and the new one comes last.
+// Resume brings back every active session whose claude window is gone, in
+// sidebar order (see sortForResume) and out of sight, without focusing
+// anything. A command that had to start the instance calls it before adding
+// its own tab, so the tabs keep their order and the new one comes last.
 func (l *Launcher) Resume() (*AttachResult, error) {
 	res, _, _, err := l.resumeAll()
 	return res, err
 }
 
-// resumeAll lists the store, resumes the active sessions oldest first and
-// returns the result, the active sessions in that order, and the names that
-// must not be focused because their relaunch failed or exited.
+// resumeAll lists the store, resumes the active sessions in sidebar order
+// and returns the result, the active sessions in that order, and the names
+// that must not be focused because their relaunch failed or exited.
 func (l *Launcher) resumeAll() (*AttachResult, []*session.Session, map[string]bool, error) {
 	sessions, err := l.store.List()
 	if err != nil {
@@ -87,7 +87,7 @@ func (l *Launcher) resumeAll() (*AttachResult, []*session.Session, map[string]bo
 		}
 		active = append(active, s)
 	}
-	sortByCreation(active)
+	sortForResume(active)
 	skip := l.resume(active, res)
 	return res, active, skip, nil
 }
@@ -148,16 +148,26 @@ func (l *Launcher) settle(launched []string, res *AttachResult) []string {
 	return exited
 }
 
-// focusHome focuses the instance's first window: the home tab's sidebar
-// while no session tab exists, otherwise the first session's sidebar.
+// focusHome focuses the home tab's sidebar, or the instance's first window
+// when no tab carries the home tag: an instance an older ks started, or one
+// where session tabs hold the instance up.
 func (l *Launcher) focusHome(res *AttachResult) {
-	anchor, err := l.anyWindow()
-	if err == nil {
-		err = l.kitty.FocusWindow(anchor)
-	}
-	if err != nil {
+	if err := l.focusHomeWindow(); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Errorf("could not focus the home tab: %w", err))
 	}
+}
+
+// focusHomeWindow takes a snapshot and focuses the window homeWindow picks.
+func (l *Launcher) focusHomeWindow() error {
+	all, err := l.kitty.Windows()
+	if err != nil {
+		return err
+	}
+	id, err := homeWindow(all)
+	if err != nil {
+		return err
+	}
+	return l.kitty.FocusWindow(id)
 }
 
 // focusTarget picks the session with the latest FocusedAt; with no stamps
@@ -172,17 +182,31 @@ func focusTarget(active []*session.Session) *session.Session {
 	return best
 }
 
-// sortByCreation orders sessions oldest first, by name when stamps tie, so
-// attach opens tabs in the order the sessions were made and the sidebar's
-// tab order survives a restart.
-func sortByCreation(sessions []*session.Session) {
+// sortForResume orders sessions the way their tabs should come back: the
+// ones ks move ranked (Position > 0) first, by rank, then the rest oldest
+// first, so a moved order survives a restart and sessions made since land
+// after it. Equal ranks and equal stamps fall back to creation, then name.
+func sortForResume(sessions []*session.Session) {
 	sort.SliceStable(sessions, func(i, j int) bool {
-		a, b := createdAt(sessions[i]), createdAt(sessions[j])
-		if !a.Equal(b) {
-			return a.Before(b)
+		a, b := sessions[i], sessions[j]
+		if (a.Position > 0) != (b.Position > 0) {
+			return a.Position > 0
 		}
-		return sessions[i].Name < sessions[j].Name
+		if a.Position != b.Position {
+			return a.Position < b.Position
+		}
+		return createdBefore(a, b)
 	})
+}
+
+// createdBefore reports whether a was made before b, by name when the stamps
+// tie.
+func createdBefore(a, b *session.Session) bool {
+	at, bt := createdAt(a), createdAt(b)
+	if !at.Equal(bt) {
+		return at.Before(bt)
+	}
+	return a.Name < b.Name
 }
 
 // createdAt parses the record's creation stamp; one that does not parse

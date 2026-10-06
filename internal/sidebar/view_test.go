@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -312,4 +313,45 @@ func TestViewHomeHint(t *testing.T) {
 			t.Errorf("filter line = %q", got[2])
 		}
 	})
+}
+
+func TestViewWaitLabelOnInputRows(t *testing.T) {
+	fb := &fakeBackend{agents: []Agent{
+		{Name: "asked", Title: "Approve the merge", State: StateInput, Waiting: 12 * time.Minute, Tab: 1},
+		{Name: "fresh", Title: "Just asked", State: StateInput, Waiting: 30 * time.Second, Tab: 2},
+		{Name: "long", Dir: "/home/u/code/long", State: StateInput, Waiting: 90 * time.Minute, Tab: 3},
+		{Name: "finished", Title: "Done", State: StateDone, Waiting: time.Hour, Tab: 4},
+	}}
+	m := newTestModel(t, fb, "demo")
+	got := lines(m)
+	want := map[int]string{
+		4:  "│   waiting 12m · Approve the mer… │",
+		6:  "│   Just asked" + strings.Repeat(" ", 21) + "│",
+		8:  "│   waiting 1h30m · ~/code/long    │",
+		10: "│   Done" + strings.Repeat(" ", 27) + "│",
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("line %d\n got %q\nwant %q", i, got[i], w)
+		}
+	}
+	assertGeometry(t, m, DefaultWidth, testLines)
+}
+
+func TestShortDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{time.Minute, "1m"},
+		{59*time.Minute + 59*time.Second, "59m"},
+		{time.Hour, "1h00m"},
+		{90 * time.Minute, "1h30m"},
+		{26*time.Hour + 5*time.Minute, "26h05m"},
+	}
+	for _, tt := range tests {
+		if got := shortDuration(tt.d); got != tt.want {
+			t.Errorf("shortDuration(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
 }

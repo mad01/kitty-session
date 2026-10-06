@@ -101,7 +101,10 @@ func newLauncher(store *session.Store, b backend, sidebarWidth int, exe string) 
 // Open creates a new session or focuses/reopens a stored one, then saves the
 // record. A tab is built hidden and shown with one focus switch at the end,
 // which req.Background skips. Either way the home tab is retired afterwards:
-// a session tab now exists to hold the instance up.
+// a session tab now exists to hold the instance up. Once any session carries
+// a rank from ks move, a launch ends by ranking every open session again by
+// the tab order (rerank), so the new tab, which kitty puts last, takes the
+// bottom rank.
 func (l *Launcher) Open(req Request) (*Result, error) {
 	sess, err := l.target(req)
 	if err != nil {
@@ -144,6 +147,7 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 		warnings = append(warnings, l.show(w.claudeID)...)
 	}
 	warnings = append(warnings, l.retireHome()...)
+	warnings = append(warnings, l.rerank()...)
 	return &Result{Session: saved, Warnings: warnings}, nil
 }
 

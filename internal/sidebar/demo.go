@@ -29,7 +29,7 @@ func NewDemoBackend() *DemoBackend {
 			{
 				Name: "thismoon", Dir: filepath.Join(src, "thismoon"),
 				Title: "Mods overview and integration plan for the events service",
-				State: StateInput, Tab: 1,
+				State: StateInput, Tab: 1, Waiting: 12 * time.Minute,
 			},
 			{
 				Name: "dropbrain-app", Dir: filepath.Join(src, "dropbrain-app"),

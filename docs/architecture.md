@@ -36,9 +36,9 @@ cmd/ks
 | Package | Responsibility |
 |---|---|
 | `internal/instance` | `Ensure(cfg, opts)` pings the configured socket. When nothing answers it removes the stale socket file, runs `kitty --detach --listen-on <socket> -o ...` with `ks sidebar` as the first window, and polls until the socket answers (100 ms, up to 10 s). `Connect` for commands that must not start it; `Client` for commands that must work while it is down; `Shutdown` closes every window. |
-| `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Attach()`, `Alive(sess)`. `SuggestName(dir)` (base name plus git branch) and `ScratchDir(base)`. `SidebarBackend` maps the sidebar's actions onto all of that and resolves each row's state (below). Layout and teardown sit behind a small backend interface so tests run without kitty. |
+| `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Move(name, where)` (focus the tab, step it with `move_tab_forward`/`move_tab_backward`, refocus, then rank every open session's `position` by the new tab order), `Attach()`, `Alive(sess)`. `SuggestName(dir)` (base name plus git branch) and `ScratchDir(base)`. `SidebarBackend` maps the sidebar's actions onto all of that and resolves each row's state (below). Layout and teardown sit behind a small backend interface so tests run without kitty. |
 | `internal/sidebar` | The agent list: model, view, key and mouse handling, menu, picker, demo backend. `Run(Options{Session, Width, Backend})`. Polls `Backend.List` every 3 s. |
-| `internal/hooks` | `Install`, `Uninstall` and `Installed` for the five ks matcher groups in `~/.claude/settings.json`; other tools' entries are kept. |
+| `internal/hooks` | `Install`, `Uninstall` and `Installed` for the six ks matcher groups in `~/.claude/settings.json`; other tools' entries are kept. |
 | `internal/herdr` | `Load(path)` parses herdr's `session.json` (format version 3 only), `Agents()` flattens workspaces, tabs and panes into the claude panes ks can import plus the skipped ones with a reason, `Running(dir)` dials `herdr.sock` to tell whether herdr still owns them. Stdlib only; `ks import` does the wiring. |
 | `internal/procinfo` | `ParentOf(pid)` and `CommOf(pid)` via the darwin `kern.proc.pid` sysctl; `ErrUnsupported` elsewhere. Used by the hook to tell the Claude kitty launched from one nested inside the session. |
 | `internal/kitty` | `Client`: every `kitty @` call against one `--to` socket; `Start` runs the kitty binary itself. Parses `@ ls` JSON into `Window` values. No knowledge of sessions beyond `SessionVar`, the user variable that tags ks windows. |
@@ -83,11 +83,11 @@ Session files are small JSON:
 }
 ```
 
-The `kitty_*` IDs are ephemeral. Kitty numbers tabs and windows from 1 in every instance, so they go stale when the instance restarts, and a stored id can then point at another session's window. That is why the launcher never trusts an id alone. Every window it launches carries the kitty user variable `KS_SESSION_ID=<id>` (`kitty @ launch --var`), visible as `user_vars` in `kitty @ ls`. A window counts as the session's only when the tag matches.
+The `kitty_*` IDs are ephemeral. Kitty numbers tabs and windows from 1 in every instance, so they go stale when the instance restarts, and a stored id can then point at another session's window. That is why the launcher never trusts an id alone. Every window it launches carries the kitty user variable `KS_SESSION_ID=<id>` (`kitty @ launch --var`), visible as `user_vars` in `kitty @ ls`. A window counts as the session's only when the tag matches. The home tab's sidebar carries `KS_HOME=1` the same way: the instance's first window gets no `--var`, so `instance.Ensure` sets it right after a start and the sidebar sets it on its own window too; the launcher passes it as `--var` when it recreates the tab. A tab with neither tag is one the user opened in the instance; the launcher never closes or recreates it.
 
 `id` is random and stable across renames (also exported as the `KS_SESSION_ID` environment variable, found with `Store.FindByID`). `status` is `active` or `stopped` (absent in files from older versions, which read as `active`). `claude_session_id` and `claude_transcript_path` are what Claude Code reported on its last `SessionStart` hook; together they let a reopen bring back a conversation with `claude --resume <id>` while the transcript file still exists.
 
-`focused_at` is stamped whenever the launcher creates or focuses the session; attach brings the newest one to the front. `viewed_at` is stamped by the session's own sidebar while its tab is the active one (at most every 10 s); a state file `idle` newer than it shows the row as `done`. Files written by older `ks` versions may still carry `kitty_shell_window_id` and `kitty_summary_window_id`; the launcher clears them on the next reopen. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
+`focused_at` is stamped whenever the launcher creates or focuses the session; attach brings the newest one to the front. `viewed_at` is stamped by the session's own sidebar while its tab is the active one (at most every 10 s); a state file `idle` newer than it shows the row as `done`. `position` is the session's rank among the sessions with a tab, counted from 1: written by `ks move`, and from then on refreshed by every tab launch, so a reopened session takes the bottom rank. Absent until a move; attach opens ranked sessions first, by rank, then the rest by creation. Files written by older `ks` versions may still carry `kitty_shell_window_id` and `kitty_summary_window_id`; the launcher clears them on the next reopen. `Store.Save` writes through a temp file and rename, so readers never see a partial record.
 
 State files are even smaller, see [Hooks and state detection](hooks-and-state.md#state-file).
 
@@ -122,7 +122,7 @@ cli.runNew / cli.runTmp / cli.runOpen / SidebarBackend.New / SidebarBackend.Focu
 
 The claude window never gets `--title`: Claude Code sets the window title itself through OSC, and that title (`◐ ...` while working, `✳ ...` idle) is a state signal. `PATH` is forwarded because `kitty @ launch` runs with the instance's environment, not the caller's. Every launch also passes `--env NAME` without a value for the agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`), which unsets them in the child; `Client.Start` already drops the Claude Code session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_EFFORT`) and every `KS_*` and `KITTY_*` variable except `KITTY_CONFIG_DIRECTORY` from the instance's own environment, leaving the user's `CLAUDE_CONFIG_DIR`, Bedrock and Vertex flags and auth tokens in place. `KS_SESSION_NAME` and `KS_SESSION_ID` let the `ks _hook` handler find the record and its state file. The record is reloaded before the final save because the `SessionStart` hook may already have written `claude_session_id` while claude was starting. Callers print the launcher's warnings (geometry, focus, leftover tabs) themselves; the sidebar backend drops them, since the UI has one status line and the action itself succeeded.
 
-Closing is the mirror image. `ks close` and the sidebar's close/delete actions call `Launcher.Close(sess, keep)`. It removes the state file, closes every tab holding a window tagged with the session id, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`. An instance that cannot be reached is a warning; the record is handled regardless.
+Closing is the mirror image. `ks close` and the sidebar's close/delete actions call `Launcher.Close(sess, keep)`. It removes the state file, closes every tab holding a window tagged with the session id, and then marks the record `stopped` (keep) or moves it to `sessions/trash/`. An instance that cannot be reached is a warning; the record is handled regardless. A session's own sidebar also closes its tab by itself once its claude window is gone, through the same `closeTabs`, from the snapshot its `List` tick already holds; the record and the state file are left alone (`internal/launcher/reap.go`).
 
 ## Flow: attach
 
@@ -132,9 +132,9 @@ Bare `ks`.
 cli.runAttach
     └── instance.Ensure(cfg)                 start the instance if needed
     └── launcher.Attach()
-          ├── store.List()                   sorted by file name
+          ├── store.List()                   sorted for resume: position (ks move) first, then creation
           ├── stopped records → counted, untouched
-          ├── target = the active record with the newest focused_at (first by name if none)
+          ├── target = the active record with the newest focused_at (the first in that order if none)
           ├── for each active record: Alive? → counted as running
           │                           else  → Open(ResumeStored), 100 ms apart
           ├── wait 2 s, re-check every launched claude window: gone again → Exited, else Resumed
@@ -165,6 +165,8 @@ SidebarBackend.List():
             no glyph: state file working / input      → working / input
             otherwise                                 → idle
         Title = title minus glyph, or ~-shortened dir; Tab = position of the session's tab in kitty's order
+        if sess is the own session:
+            reapIfGone(all, lv)                        # claude seen then gone, or never seen for 30 s → closeTabs (reap.go)
 ```
 
 `ks list` has its own, older chain: `stopped` when the record is stopped or `Launcher.Alive` says no, a fresh state file's value if there is one, else `DetectState(kitty.GetText(...))` on the pane text. It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.

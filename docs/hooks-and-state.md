@@ -24,16 +24,14 @@ All three write or read through the same interface: a state file at `~/.config/k
 
 ### Freshness
 
-- Anything within 10 seconds is **fresh** and trusted outright.
-- A fresh `working` entry is trusted directly.
-- A stale `working` entry less than 5 minutes old is still honored *unless* terminal text clearly says otherwise (idle prompt or visible permission prompt).
-- Any state older than 10 seconds that isn't `working` falls through to terminal detection.
+`internal/state/file.go` has one threshold: `freshness = 10 * time.Second`, behind `IsFresh`. A state file younger than that is **fresh**.
 
-The two thresholds live in `internal/state/file.go` (`freshness = 10 * time.Second`, `IsRecentlyWorking` = 5 minutes).
+- `ks list` trusts a fresh file outright, whatever it says. An older file is ignored and the pane text is classified instead (section 3).
+- The sidebar lets a fresh `input` or `working` win over the title glyph. Past 10 s the glyph leads, with one exception: an `input` entry counts whatever its age, until a later hook replaces it, so an unanswered prompt stays visible. Its full order is in [Sidebar guide](tui.md#states).
 
 ## 1. Claude Code hooks (preferred)
 
-Claude Code fires [hook events](https://docs.claude.com/en/docs/claude-code/hooks) at specific points in its lifecycle. `ks hooks install` wires five of them to a hidden `ks _hook` handler, which writes the state file and keeps the session record's lifecycle fields current.
+Claude Code fires [hook events](https://docs.claude.com/en/docs/claude-code/hooks) at specific points in its lifecycle. `ks hooks install` wires six of them to a hidden `ks _hook` handler, which writes the state file and keeps the session record's lifecycle fields current.
 
 ### Install / uninstall
 
@@ -44,15 +42,20 @@ ks hooks uninstall  # strips them
 
 Both commands are idempotent. Install re-runs remove any stale ks entries (for example, entries pointing at an old binary path) before writing the fresh set. Uninstall removes any matcher whose command matches `ks _hook`, whether written with `~/` or an absolute path.
 
+An install made before an event was added to `ks` lacks that event. The sidebar's `hooks status` menu entry reports it as missing; rerun `ks hooks install` to add it.
+
 ### Event → state map
 
 | Event | Matcher | State written | Extra effect |
 |---|---|---|---|
+| `UserPromptSubmit` | *(empty)* | `working` | Fires when you send a message, before any tool call, so a stale `input` clears on your next message even when you dismissed the prompt |
 | `PreToolUse` | `.*` | `working` | |
 | `Stop` | *(empty)* | `idle` | |
 | `Notification` | `permission_prompt\|elicitation_dialog` | `input` | — |
 | `SessionStart` | *(empty)* | `waiting` | Stores the payload's `session_id` and `transcript_path` on the record as `claude_session_id` / `claude_transcript_path` and sets `status` to `active` |
 | `SessionEnd` | `prompt_input_exit\|logout` | *(none)* | Sets `status` to `stopped` and removes the state file. The handler checks the reason again, so a `clear`, `resume` or `other` that slips through is still ignored |
+
+`Notification` is registered for `permission_prompt` and `elicitation_dialog` only. Claude Code also sends `idle_prompt` after about a minute at an empty prompt. Mapping it to `input` would turn every idle session into a false "waiting on you" and bury the real ones. `done` and `idle` already cover that case. Should another type ever belong here, it is one more alternative in the `Notification` matcher in `internal/hooks/hooks.go` and a case in `stateForEvent` in `internal/cli/hook.go`.
 
 Every launch path (`ks new`, `ks open`, `ks tmp`, the sidebar) exports two variables into both of the session's windows: `KS_SESSION_NAME=<name>` and `KS_SESSION_ID=<id>`. The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the sidebar does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
 
@@ -87,10 +90,11 @@ Simplified example after `ks hooks install`:
         ]
       }
     ],
-    "Stop":         [ /* ... */ ],
-    "Notification": [ /* matcher "permission_prompt|elicitation_dialog" */ ],
-    "SessionStart": [ /* ... */ ],
-    "SessionEnd":   [ /* matcher "prompt_input_exit|logout" */ ]
+    "UserPromptSubmit": [ /* ... */ ],
+    "Stop":             [ /* ... */ ],
+    "Notification":     [ /* matcher "permission_prompt|elicitation_dialog" */ ],
+    "SessionStart":     [ /* ... */ ],
+    "SessionEnd":       [ /* matcher "prompt_input_exit|logout" */ ]
   }
 }
 ```
@@ -143,7 +147,7 @@ ls ~/.config/ks/state/
 cat ~/.config/ks/state/<name>.json
 ```
 
-`ks list` prints the current state alongside the name and directory. The sidebar's dot is computed separately (it adds `done` and reads the title glyph instead of the pane text), so the two can differ for a moment.
+`ks list` prints the current state alongside the name and directory. The sidebar's dot is computed separately (it adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it), so the two can differ.
 
 ## Cleaning state
 

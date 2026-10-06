@@ -27,7 +27,7 @@ Fix: install [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
 
 Symptom: the tab comes back with the sidebar only; `ks list` says `stopped`.
 
-Bare `ks` reports this as `ks: <name> exited right after launch`. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists, `claude --continue` when the directory has any transcript, and a bare `claude` otherwise. A missing conversation is not the cause. Look at what Claude printed before the window closed: `ks open <name>` again puts a fresh claude beside the surviving sidebar, and the message is visible for a moment. Usual causes are a `claude` that is not on the `PATH` of the shell you ran `ks` from, or a transcript Claude Code purged between the `ls` check and the start.
+Bare `ks` reports this as `ks: <name> exited right after launch`. A reopen starts `claude --resume <id>` when the record has a Claude session id whose transcript file still exists, `claude --continue` when the directory has any transcript, and a bare `claude` otherwise. A missing conversation is not the cause. Look at what Claude printed before the window closed. The sidebar closes a tab whose claude is gone within a few seconds (30 seconds when it never saw the window); until then `ks open <name>` puts a fresh claude beside it, with the message visible for a moment. Usual causes are a `claude` that is not on the `PATH` of the shell you ran `ks` from, or a transcript Claude Code purged between the `ls` check and the start.
 
 Older `ks` builds passed the environment of a Claude Code session straight into the instance. That turned every claude in it into a child session with transcript saving off, and the footer said so. Current builds scrub those variables; if you still see that footer, `ks quit` and start the instance with the new binary.
 
@@ -75,7 +75,7 @@ Fix: `ks hooks install`. See [Hooks and state detection](hooks-and-state.md).
 
 ## State badge stuck on `working`
 
-The state file says `working` and is less than five minutes old. `ks` trusts that until the terminal clearly shows `idle` or `input`.
+A `working` state file is trusted for 10 seconds. After that `ks list` classifies the pane text and the sidebar follows the title glyph. A badge stuck on `working` past that means the pane still reads as busy, or a spinner glyph is still in the title.
 
 If Claude actually finished and the hooks were installed, the `Stop` hook should have overwritten the state file with `idle`. Check:
 

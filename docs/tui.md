@@ -11,7 +11,7 @@ ks sidebar --agent    # same, plus the background Haiku state monitor
 ks _sidebar-demo      # the sidebar on fake agents; no kitty needed
 ```
 
-The home tab exists only while no session tab does: the first session tab closes it (unless its sidebar runs `--agent`, which would take the state monitor with it), and closing the last session tab brings it back so the instance stays up. With the tab bar hidden, a kitty `goto_tab 1` therefore lands on a session rather than on the home tab's blank right half. In the home tab the sidebar shows `no agent in this tab · enter to focus · n for new` under its header.
+The home tab exists only while no session tab does: the first session tab closes it (unless its sidebar runs `--agent`, which would take the state monitor with it), and closing the last session tab brings it back when no other tab would be left, so the instance stays up. ks knows the home tab by the `KS_HOME` user variable its sidebar sets on its own window. A tab you open yourself in the instance (cmd+t) carries neither that nor a session tag, so ks leaves it alone, and it keeps the instance up on its own. With the tab bar hidden, a kitty `goto_tab 1` therefore lands on a session rather than on the home tab's blank right half. In the home tab the sidebar shows `no agent in this tab · enter to focus · n for new` under its header.
 
 Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instance not running` otherwise. `--agent` is a fallback for when the Claude Code hooks are not installed; see [Hooks and state detection](hooks-and-state.md). `_sidebar-demo` is hidden and takes `--width` and `--session` to tune the preview.
 
@@ -28,7 +28,7 @@ The footer has two labels, `new` and `menu`, and the line above it shows the res
 
 | Dot | State | Meaning |
 |---|---|---|
-| `●` pulsing red | `input` | Claude is waiting on you: a permission prompt or a question |
+| `●` pulsing red | `input` | Claude is waiting on you: a permission prompt or a question. It stays until you answer; after a minute the title line leads with how long (`waiting 12m`) |
 | `●` | `done` | Claude finished a turn and you have not looked at the tab since |
 | `●` pulsing amber | `working` | Claude is processing |
 | `○` | `idle` | Claude is at its prompt and the result has been seen |
@@ -40,14 +40,15 @@ Each row's state comes from one `kitty @ ls` snapshot plus the session's state f
 2. State file says `input` and is less than 10 s old: `input`.
 3. State file says `working` and is less than 10 s old: `working`. A fresh working file outranks the `✳` title below, because `✳` is also one of Claude's spinner frames, so a snapshot mid-turn can catch it.
 4. Claude's title starts with a spinner glyph: `working`.
-5. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
-6. No glyph: the state file's `working` or `input` as is; `idle`, `waiting`, or no file at all: `idle`.
+5. State file says `input`, however old: `input`. The hooks write `input` when a prompt appears. Nothing replaces it until the next event (your next message, a tool call, the end of the turn, the session ending), so an unanswered prompt keeps its row red for hours. The spinner title of rule 4 is the one thing that outranks it. It means you have answered and Claude is mid-turn, which the hooks do not report until its next tool call.
+6. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
+7. No glyph: the state file's `working` as is; `idle`, `waiting`, or no file at all: `idle`.
 
 `viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. Without the hooks there is no state file, and `done` and `input` never appear; the title glyph still gives `working` and `idle`.
 
 ### Sort
 
-Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order the sessions were created before adding anything new, so the numbering survives a restart. A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
+Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order `ks move` last left them, then the rest in the order the sessions were created, before adding anything new, so the numbering survives a restart. `ks move <name> <where>` (or `ks move <where>` from inside a session) reorders the tabs; see the [command reference](commands.md#ks-move-name-where). A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
 
 ## Keys
 
@@ -66,7 +67,7 @@ Rows follow the tab order of the ks instance: the top row is the first tab, whic
 | `m` | Open the menu |
 | `?` | Show the keys popup; `esc`, `?` or `q` closes it |
 
-`ctrl+c` does nothing: the sidebar never exits on its own. To end ks use the menu's `quit ks` or `ks quit`.
+`ctrl+c` does nothing: the sidebar never exits on its own. Its tab closes once its claude is gone, see [When claude exits](#when-claude-exits). To end ks use the menu's `quit ks` or `ks quit`.
 
 ### Between the sidebar and claude
 
@@ -90,6 +91,12 @@ The cursor row turns into an input pre-filled with the current name. `enter` sav
 
 Both pop a confirmation with the agent's name. `y` or `enter` confirms, `n` or `esc` cancels. Close removes the tab and marks the record `stopped`; `enter` on the row later brings it back. Delete also moves the record to `~/.config/ks/sessions/trash/`.
 
+## When claude exits
+
+A session tab closes on its own once its claude window is gone, whether claude ended with `/exit`, crashed, or was killed. The tab's sidebar checks its claude window on every refresh. Once it has seen the window and then finds it missing, it closes its own tab the way `c` does. The home tab is recreated first when it was the last session tab. A claude that never shows up within 30 seconds of the sidebar's first refresh (bad flags, a missing binary) closes the tab as well. Another window of the session still in the tab, a shell split for one, holds the tab open until it exits too.
+
+The record is not touched. `/exit` is marked `stopped` by the SessionEnd hook, and the row sits at the bottom until `enter` reopens it. A crash leaves the record `active`, so the next `ks` brings the session back. The home tab's sidebar never closes anything.
+
 ## Trash and restore (`u`)
 
 A popup lists the trashed sessions; `j`/`k` move, `enter` restores, `esc` cancels. A restored session comes back `stopped`. `enter` on its row recreates the tab, with `claude --resume` when its transcript is still there and `--continue` otherwise.
@@ -99,7 +106,7 @@ A popup lists the trashed sessions; `j`/`k` move, `enter` restores, `esc` cancel
 A popup above the footer: `new agent`, `rename`, `close (keep)`, `delete`, `restore`, `shell split`, `hooks status`, `keys`, `quit ks`. `j`/`k` move, `enter` runs the entry, `esc`, `m` or `q` close it.
 
 - `shell split` opens a shell below this tab's claude window, in the session directory, taking roughly a third of the height. The home tab has no agent, so there the entry reports that instead.
-- `hooks status` says whether the five Claude Code hook events are registered in `~/.claude/settings.json`, or which are missing.
+- `hooks status` says whether the six Claude Code hook events are registered in `~/.claude/settings.json`, or which are missing. An event missing from an older install is added by `ks hooks install`.
 - `quit ks` closes every window of the instance, like `ks quit`. Records stay active and come back on the next `ks`.
 
 ## Width

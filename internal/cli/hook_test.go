@@ -56,6 +56,12 @@ func TestHook(t *testing.T) {
 func hookCases() []hookCase {
 	return []hookCase{
 		{
+			name:      "UserPromptSubmit writes working",
+			session:   "ks-hook-test-prompt",
+			payload:   `{"hook_event_name":"UserPromptSubmit","prompt":"go on","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "working",
+		},
+		{
 			name:      "PreToolUse writes working",
 			session:   "ks-hook-test-pretool",
 			payload:   `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp","permission_mode":"default"}`,

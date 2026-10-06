@@ -46,6 +46,7 @@ type SidebarBackend struct {
 
 	mu         sync.Mutex // guards lastViewed; List runs off the UI loop
 	lastViewed time.Time
+	reap       reaper // closes the own tab once its claude is gone; see reapIfGone
 }
 
 // NewSidebarBackend returns the backend for the instance behind client.
@@ -85,6 +86,8 @@ func newSidebarBackend(l *Launcher, cfg *config.Config, ownID string) *SidebarBa
 // instance snapshot. Windows are matched to records by their session tag.
 // When the own session's tab is the active one, its record is stamped as
 // viewed (at most once per viewedDebounce) before its state is resolved.
+// Once the own session's claude window is gone, its tab is closed from the
+// same snapshot (reapIfGone).
 func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	sessions, err := b.l.store.List()
 	if err != nil {
@@ -105,6 +108,9 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 			}
 		}
 		agents = append(agents, b.agent(sess, lv, own, pos[lv.tabID()]))
+		if own {
+			b.reapIfGone(all, lv)
+		}
 	}
 	return agents, nil
 }
@@ -142,14 +148,25 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 	if s, at, err := b.readState(sess.Name); err == nil {
 		in.fileState, in.fileAt = s, at
 	}
+	st := resolveState(in)
 	return sidebar.Agent{
-		Name:  sess.Name,
-		Dir:   sess.Dir,
-		Title: b.title(in, sess.Dir),
-		State: resolveState(in),
-		Tab:   tab,
-		Own:   own,
+		Name:    sess.Name,
+		Dir:     sess.Dir,
+		Title:   b.title(in, sess.Dir),
+		State:   st,
+		Waiting: b.waiting(st, in.fileAt),
+		Tab:     tab,
+		Own:     own,
 	}
+}
+
+// waiting is how long an input row has been waiting on the user: the age of
+// the state file that reported the prompt. Every other state reports zero.
+func (b *SidebarBackend) waiting(st sidebar.State, fileAt time.Time) time.Duration {
+	if st != sidebar.StateInput || fileAt.IsZero() {
+		return 0
+	}
+	return max(b.l.now().Sub(fileAt), 0)
 }
 
 // stateInput is everything resolveState looks at for one session.
@@ -168,13 +185,23 @@ type stateInput struct {
 //	state file fresh and input                      → input
 //	state file fresh and working                    → working
 //	title glyph working                             → working
+//	state file input, whatever its age              → input
 //	title glyph idle (✳)                            → done if the state file says idle later than viewed_at, else idle
-//	no glyph: state file working / input            → working / input
+//	no glyph: state file working                    → working
 //	anything else (idle, waiting, no state file)    → idle
 //
 // A fresh working state file outranks the ✳ idle title because ✳ is also one
 // of Claude Code's spinner frames, so a mid-turn snapshot can catch it while
 // the hooks already know the turn is still running.
+//
+// An input state file is sticky. The hooks write it when Claude shows a
+// permission prompt or a question, and nothing replaces it until the next
+// event: UserPromptSubmit or PreToolUse (working), Stop (idle) or SessionEnd
+// (file removed). So a prompt left unanswered keeps its row at input however
+// old the file is. The one signal that outranks a stale input is a working
+// title glyph: the user has answered and Claude is mid-turn, which no hook
+// reports before its next tool call. A fresh input still beats that glyph,
+// since the title can lag the hooks when the prompt appears.
 func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
@@ -187,23 +214,23 @@ func resolveState(in stateInput) sidebar.State {
 	if fresh && fileState == claude.StateWorking {
 		return sidebar.StateWorking
 	}
-	if titleState, _, ok := claude.ParseTitle(in.title); ok {
-		if titleState == claude.StateWorking {
-			return sidebar.StateWorking
-		}
+	titleState, _, hasGlyph := claude.ParseTitle(in.title)
+	if hasGlyph && titleState == claude.StateWorking {
+		return sidebar.StateWorking
+	}
+	if fileState == claude.StateNeedsInput {
+		return sidebar.StateInput
+	}
+	if hasGlyph { // the idle glyph ✳
 		if fileState == claude.StateIdle && in.fileAt.After(in.viewedAt) {
 			return sidebar.StateDone
 		}
 		return sidebar.StateIdle
 	}
-	switch fileState {
-	case claude.StateWorking:
+	if fileState == claude.StateWorking {
 		return sidebar.StateWorking
-	case claude.StateNeedsInput:
-		return sidebar.StateInput
-	default:
-		return sidebar.StateIdle
 	}
+	return sidebar.StateIdle
 }
 
 // title is the claude window's title minus its state glyph, or the session

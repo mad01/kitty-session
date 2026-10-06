@@ -42,6 +42,7 @@ var (
 
 	nameStyle   = lipgloss.NewStyle().Foreground(colorTextPri).Bold(true)
 	titleStyle  = lipgloss.NewStyle().Foreground(colorMuted)
+	waitStyle   = lipgloss.NewStyle().Foreground(colorDanger) // "waiting 12m" on an input row
 	markerStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	plainStyle  = lipgloss.NewStyle()
 

@@ -14,7 +14,7 @@ import (
 const lsFixture = `[{"id":1,"tabs":[
   {"id":1,"title":"ks","is_active":false,"windows":[
     {"id":1,"title":"ks","columns":158,"lines":39,"is_focused":false,
-     "user_vars":{"KS_HOME_AGENT":"1"}}]},
+     "user_vars":{"KS_HOME":"1","KS_HOME_AGENT":"1"}}]},
   {"id":2,"title":"demo","is_active":true,"windows":[
     {"id":2,"title":"ks","columns":36,"lines":39,"is_focused":false,
      "user_vars":{"KS_SESSION_ID":"abc"}},
@@ -180,6 +180,35 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 	}
 }
 
+func TestMoveActiveTabRunsOneActionPerStep(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps int
+		want  [][]string
+	}{
+		{"forward two", 2, [][]string{
+			{"action", "move_tab_forward"}, {"action", "move_tab_forward"},
+		}},
+		{"backward one", -1, [][]string{{"action", "move_tab_backward"}}},
+		{"zero touches nothing", 0, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, calls := newFake("", nil)
+			if err := c.MoveActiveTab(tc.steps); err != nil {
+				t.Fatalf("MoveActiveTab: %v", err)
+			}
+			var got [][]string
+			for _, call := range *calls {
+				got = append(got, call[3:]) // after `@ --to <sock>`
+			}
+			if !slices.EqualFunc(got, tc.want, slices.Equal) {
+				t.Errorf("calls = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLaunchParsesTheWindowID(t *testing.T) {
 	c, _ := newFake("42\n", nil)
 	id, err := c.LaunchTab(Launch{Match: 1, Command: []string{"sh"}})
@@ -292,7 +321,7 @@ func TestWindows(t *testing.T) {
 		t.Fatalf("Windows: %v", err)
 	}
 	want := []Window{
-		{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: 158, HomeAgent: true},
+		{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: 158, Home: true, HomeAgent: true},
 		{
 			ID: 2, TabID: 2, TabTitle: "demo", TabActive: true,
 			Title: "ks", Columns: 36, SessionID: "abc",

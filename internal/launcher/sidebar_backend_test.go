@@ -58,6 +58,7 @@ func TestResolveState(t *testing.T) {
 	fresh := now.Add(-time.Second)
 	stale := now.Add(-time.Minute)
 	viewed := now.Add(-10 * time.Minute)
+	hoursOld := now.Add(-3 * time.Hour)
 	tests := []struct {
 		name string
 		in   stateInput
@@ -201,6 +202,35 @@ func TestResolveState(t *testing.T) {
 			"no glyph, nothing",
 			stateInput{active: true, hasWindow: true, title: ""},
 			sidebar.StateIdle,
+		},
+		{
+			"input hours old stays input under the idle glyph",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				fileState: "input", fileAt: hoursOld, viewedAt: viewed,
+			},
+			sidebar.StateInput,
+		},
+		{
+			"input hours old loses to a working title",
+			stateInput{
+				active:    true,
+				hasWindow: true,
+				title:     "◐ busy",
+				fileState: "input",
+				fileAt:    hoursOld,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"input hours old, no title",
+			stateInput{active: true, hasWindow: true, fileState: "input", fileAt: hoursOld},
+			sidebar.StateInput,
+		},
+		{
+			"stopped record with an input file",
+			stateInput{hasWindow: true, title: "✳ Claude Code", fileState: "input", fileAt: hoursOld},
+			sidebar.StateStopped,
 		},
 		{
 			"unknown state file value",
@@ -582,14 +612,16 @@ func TestSessionActions(t *testing.T) {
 }
 
 func TestHooksSummary(t *testing.T) {
-	all := []string{"PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd"}
+	all := []string{
+		"UserPromptSubmit", "PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd",
+	}
 	tests := []struct {
 		installed []string
 		want      string
 	}{
 		{nil, "hooks: none registered (ks hooks install)"},
-		{all, "hooks: all 5 events registered"},
-		{[]string{"PreToolUse", "Notification"}, "hooks: missing Stop, SessionStart, SessionEnd"},
+		{all, "hooks: all 6 events registered"},
+		{[]string{"PreToolUse", "Notification"}, "hooks: missing UserPromptSubmit, Stop, SessionStart, SessionEnd"},
 	}
 	for _, tt := range tests {
 		if got := hooksSummary(tt.installed); got != tt.want {
@@ -677,5 +709,41 @@ func TestFocused(t *testing.T) {
 	f.errs["Windows"] = errSocket
 	if _, err := b.Focused(); !errors.Is(err, errSocket) {
 		t.Fatalf("Focused with a dead instance: err = %v, want %v wrapped", err, errSocket)
+	}
+}
+
+func TestListReportsHowLongAnInputRowHasWaited(t *testing.T) {
+	b, f, clock := newTestBackend(t)
+	states := fakeStates{
+		"asked": {"input", clock.Add(-30 * time.Minute)},
+		"busy":  {"working", clock.Add(-30 * time.Minute)},
+	}
+	b.readState = states.read
+	for _, name := range []string{"asked", "busy"} {
+		s := session.New(name, "/work/"+name, 0, 0)
+		f.addTab(s, true)
+		f.find(s.KittyWindowID).Title = "✳ Claude Code"
+		if err := b.l.store.Save(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agents, err := b.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("got %d agents, want 2: %+v", len(agents), agents)
+	}
+	for _, a := range agents {
+		switch a.Name {
+		case "asked":
+			if a.State != sidebar.StateInput || a.Waiting != 30*time.Minute {
+				t.Errorf("asked = %s after %v, want input after 30m", a.State, a.Waiting)
+			}
+		case "busy":
+			if a.Waiting != 0 {
+				t.Errorf("busy waited %v, want 0", a.Waiting)
+			}
+		}
 	}
 }
