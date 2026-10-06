@@ -57,16 +57,19 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	ownID, ownName := sidebarIdentity(store)
+	agentRunning := false
 	if agentFlag {
 		if agent, err := startAgent(c.Socket()); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: agent failed to start: %v\n", err)
 		} else {
 			defer stopAgent(agent)
 			stopAgentOnSignal(agent)
-			if ownID == "" {
-				markAgentHome(cmd, c)
-			}
+			agentRunning = true
 		}
+	}
+	home := sidebarSessionID == "" && sidebarSession == "" // no session flag: the home tab
+	if vars := homeVars(home, agentRunning); len(vars) > 0 {
+		markHome(cmd, c, vars)
 	}
 	b, err := launcher.NewSidebarBackend(store, c, cfg, ownID)
 	if err != nil {
@@ -99,17 +102,45 @@ func sidebarIdentity(store *session.Store) (id, name string) {
 	return "", ""
 }
 
-// markAgentHome tags this window as the home sidebar running the agent, so
-// the launcher keeps the home tab, and the agent with it, once session tabs
-// exist. Outside kitty there is no window to tag.
-func markAgentHome(cmd *cobra.Command, c *kitty.Client) {
+// homeVars returns the kitty user variables a sidebar sets on its own window.
+// A session's sidebar sets none: the launcher tagged its window at launch.
+// The home tab's sidebar sets HomeVar, which tells the launcher this tab is
+// its to retire and recreate and not one the user opened; the instance's
+// first window gets no --var at launch, so this is where it is tagged. With
+// the agent running it adds HomeAgentVar, which keeps the home tab, and the
+// agent with it, once session tabs exist.
+func homeVars(home, agentRunning bool) []string {
+	if !home {
+		return nil
+	}
+	vars := []string{kitty.HomeVar + "=1"}
+	if agentRunning {
+		vars = append(vars, kitty.HomeAgentVar+"=1")
+	}
+	return vars
+}
+
+// markHome sets vars on the window this sidebar runs in. Only a sidebar
+// inside the instance tags anything: run by hand in another kitty,
+// KITTY_WINDOW_ID names one of that kitty's windows, and the same id in the
+// instance may be any window at all.
+func markHome(cmd *cobra.Command, c *kitty.Client, vars []string) {
+	if !inInstance(c.Socket()) {
+		return
+	}
 	id, err := strconv.Atoi(os.Getenv(windowIDEnv))
 	if err != nil {
 		return
 	}
-	if err := c.SetUserVars(id, kitty.HomeAgentVar+"=1"); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot mark the agent home tab: %v\n", err)
+	if err := c.SetUserVars(id, vars...); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot tag the home tab: %v\n", err)
 	}
+}
+
+// inInstance reports whether this process runs in a window of the ks
+// instance: kitty exports the address it listens on into every window.
+func inInstance(socket string) bool {
+	return os.Getenv(listenOnEnv) == socket
 }
 
 // connectSidebar returns a client for the running instance. Inside the
@@ -121,7 +152,7 @@ func connectSidebar(cfg *config.Config) (*kitty.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if os.Getenv(listenOnEnv) == socket {
+	if inInstance(socket) {
 		return instance.Await(cfg)
 	}
 	return instance.Connect(cfg)

@@ -148,16 +148,26 @@ func (l *Launcher) settle(launched []string, res *AttachResult) []string {
 	return exited
 }
 
-// focusHome focuses the instance's first window: the home tab's sidebar
-// while no session tab exists, otherwise the first session's sidebar.
+// focusHome focuses the home tab's sidebar, or the instance's first window
+// when no tab carries the home tag: an instance an older ks started, or one
+// where session tabs hold the instance up.
 func (l *Launcher) focusHome(res *AttachResult) {
-	anchor, err := l.anyWindow()
-	if err == nil {
-		err = l.kitty.FocusWindow(anchor)
-	}
-	if err != nil {
+	if err := l.focusHomeWindow(); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Errorf("could not focus the home tab: %w", err))
 	}
+}
+
+// focusHomeWindow takes a snapshot and focuses the window homeWindow picks.
+func (l *Launcher) focusHomeWindow() error {
+	all, err := l.kitty.Windows()
+	if err != nil {
+		return err
+	}
+	id, err := homeWindow(all)
+	if err != nil {
+		return err
+	}
+	return l.kitty.FocusWindow(id)
 }
 
 // focusTarget picks the session with the latest FocusedAt; with no stamps

@@ -460,7 +460,7 @@ func TestOpenStoredSession(t *testing.T) {
 				t.Fatal("reopened record has no ID")
 			}
 			for _, launch := range f.launches {
-				if !hasEnv(launch, "KS_SESSION_ID="+got.ID) || varValue(launch.Vars) != got.ID {
+				if !hasEnv(launch, "KS_SESSION_ID="+got.ID) || varValue(launch.Vars, kitty.SessionVar) != got.ID {
 					t.Errorf("launch %q not tagged with id %q: env %q vars %q",
 						launch.Command, got.ID, launch.Env, launch.Vars)
 				}

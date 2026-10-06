@@ -167,6 +167,20 @@ func (l *Launcher) anyWindow() (int, error) {
 	return all[0].ID, nil
 }
 
+// homeWindow returns the id of the home tab's sidebar in the snapshot, or of
+// the instance's first window when no window carries the home tag.
+func homeWindow(all []kitty.Window) (int, error) {
+	if len(all) == 0 {
+		return 0, fmt.Errorf("instance has no windows: %w", kitty.ErrNotFound)
+	}
+	for _, w := range all {
+		if w.Home {
+			return w.ID, nil
+		}
+	}
+	return all[0].ID, nil
+}
+
 // launchTopology lays out one session as a tab in the instance: a sidebar
 // window running `ks sidebar` on the left and claude on the right. The tab
 // is built behind the current one (every launch keeps the keyboard where it
@@ -259,13 +273,14 @@ func (l *Launcher) pinSidebar(sidebarID int) []error {
 	return nil
 }
 
-// closeTabs closes every tab holding a window the session owns. When those
-// are the last session tabs and there is no home tab, the home tab is
-// created first: the instance quits with its last window. A tab that will
+// closeTabs closes every tab holding a window the session owns. When no tab
+// would be left afterwards the home tab is created first: the instance quits
+// with its last window. Any other tab, another session's, the home tab or
+// one of the user's own, holds the instance up by itself. A tab that will
 // not close is a warning, since the session is being torn down regardless.
 func (l *Launcher) closeTabs(all []kitty.Window, lv live) []error {
 	var warnings []error
-	if len(lv.tabs) > 0 && !sessionTabsOutside(all, lv.tabs) && len(homeTabs(all)) == 0 {
+	if len(lv.tabs) > 0 && !tabsOutside(all, lv.tabs) {
 		if err := l.openHome(all); err != nil {
 			warnings = append(warnings, fmt.Errorf("could not recreate the home tab: %w", err))
 		}
@@ -278,28 +293,33 @@ func (l *Launcher) closeTabs(all []kitty.Window, lv live) []error {
 	return warnings
 }
 
-// homeTabs returns the tabs holding no session-tagged window, in instance
-// order: the home tab, whether kitty's first tab or one openHome made. ks
-// tags every window it launches for a session, so an untagged tab is not a
-// session's.
+// homeTabs returns the tabs whose sidebar carries the home tag and that hold
+// no session-tagged window, in instance order: kitty's first tab, whose
+// sidebar tags itself at startup, or one openHome made. A tab with neither
+// tag is the user's own (cmd+t) and never ks's to close; so is the home tab
+// of an instance an older ks started, which lingers until the user closes it.
 func homeTabs(all []kitty.Window) []int {
 	var order []int
+	home := map[int]bool{}
 	tagged := map[int]bool{}
 	for _, w := range all {
 		if !slices.Contains(order, w.TabID) {
 			order = append(order, w.TabID)
 		}
+		if w.Home {
+			home[w.TabID] = true
+		}
 		if w.SessionID != "" {
 			tagged[w.TabID] = true
 		}
 	}
-	var home []int
+	var tabs []int
 	for _, tab := range order {
-		if !tagged[tab] {
-			home = append(home, tab)
+		if home[tab] && !tagged[tab] {
+			tabs = append(tabs, tab)
 		}
 	}
-	return home
+	return tabs
 }
 
 // agentHome reports whether a window of the tab carries the --agent tag.
@@ -309,17 +329,21 @@ func agentHome(all []kitty.Window, tab int) bool {
 	})
 }
 
-// sessionTabsOutside reports whether a session-tagged window lives in a tab
-// other than those in closing. With closing nil it asks whether any session
-// tab exists at all.
-func sessionTabsOutside(all []kitty.Window, closing []int) bool {
+// hasSessionTab reports whether any window in the snapshot is session-tagged.
+func hasSessionTab(all []kitty.Window) bool {
+	return slices.ContainsFunc(all, func(w kitty.Window) bool { return w.SessionID != "" })
+}
+
+// tabsOutside reports whether any window, whatever its tags, lives in a tab
+// other than those in closing.
+func tabsOutside(all []kitty.Window, closing []int) bool {
 	return slices.ContainsFunc(all, func(w kitty.Window) bool {
-		return w.SessionID != "" && !slices.Contains(closing, w.TabID)
+		return !slices.Contains(closing, w.TabID)
 	})
 }
 
-// openHome creates the home tab: `ks sidebar` with no session, titled
-// homeTitle, anchored on any window of the snapshot.
+// openHome creates the home tab: `ks sidebar` with no session, tagged with
+// the home tag, titled homeTitle, anchored on any window of the snapshot.
 func (l *Launcher) openHome(all []kitty.Window) error {
 	if len(all) == 0 {
 		return fmt.Errorf("instance has no windows: %w", kitty.ErrNotFound)
@@ -327,6 +351,7 @@ func (l *Launcher) openHome(all []kitty.Window) error {
 	id, err := l.kitty.LaunchTab(kitty.Launch{
 		Match:   all[0].ID,
 		Env:     []string{"PATH=" + os.Getenv("PATH")},
+		Vars:    []string{kitty.HomeVar + "=1"},
 		Command: []string{l.exe, "sidebar"},
 	})
 	if err != nil {
@@ -352,8 +377,9 @@ func (l *Launcher) retireHome() []error {
 // exists, except one whose sidebar runs the --agent monitor. The home tab is
 // only there so the instance has a window while no session does; with the
 // tab bar hidden, a goto_tab key would otherwise land on its blank right half.
+// Only tagged home tabs go (homeTabs); the user's own tabs stay.
 func (l *Launcher) retireHomeIn(all []kitty.Window) []error {
-	if !sessionTabsOutside(all, nil) {
+	if !hasSessionTab(all) {
 		return nil
 	}
 	var warnings []error

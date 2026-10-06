@@ -27,6 +27,14 @@ const pingTimeout = 2 * time.Second
 // this tag, not the id, says which session a window belongs to.
 const SessionVar = "KS_SESSION_ID"
 
+// HomeVar marks the home tab's sidebar window: the sidebar `ks sidebar` runs
+// with no session, either the instance's first window (tagged by whoever
+// started the instance and by the sidebar itself, since Start cannot pass
+// --var) or a tab the launcher made. The launcher closes and recreates only
+// tabs carrying this tag; a tab with neither this nor SessionVar is the
+// user's own and is left alone.
+const HomeVar = "KS_HOME"
+
 // HomeAgentVar marks the home tab's sidebar window when it runs the --agent
 // state monitor. The launcher retires the home tab once a session tab
 // exists, except one carrying this tag, which would take the agent with it.
@@ -252,6 +260,8 @@ type Window struct {
 	// SessionID is the SessionVar user variable: the owning ks session's ID,
 	// empty for windows ks did not launch.
 	SessionID string
+	// Home is true when the window carries HomeVar: the home tab's sidebar.
+	Home bool
 	// HomeAgent is true when the window carries HomeAgentVar.
 	HomeAgent bool
 	// Focused is true when the window has keyboard focus: the active window
@@ -307,6 +317,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					Title:     w.Title,
 					Columns:   w.Columns,
 					SessionID: w.UserVars[SessionVar],
+					Home:      w.UserVars[HomeVar] != "",
 					HomeAgent: w.UserVars[HomeAgentVar] != "",
 					Focused:   w.IsFocused,
 				})

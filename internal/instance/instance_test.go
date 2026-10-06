@@ -2,8 +2,10 @@ package instance
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,14 +15,17 @@ import (
 
 // fakeKitty answers Ping from a script: it fails untilUp times, then
 // succeeds, unless Start was never called (an instance that is not started
-// never comes up).
+// never comes up). Once started it holds the one window Start launched.
 type fakeKitty struct {
-	untilUp  int // Pings to fail after Start before answering
-	startErr error
+	untilUp    int // Pings to fail after Start before answering
+	startErr   error
+	windowsErr error
+	varsErr    error
 
 	pings   int
 	started []kitty.StartOptions
 	slept   time.Duration
+	tagged  []string // "<window id>:<vars>" per SetUserVars call
 }
 
 func (f *fakeKitty) Ping() error {
@@ -37,6 +42,21 @@ func (f *fakeKitty) Ping() error {
 func (f *fakeKitty) Start(o kitty.StartOptions) error {
 	f.started = append(f.started, o)
 	return f.startErr
+}
+
+func (f *fakeKitty) Windows() ([]kitty.Window, error) {
+	if f.windowsErr != nil {
+		return nil, f.windowsErr
+	}
+	if len(f.started) == 0 {
+		return nil, nil
+	}
+	return []kitty.Window{{ID: 1, TabID: 1, Title: "ks"}}, nil
+}
+
+func (f *fakeKitty) SetUserVars(id int, vars ...string) error {
+	f.tagged = append(f.tagged, fmt.Sprintf("%d:%s", id, strings.Join(vars, ",")))
+	return f.varsErr
 }
 
 func (f *fakeKitty) sleep(d time.Duration) { f.slept += d }
@@ -68,16 +88,21 @@ func TestEnsureLeavesARunningInstanceAlone(t *testing.T) {
 	if running.started != 0 {
 		t.Errorf("Start called %d times for a running instance", running.started)
 	}
+	if running.tagged != 0 {
+		t.Errorf("SetUserVars called %d times for a running instance", running.tagged)
+	}
 	if _, err := os.Stat(sock); err != nil {
 		t.Errorf("live socket file removed: %v", err)
 	}
 }
 
 // alwaysUp is an instance that answers every Ping.
-type alwaysUp struct{ started int }
+type alwaysUp struct{ started, tagged int }
 
-func (a *alwaysUp) Ping() error                    { return nil }
-func (a *alwaysUp) Start(kitty.StartOptions) error { a.started++; return nil }
+func (a *alwaysUp) Ping() error                        { return nil }
+func (a *alwaysUp) Start(kitty.StartOptions) error     { a.started++; return nil }
+func (a *alwaysUp) Windows() ([]kitty.Window, error)   { return nil, nil }
+func (a *alwaysUp) SetUserVars(int, ...string) error   { a.tagged++; return nil }
 
 func TestEnsureStartsAndWaitsForTheSocket(t *testing.T) {
 	// One failing Ping before Start, then three more while kitty boots.
@@ -108,6 +133,44 @@ func TestEnsureStartsAndWaitsForTheSocket(t *testing.T) {
 	}
 	if f.slept != 3*startPoll {
 		t.Errorf("slept %v, want %v", f.slept, 3*startPoll)
+	}
+	// The first window is the home sidebar; it is tagged before ensure returns.
+	if want := []string{"1:KS_HOME=1"}; !slices.Equal(f.tagged, want) {
+		t.Errorf("tagged = %q, want %q", f.tagged, want)
+	}
+}
+
+func TestEnsureReportsAHomeTagFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		fake *fakeKitty
+		want string
+	}{
+		{
+			name: "a snapshot that fails",
+			fake: &fakeKitty{windowsErr: errors.New("ls broke")},
+			want: "cannot list its windows",
+		},
+		{
+			name: "a tag that fails",
+			fake: &fakeKitty{varsErr: errors.New("set-user-vars broke")},
+			want: "cannot tag its home tab",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := newBoot(t, tc.fake, time.Second)
+			started, err := ensure(tc.fake, b)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if started {
+				t.Error("ensure reported a start despite the error")
+			}
+			if len(tc.fake.started) != 1 {
+				t.Errorf("Start called %d times, want 1", len(tc.fake.started))
+			}
+		})
 	}
 }
 

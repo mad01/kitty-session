@@ -83,7 +83,7 @@ Session files are small JSON:
 }
 ```
 
-The `kitty_*` IDs are ephemeral. Kitty numbers tabs and windows from 1 in every instance, so they go stale when the instance restarts, and a stored id can then point at another session's window. That is why the launcher never trusts an id alone. Every window it launches carries the kitty user variable `KS_SESSION_ID=<id>` (`kitty @ launch --var`), visible as `user_vars` in `kitty @ ls`. A window counts as the session's only when the tag matches.
+The `kitty_*` IDs are ephemeral. Kitty numbers tabs and windows from 1 in every instance, so they go stale when the instance restarts, and a stored id can then point at another session's window. That is why the launcher never trusts an id alone. Every window it launches carries the kitty user variable `KS_SESSION_ID=<id>` (`kitty @ launch --var`), visible as `user_vars` in `kitty @ ls`. A window counts as the session's only when the tag matches. The home tab's sidebar carries `KS_HOME=1` the same way: the instance's first window gets no `--var`, so `instance.Ensure` sets it right after a start and the sidebar sets it on its own window too; the launcher passes it as `--var` when it recreates the tab. A tab with neither tag is one the user opened in the instance; the launcher never closes or recreates it.
 
 `id` is random and stable across renames (also exported as the `KS_SESSION_ID` environment variable, found with `Store.FindByID`). `status` is `active` or `stopped` (absent in files from older versions, which read as `active`). `claude_session_id` and `claude_transcript_path` are what Claude Code reported on its last `SessionStart` hook; together they let a reopen bring back a conversation with `claude --resume <id>` while the transcript file still exists.
 

@@ -31,11 +31,12 @@ type fakeKitty struct {
 	slept       time.Duration
 }
 
-// newFakeKitty returns an instance holding only the home tab.
+// newFakeKitty returns an instance holding only the home tab, its sidebar
+// tagged as the real one tags itself at startup.
 func newFakeKitty() *fakeKitty {
 	return &fakeKitty{
 		windows: []kitty.Window{
-			{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: fakeTabColumns},
+			{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: fakeTabColumns, Home: true},
 		},
 		nextWindow: 2,
 		nextTab:    2,
@@ -67,6 +68,23 @@ func (f *fakeKitty) addTab(sess *session.Session, withClaude bool) {
 		return
 	}
 	f.windows = append(f.windows, sidebar)
+}
+
+// addUserTab registers a plain shell tab the user opened in the instance
+// (cmd+t): one window with no ks tag. It returns the tab id.
+func (f *fakeKitty) addUserTab() int {
+	tab := f.nextTab
+	f.nextTab++
+	f.windows = append(f.windows, kitty.Window{
+		ID: f.nextWindow, TabID: tab, TabTitle: "zsh", Title: "zsh", Columns: fakeTabColumns,
+	})
+	f.nextWindow++
+	return tab
+}
+
+// hasTab reports whether any window of the tab is still in the instance.
+func (f *fakeKitty) hasTab(tab int) bool {
+	return slices.ContainsFunc(f.windows, func(w kitty.Window) bool { return w.TabID == tab })
 }
 
 func (f *fakeKitty) record(format string, args ...any) error {
@@ -110,7 +128,9 @@ func (f *fakeKitty) LaunchTab(l kitty.Launch) (int, error) {
 	id := f.nextWindow
 	f.nextWindow++
 	f.windows = append(f.windows, kitty.Window{
-		ID: id, TabID: f.nextTab, Columns: fakeTabColumns, SessionID: varValue(l.Vars),
+		ID: id, TabID: f.nextTab, Columns: fakeTabColumns,
+		SessionID: varValue(l.Vars, kitty.SessionVar),
+		Home:      varValue(l.Vars, kitty.HomeVar) != "",
 	})
 	f.nextTab++
 	return id, nil
@@ -135,7 +155,7 @@ func (f *fakeKitty) LaunchVSplit(l kitty.Launch) (int, error) {
 	}
 	f.windows = append(f.windows, kitty.Window{
 		ID: id, TabID: target.TabID, TabTitle: target.TabTitle,
-		Columns: newCols, SessionID: varValue(l.Vars),
+		Columns: newCols, SessionID: varValue(l.Vars, kitty.SessionVar),
 	})
 	return id, nil
 }
@@ -153,7 +173,7 @@ func (f *fakeKitty) LaunchHSplit(l kitty.Launch) (int, error) {
 	f.nextWindow++
 	f.windows = append(f.windows, kitty.Window{
 		ID: id, TabID: target.TabID, TabTitle: target.TabTitle,
-		Columns: target.Columns, SessionID: varValue(l.Vars),
+		Columns: target.Columns, SessionID: varValue(l.Vars, kitty.SessionVar),
 	})
 	return id, nil
 }
@@ -251,10 +271,11 @@ func (f *fakeKitty) CloseTab(tab int) error {
 	return nil
 }
 
-// varValue returns the session id from a launch's user variables.
-func varValue(vars []string) string {
+// varValue returns the value of the named user variable in a launch, empty
+// when it is not set.
+func varValue(vars []string, name string) string {
 	for _, v := range vars {
-		if value, ok := strings.CutPrefix(v, kitty.SessionVar+"="); ok {
+		if value, ok := strings.CutPrefix(v, name+"="); ok {
 			return value
 		}
 	}

@@ -52,6 +52,8 @@ type Options struct {
 type kittyInstance interface {
 	Ping() error
 	Start(kitty.StartOptions) error
+	Windows() ([]kitty.Window, error)
+	SetUserVars(windowID int, vars ...string) error
 }
 
 // boot is everything ensure needs besides the kitty surface.
@@ -109,7 +111,8 @@ func Await(cfg *config.Config) (*kitty.Client, error) {
 // Ensure returns a client for the instance, starting it when it is not
 // running, and reports whether it did start one, so the caller can bring the
 // sessions back before adding its own. A new instance opens with the home tab
-// running `ks sidebar` and is ready once its socket answers.
+// running `ks sidebar`, is ready once its socket answers, and has its home
+// tab tagged before Ensure returns.
 func Ensure(cfg *config.Config, opts Options) (*kitty.Client, bool, error) {
 	c, err := Client(cfg)
 	if err != nil {
@@ -146,7 +149,8 @@ func Ensure(cfg *config.Config, opts Options) (*kitty.Client, bool, error) {
 	return c, started, nil
 }
 
-// ensure pings, starts kitty when nothing answers, and reports whether it did.
+// ensure pings, starts kitty when nothing answers, tags the home tab of the
+// instance it started, and reports whether it did start one.
 func ensure(k kittyInstance, b boot) (bool, error) {
 	if k.Ping() == nil {
 		return false, nil
@@ -168,7 +172,31 @@ func ensure(k kittyInstance, b boot) (bool, error) {
 		return false, fmt.Errorf("ks instance did not answer on %s within %s: %w",
 			b.socketPath, b.timeout, err)
 	}
+	if err := tagHome(k); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+// tagHome marks the first window of a freshly started instance, the sidebar
+// Start launched, with the home tag. Start cannot pass --var, and the
+// sidebar's own tag races the command that started the instance: both poll
+// the socket, and an Open that wins the race would leave the untagged home
+// tab behind the first session tab. Tagging here, before Ensure returns,
+// settles it; the sidebar's tag is the same value and covers an instance
+// started some other way.
+func tagHome(k kittyInstance) error {
+	all, err := k.Windows()
+	if err != nil {
+		return fmt.Errorf("ks instance started but cannot list its windows: %w", err)
+	}
+	if len(all) == 0 {
+		return fmt.Errorf("ks instance started with no window: %w", kitty.ErrNotFound)
+	}
+	if err := k.SetUserVars(all[0].ID, kitty.HomeVar+"=1"); err != nil {
+		return fmt.Errorf("ks instance started but cannot tag its home tab: %w", err)
+	}
+	return nil
 }
 
 // staleSocket reports whether the socket file is safe to remove: it is gone
