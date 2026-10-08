@@ -51,6 +51,12 @@ func TestHook(t *testing.T) {
 			runHookCase(t, store, tc)
 		})
 	}
+	// The pi handler's cases run here for the same reason (pihook_test.go).
+	for _, tc := range piHookCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			runPiHookCase(t, store, tc)
+		})
+	}
 }
 
 func hookCases() []hookCase {
