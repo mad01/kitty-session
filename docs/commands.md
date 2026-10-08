@@ -26,12 +26,12 @@ Sessions that fail to resume are reported as warnings on stderr; the attach cont
 |---|---|
 | `--agent` | When this attach starts the instance, its home sidebar runs with `--agent`, so the background Haiku state monitor lives as long as the instance. With the instance already running the flag prints a note and does nothing. |
 
-The `--agent` flag is persistent, so it's recognized on subcommands too; only `ks` (when starting the instance) and `ks sidebar` act on it.
+The `--agent` flag is persistent, so it's recognized on subcommands too; only `ks` (when starting the instance) and `ks sidebar` act on it. `ks new` and `ks tmp` define an `--agent` of their own that takes a value, the agent kind, and shadows this one; see below.
 
 ## `ks new`
 
 ```
-Usage: ks new -n <name> [-d <dir>]
+Usage: ks new -n <name> [-d <dir>] [--agent claude|pi|shell]
 ```
 
 Create a new session. Fails if a session with the same name already exists.
@@ -42,6 +42,7 @@ Create a new session. Fails if a session with the same name already exists.
 |---|---|---|
 | `-n`, `--name` | yes | Session name. Used as the kitty tab title and the state-file name. |
 | `-d`, `--dir` | no | Working directory. Defaults to the current directory. Tildes are not expanded; pass an absolute path. |
+| `--agent` | no | What runs in the right-hand window: `claude` (default), `pi`, or `shell` for kitty's default shell with no agent. Any other value is refused before the instance is touched. The kind is stored on the record as `agent`, and a reopen starts the same kind. |
 
 Behavior:
 
@@ -49,7 +50,7 @@ Behavior:
 2. Starts the instance if needed. A fresh instance first brings every active session back, in sidebar order (the order `ks move` left behind, then creation order) and out of sight, so the new session becomes the last tab, the same order bare `ks` produces.
 3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
 4. Creates a tab in the instance running `ks sidebar --session-id <id>`, switches it to the `splits` layout and titles it `<name>`.
-5. Splits claude in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells. Both windows get `PATH`, `KS_SESSION_NAME` and `KS_SESSION_ID` in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
+5. Splits the agent in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells: `claude`, `pi`, or no command at all for `shell`. Both windows get `PATH`, `KS_SESSION_NAME`, `KS_SESSION_ID` and `KS_EXE` (the path of the ks binary that made the session, for the pi extension) in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
 6. Shows the tab by focusing the claude window.
 7. Writes the kitty IDs and `focused_at` back to the session file.
 
@@ -58,10 +59,10 @@ Claude Code asks whether you trust the files in a folder it has not seen before.
 ## `ks tmp`
 
 ```
-Usage: ks tmp [-n <name>]
+Usage: ks tmp [-n <name>] [--agent claude|pi|shell]
 ```
 
-Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, under `tmpdir` from the config or the OS temp dir. The name defaults to `tmp-<MMDD-HHMM>`, with a random suffix when that is taken. Every scratch directory is new to Claude Code, so each `ks tmp` session opens with the folder-trust dialog. Like `ks new`, a `ks tmp` that has to start the instance brings the active sessions back first.
+Create a session in a fresh scratch directory: `os.MkdirTemp(tmpdir, "ks-*")`, under `tmpdir` from the config or the OS temp dir. The name defaults to `tmp-<MMDD-HHMM>`, with a random suffix when that is taken. `--agent` picks the kind the way it does for `ks new`. Every scratch directory is new to Claude Code, so each `ks tmp` session opens with the folder-trust dialog. Like `ks new`, a `ks tmp` that has to start the instance brings the active sessions back first.
 
 ## `ks open <name>`
 
@@ -71,9 +72,9 @@ Usage: ks open <name>
 
 Focus or recreate the named session. Starts the instance if needed; a fresh instance first brings every active session back, in sidebar order, before this one is opened.
 
-- If the claude window is alive, focus it.
-- If only the sidebar is left (claude exited or was closed), relaunch claude beside it in the same tab.
-- Otherwise close whatever tab the session still owns and create the tab again. Claude starts with `--resume <id>` when the record has a `claude_session_id` whose transcript still exists, with `--continue` when the directory has any Claude transcript, and bare otherwise. A `--continue` with nothing to continue makes claude exit at once. The new kitty IDs are written back to the session file.
+- If the agent window is alive, focus it.
+- If only the sidebar is left (the agent exited or was closed), relaunch the agent beside it in the same tab.
+- Otherwise close whatever tab the session still owns and create the tab again. The record's `agent` says what starts. Claude starts with `--resume <id>` when the record has a `claude_session_id` whose transcript still exists, with `--continue` when the directory has any Claude transcript, and bare otherwise. A `--continue` with nothing to continue makes claude exit at once. pi starts with `--session <path>` when the record's `pi_session_path` still exists and bare otherwise. A shell session gets a fresh shell. The new kitty IDs are written back to the session file.
 
 ## `ks close <name>`
 
@@ -97,17 +98,18 @@ With `--keep`, only the tab goes away; `ks open <name>` recreates it. Without `-
 Usage: ks list
 ```
 
-Print one line per session to stdout:
+Print one line per session to stdout: the name, the agent kind (`claude`, `pi` or `shell`), the state and the directory.
 
 ```
-<name>               <state>    <dir>
+<name>               <agent> <state>    <dir>
 ```
 
 State detection:
 
-1. If the record is `stopped`, or no window tagged with the session's id matches its claude window → `stopped`.
-2. If a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
-3. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
+1. If the record is `stopped`, or no window tagged with the session's id matches its agent window → `stopped`.
+2. A `shell` session is `idle` from here on: nothing reports its state. A `pi` session shows its state file's value whatever its age (the ks pi extension writes it) and `idle` without one.
+3. For a `claude` session, if a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
+4. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
 
 The sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text and adds `done`); see [Sidebar guide](tui.md#states).
 
@@ -303,7 +305,7 @@ See [Hooks and state detection](hooks-and-state.md) for the full event-to-state 
 Usage: ks _sidebar-demo [--width <cols>] [--session <name>]
 ```
 
-Run the sidebar on six fake agents covering every state, with an in-memory backend: no kitty, no session files, nothing touched. A development aid for reviewing the look in any terminal. `--width` sets the frame width (default 36); `--session` names the fake agent treated as this tab's own (default `kitty-session`).
+Run the sidebar on eight fake agents covering every state and agent kind, with an in-memory backend: no kitty, no session files, nothing touched. A development aid for reviewing the look in any terminal. `--width` sets the frame width (default 36); `--session` names the fake agent treated as this tab's own (default `kitty-session`).
 
 ## Scripting recipes
 

@@ -3,7 +3,7 @@
 //
 // It owns the steps every entry point (ks, ks new, ks open, ks tmp, ks close,
 // ks rename, the sidebar TUI) used to carry its own copy of: building the
-// claude command line, laying out the session's tab, telling the session's
+// agent's command line, laying out the session's tab, telling the session's
 // windows apart from everything else in the instance, tearing them down, and
 // recording the result in the session store. The kitty layout is confined to
 // topology.go so it can change without touching argument building or store
@@ -22,18 +22,20 @@ import (
 	"github.com/mad01/kitty-session/internal/session"
 )
 
-// ResumeMode selects how claude starts inside the session's window.
+// ResumeMode selects how the agent starts inside the session's window.
 type ResumeMode int
 
 const (
 	// ResumeNone starts a fresh conversation for a new session record.
 	ResumeNone ResumeMode = iota
 	// ResumeStored reopens the stored session named in the Request. If its
-	// claude window is still alive it is focused. If only its sidebar is
-	// left, claude is relaunched beside it. Otherwise any leftover tab is
-	// closed and the whole tab is recreated. A relaunch uses --resume <id>
-	// when the record carries a Claude session ID whose transcript still
-	// exists, and --continue when it does not.
+	// agent window is still alive it is focused. If only its sidebar is
+	// left, the agent is relaunched beside it. Otherwise any leftover tab is
+	// closed and the whole tab is recreated. A claude relaunch uses --resume
+	// <id> when the record carries a Claude session ID whose transcript
+	// still exists, and --continue when it does not; a pi relaunch uses
+	// --session <path> while the record's session file exists. A shell has
+	// nothing to resume.
 	ResumeStored
 )
 
@@ -49,8 +51,12 @@ type Request struct {
 	// Dir is the working directory of a new session. ResumeStored ignores
 	// it and uses the stored directory.
 	Dir string
-	// Resume selects how claude starts.
+	// Resume selects how the agent starts.
 	Resume ResumeMode
+	// Agent is the kind of agent a new session runs: session.AgentClaude,
+	// session.AgentPi or session.AgentShell. Empty means claude.
+	// ResumeStored ignores it and uses the stored kind.
+	Agent string
 	// Background leaves a newly built tab hidden instead of showing it.
 	// Attach uses it to bring every session back and then focus one.
 	Background bool
@@ -183,7 +189,9 @@ func (l *Launcher) target(req Request) (*session.Session, error) {
 		if l.store.Exists(req.Name) {
 			return nil, fmt.Errorf("session %q %w", req.Name, ErrExists)
 		}
-		return session.New(req.Name, req.Dir, 0, 0), nil
+		sess := session.New(req.Name, req.Dir, 0, 0)
+		sess.Agent = req.Agent
+		return sess, nil
 	}
 	sess, err := l.store.Load(req.Name)
 	if err != nil {
@@ -245,30 +253,61 @@ func (l *Launcher) plan(sess *session.Session, mode ResumeMode) plan {
 	return plan{
 		name:       sess.Name,
 		dir:        sess.Dir,
-		env:        sessionEnv(sess),
+		env:        sessionEnv(sess, l.exe),
 		vars:       []string{kitty.SessionVar + "=" + sess.ID},
 		sidebarCmd: []string{l.exe, "sidebar", "--session-id", sess.ID},
-		claudeCmd:  ClaudeCmd(sess, mode),
+		agentCmd:   AgentCmd(sess, mode),
 	}
 }
 
 // sessionEnv is exported into both of the session's windows. PATH is
 // forwarded because kitty @ launch runs with kitty's own environment, which
-// may not include the directory claude is installed in; the two KS variables
-// let the ks hook find the record.
-func sessionEnv(sess *session.Session) []string {
+// may not include the directory the agent is installed in; the two KS
+// session variables let the ks hook find the record, and KS_EXE names the
+// ks binary that made the session, so an agent extension (the pi one) calls
+// the same build.
+func sessionEnv(sess *session.Session, exe string) []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
 		"KS_SESSION_NAME=" + sess.Name,
 		"KS_SESSION_ID=" + sess.ID,
+		"KS_EXE=" + exe,
 	}
 }
 
-// ClaudeCmd builds the command that starts claude for sess: --resume <id>
-// when the record's own transcript still exists, --continue when the
-// directory has any transcript to continue, and a fresh claude otherwise.
-// --continue with nothing to continue makes claude exit at once.
-func ClaudeCmd(sess *session.Session, mode ResumeMode) []string {
+// AgentCmd builds the command that starts the session's agent, by kind:
+// claude as claudeCmd does, pi as piCmd does, and nothing for a shell, since
+// a launch with no command runs kitty's default shell.
+func AgentCmd(sess *session.Session, mode ResumeMode) []string {
+	switch sess.Kind() {
+	case session.AgentPi:
+		return piCmd(sess, mode)
+	case session.AgentShell:
+		return nil
+	default:
+		return claudeCmd(sess, mode)
+	}
+}
+
+// piCmd starts pi: --session <path> on a reopen while the session file the
+// ks pi extension reported still exists, a fresh pi otherwise. pi --continue
+// is not used, since what it does with nothing to continue is unverified.
+func piCmd(sess *session.Session, mode ResumeMode) []string {
+	cmd := []string{"pi"}
+	if mode == ResumeNone || sess.PiSessionPath == "" {
+		return cmd
+	}
+	if _, err := os.Stat(sess.PiSessionPath); err != nil {
+		return cmd
+	}
+	return append(cmd, "--session", sess.PiSessionPath)
+}
+
+// claudeCmd starts claude: --resume <id> when the record's own transcript
+// still exists, --continue when the directory has any transcript to
+// continue, and a fresh claude otherwise. --continue with nothing to
+// continue makes claude exit at once.
+func claudeCmd(sess *session.Session, mode ResumeMode) []string {
 	cmd := []string{"claude"}
 	if mode == ResumeNone {
 		return cmd

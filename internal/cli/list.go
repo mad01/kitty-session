@@ -45,7 +45,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		if !down {
 			st = listState(w.kitty, all, sess)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", sess.Name, st, sess.Dir)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-7s %-10s %s\n", sess.Name, sess.Kind(), st, sess.Dir)
 	}
 	if down {
 		fmt.Fprintln(cmd.OutOrStdout(), "ks instance not running")
@@ -54,8 +54,10 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 // listState resolves a session's state from one instance snapshot: the
-// record's own status first, then whether its claude window is in the
-// snapshot, then a fresh state file, then the terminal text.
+// record's own status first, then whether its agent window is in the
+// snapshot. A shell is idle from there on, since nothing reports its state.
+// A pi session reads its state file, whatever its age, and is idle without
+// one. A claude session reads a fresh state file, then the terminal text.
 func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) claude.State {
 	if !sess.IsActive() {
 		return claude.StateStopped
@@ -63,6 +65,15 @@ func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) claud
 	w, ok := launcher.ClaudeWindow(all, sess)
 	if !ok {
 		return claude.StateStopped
+	}
+	switch sess.Kind() {
+	case session.AgentShell:
+		return claude.StateIdle
+	case session.AgentPi:
+		if s, _, err := state.Read(sess.Name); err == nil {
+			return claude.ParseState(s)
+		}
+		return claude.StateIdle
 	}
 	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
 		return claude.ParseState(s)

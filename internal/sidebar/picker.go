@@ -171,13 +171,14 @@ func (m model) pickerStatus(inner int) string {
 	}
 }
 
-// nameLines renders the name prompt that follows the picker.
-func (m model) nameLines(inner int) []string {
+// nameLines renders the name prompt that follows the picker; step is the
+// header's right-hand label, the step the screen is on (name or kind).
+func (m model) nameLines(inner int, step string) []string {
 	n := m.innerHeight()
 	lines := make([]string, 0, n)
 	lines = append(
 		lines,
-		spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render("name")),
+		spread(inner, headerStyle.Render("new agent"), sortLabelStyle.Render(step)),
 	)
 	lines = append(lines, blank(inner))
 	dir := "scratch directory"

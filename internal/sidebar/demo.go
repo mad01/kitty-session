@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// DemoBackend is an in-memory Backend with six fake agents covering every
-// state and a fake repo list, so the sidebar can be reviewed in any terminal
-// without kitty. Mutations are kept in memory; nothing touches the system.
+// DemoBackend is an in-memory Backend with eight fake agents covering every
+// state and agent kind and a fake repo list, so the sidebar can be reviewed
+// in any terminal without kitty. Mutations are kept in memory; nothing touches the system.
 type DemoBackend struct {
 	mu      sync.Mutex
 	agents  []Agent
@@ -50,6 +50,14 @@ func NewDemoBackend() *DemoBackend {
 				Name: "kitty-session", Dir: filepath.Join(src, "kitty-session"),
 				Title: "Claude Code",
 				State: StateIdle, Tab: 5,
+			},
+			{
+				Name: "events-pi", Kind: "pi", Dir: filepath.Join(src, "thismoon"),
+				Title: "pi", State: StateWorking, Tab: 6,
+			},
+			{
+				Name: "dotfiles-sh", Kind: "shell", Dir: filepath.Join(src, "dotfiles"),
+				State: StateIdle, Tab: 7,
 			},
 			{
 				Name: "dotfiles", Dir: filepath.Join(src, "dotfiles"),
@@ -100,8 +108,9 @@ func (d *DemoBackend) Focus(name string) error {
 	return nil
 }
 
-// New adds an idle agent; a name that is taken is rejected like the launcher does.
-func (d *DemoBackend) New(name, dir string) error {
+// New adds an idle agent of the given kind; a name that is taken is
+// rejected like the launcher does.
+func (d *DemoBackend) New(name, dir, kind string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if name == "" {
@@ -110,8 +119,12 @@ func (d *DemoBackend) New(name, dir string) error {
 	if d.index(name) >= 0 {
 		return fmt.Errorf("demo: session %q already exists", name)
 	}
+	title := ""
+	if kindBadge(kind) == "" {
+		title = "Claude Code"
+	}
 	d.agents = append(d.agents, Agent{
-		Name: name, Dir: dir, Title: "Claude Code", State: StateIdle, Tab: d.nextTab(),
+		Name: name, Kind: kind, Dir: dir, Title: title, State: StateIdle, Tab: d.nextTab(),
 	})
 	return nil
 }

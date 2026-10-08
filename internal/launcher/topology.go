@@ -48,7 +48,7 @@ type plan struct {
 	env        []string // KEY=VALUE for both windows
 	vars       []string // kitty user variables tagging both windows
 	sidebarCmd []string
-	claudeCmd  []string
+	agentCmd   []string // nil for a shell session: kitty runs its default shell
 }
 
 // windows holds the kitty IDs a topology produced plus any non-fatal problems
@@ -237,7 +237,7 @@ func (l *Launcher) relaunchClaude(p plan, sidebar kitty.Window) (windows, error)
 func (l *Launcher) splitClaude(p plan, sidebar kitty.Window) (int, []error, error) {
 	claudeID, err := l.kitty.LaunchVSplit(kitty.Launch{
 		Match: sidebar.ID, Dir: p.dir, Bias: l.claudeBias(sidebar.Columns),
-		Env: p.env, Vars: p.vars, Command: p.claudeCmd, KeepFocus: true,
+		Env: p.env, Vars: p.vars, Command: p.agentCmd, KeepFocus: true,
 	})
 	if err != nil {
 		return 0, nil, fmt.Errorf("cannot create claude window: %w", err)

@@ -13,7 +13,7 @@ import (
 	"github.com/mad01/kitty-session/internal/session"
 )
 
-func TestClaudeCmd(t *testing.T) {
+func TestAgentCmdClaude(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	derived, err := claude.TranscriptPath("/work/demo", "derived-id")
@@ -83,12 +83,68 @@ func TestClaudeCmd(t *testing.T) {
 			if tc.sess.Dir == "" {
 				tc.sess.Dir = "/work/demo" // its project dir holds derived-id.jsonl
 			}
-			cmd := ClaudeCmd(&tc.sess, tc.mode)
+			cmd := AgentCmd(&tc.sess, tc.mode)
 			if cmd[0] != "claude" {
 				t.Fatalf("cmd %q: want it to start claude", cmd)
 			}
 			if tail := cmd[1:]; !slices.Equal(tail, tc.wantTail) {
 				t.Errorf("claude args = %q, want %q", tail, tc.wantTail)
+			}
+		})
+	}
+}
+
+func TestAgentCmdPiAndShell(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	kept := filepath.Join(home, "pi", "sessions", "kept.jsonl")
+	touch(t, kept)
+	gone := filepath.Join(home, "pi", "sessions", "gone.jsonl")
+
+	tests := []struct {
+		name string
+		mode ResumeMode
+		sess session.Session
+		want []string
+	}{
+		{"new pi starts bare", ResumeNone, session.Session{Agent: session.AgentPi}, []string{"pi"}},
+		{
+			"new pi ignores a stored session file",
+			ResumeNone,
+			session.Session{Agent: session.AgentPi, PiSessionID: "p1", PiSessionPath: kept},
+			[]string{"pi"},
+		},
+		{
+			"reopen pi resumes its session file while it exists",
+			ResumeStored,
+			session.Session{Agent: session.AgentPi, PiSessionID: "p1", PiSessionPath: kept},
+			[]string{"pi", "--session", kept},
+		},
+		{
+			"reopen pi starts bare when the session file is gone",
+			ResumeStored,
+			session.Session{Agent: session.AgentPi, PiSessionID: "p1", PiSessionPath: gone},
+			[]string{"pi"},
+		},
+		{
+			"reopen pi without a session file starts bare",
+			ResumeStored,
+			session.Session{Agent: session.AgentPi},
+			[]string{"pi"},
+		},
+		{"new shell has no command", ResumeNone, session.Session{Agent: session.AgentShell}, nil},
+		{
+			"reopen shell has no command",
+			ResumeStored,
+			session.Session{Agent: session.AgentShell},
+			nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.sess.Dir = "/work/demo"
+			if got := AgentCmd(&tc.sess, tc.mode); !slices.Equal(got, tc.want) {
+				t.Errorf("AgentCmd = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -101,9 +157,52 @@ func TestSessionEnv(t *testing.T) {
 		"PATH=/opt/claude/bin:/usr/bin",
 		"KS_SESSION_NAME=my-session",
 		"KS_SESSION_ID=sid-1",
+		"KS_EXE=/bin/ks",
 	}
-	if got := sessionEnv(sess); !slices.Equal(got, want) {
+	if got := sessionEnv(sess, "/bin/ks"); !slices.Equal(got, want) {
 		t.Errorf("sessionEnv = %q, want %q", got, want)
+	}
+}
+
+// TestOpenNewSessionByKind checks that the requested kind lands on the record
+// and decides the agent window's command: pi for a pi session, none for a
+// shell, so kitty runs its default shell.
+func TestOpenNewSessionByKind(t *testing.T) {
+	tests := []struct {
+		kind    string
+		want    string // Agent as stored
+		command []string
+	}{
+		{"", "", []string{"claude"}},
+		{session.AgentClaude, session.AgentClaude, []string{"claude"}},
+		{session.AgentPi, session.AgentPi, []string{"pi"}},
+		{session.AgentShell, session.AgentShell, nil},
+	}
+	for _, tc := range tests {
+		t.Run("kind="+tc.kind, func(t *testing.T) {
+			l, f, store := newTestLauncher(t)
+			res, err := l.Open(Request{Name: "demo", Dir: "/work/demo", Agent: tc.kind})
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if res.Session.Agent != tc.want {
+				t.Errorf("stored Agent = %q, want %q", res.Session.Agent, tc.want)
+			}
+			stored, err := store.Load("demo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Agent != tc.want {
+				t.Errorf("reloaded Agent = %q, want %q", stored.Agent, tc.want)
+			}
+			agentWin := f.launches[1] // after the sidebar's tab launch
+			if !slices.Equal(agentWin.Command, tc.command) {
+				t.Errorf("agent command = %q, want %q", agentWin.Command, tc.command)
+			}
+			if !hasEnv(agentWin, "KS_EXE=/bin/ks") {
+				t.Errorf("agent window lacks KS_EXE: %q", agentWin.Env)
+			}
+		})
 	}
 }
 
@@ -192,6 +291,7 @@ func TestOpenNewSession(t *testing.T) {
 		}
 		for _, env := range []string{
 			"PATH=/opt/claude/bin:/usr/bin", "KS_SESSION_NAME=demo", "KS_SESSION_ID=" + got.ID,
+			"KS_EXE=/bin/ks",
 		} {
 			if !hasEnv(launch, env) {
 				t.Errorf("launch %q lacks env %s", launch.Command, env)

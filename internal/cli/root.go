@@ -25,7 +25,7 @@ Sidebar keys (m opens the menu with the rest):
   j/k, 1-9    Move the cursor, jump to a row
   enter       Focus the agent under the cursor, reopening its tab if gone
   l / tab / q Hand the keyboard to this tab's claude window
-  n           New agent (repo picker)
+  n           New agent (repo picker, then claude, pi or shell)
   r  c  d  u  Rename, close (keep), delete, restore
   /           Filter by name
   ?           Keys popup

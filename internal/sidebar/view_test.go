@@ -59,7 +59,8 @@ func TestViewGeometryAcrossModes(t *testing.T) {
 		{"restore", []string{"u"}, false},
 		{"rename", []string{"r"}, false},
 		{"picker", []string{"n"}, false},
-		{"name", []string{"n", "enter"}, true},
+		{"kind", []string{"n", "enter"}, false},
+		{"name", []string{"n", "enter", "enter"}, true},
 	}
 	for _, width := range []int{12, 20, 36, 60} {
 		for _, height := range []int{6, 12, 24} {
@@ -333,6 +334,44 @@ func TestViewWaitLabelOnInputRows(t *testing.T) {
 	for i, w := range want {
 		if got[i] != w {
 			t.Errorf("line %d\n got %q\nwant %q", i, got[i], w)
+		}
+	}
+	assertGeometry(t, m, DefaultWidth, testLines)
+}
+
+func TestViewKindBadge(t *testing.T) {
+	fb := &fakeBackend{agents: []Agent{
+		{Name: "events", Kind: "pi", Title: "pi", State: StateWorking, Tab: 1},
+		{Name: "scratch", Kind: "shell", Dir: "/home/u/scratch", State: StateIdle, Tab: 2},
+		{Name: "plain", Kind: "claude", Title: "Claude Code", State: StateIdle, Tab: 3},
+		{Name: "a-name-that-is-far-too-long-to-fit", Kind: "pi", State: StateIdle, Tab: 4},
+	}}
+	m := newTestModel(t, fb, "demo")
+	got := lines(m)
+	want := map[int]string{
+		3: "│ ● events pi                      │",
+		5: "│ ○ scratch sh                     │",
+		7: "│ ○ plain                          │",
+		9: "│ ○ a-name-that-is-far-too-long… pi │"[:0] + "│ ○ a-name-that-is-far-too-lon… pi │",
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("line %d\n got %q\nwant %q", i, got[i], w)
+		}
+	}
+	assertGeometry(t, m, DefaultWidth, testLines)
+}
+
+func TestViewKindChooserPopup(t *testing.T) {
+	fb := &fakeBackend{agents: mockupAgents(), repos: []Repo{{Name: "mad01/zeta", Path: "/r/zeta"}}}
+	m := newTestModel(t, fb, "kitty-session")
+	m, _ = press(t, m, "n")
+	m = update(t, m, reposMsg{repos: fb.repos})
+	m, _ = press(t, m, "zeta", "enter", "j")
+	got := lines(m)
+	for _, s := range []string{"new agent", "sug-zeta", "agent", "claude", "pi", "shell"} {
+		if !contains(got, s) {
+			t.Errorf("kind chooser view lacks %q:\n%s", s, strings.Join(got, "\n"))
 		}
 	}
 	assertGeometry(t, m, DefaultWidth, testLines)

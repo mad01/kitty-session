@@ -41,6 +41,7 @@ var (
 	footerHintStyle = lipgloss.NewStyle().Foreground(colorMuted)
 
 	nameStyle   = lipgloss.NewStyle().Foreground(colorTextPri).Bold(true)
+	kindStyle   = lipgloss.NewStyle().Foreground(colorTextSec) // the pi / sh badge after a name
 	titleStyle  = lipgloss.NewStyle().Foreground(colorMuted)
 	waitStyle   = lipgloss.NewStyle().Foreground(colorDanger) // "waiting 12m" on an input row
 	markerStyle = lipgloss.NewStyle().Foreground(colorAccent)

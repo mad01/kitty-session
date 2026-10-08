@@ -233,8 +233,12 @@ func TestPickerCreatesFromRepoAndTmp(t *testing.T) {
 		got[1].name != "mad01/kitty-session" {
 		t.Fatalf("picker items = %+v", got)
 	}
-	m, _ = run(t, m, "kitty", "enter")
-	wantCalls(t, fb, "new:sug-kitty-session:/r/kitty-session")
+	m, cmd = press(t, m, "kitty", "enter")
+	if m.mode != modeKind || m.kindIdx != 0 || cmd != nil {
+		t.Fatalf("a suggested name should go straight to the kind chooser: mode %v", m.mode)
+	}
+	m, _ = run(t, m, "enter") // claude is the default
+	wantCalls(t, fb, "new:sug-kitty-session:/r/kitty-session:claude")
 	if m.mode != modeList || m.status != "created sug-kitty-session" {
 		t.Fatalf("after create: mode %v status %q", m.mode, m.status)
 	}
@@ -242,12 +246,41 @@ func TestPickerCreatesFromRepoAndTmp(t *testing.T) {
 	fb.calls = nil
 	m, _ = press(t, m, "n")
 	m = update(t, m, reposMsg{repos: fb.repos})
-	m, cmd = press(t, m, "enter") // tmp is first with an empty filter
-	wantCalls(t, fb)              // TmpDir is deferred to the command
+	m, _ = press(t, m, "enter") // tmp is first with an empty filter
+	if m.mode != modeKind || !m.pending.tmp || m.pending.name != "tmp-1005-1200" {
+		t.Fatalf("tmp should go to the kind chooser: mode %v pending %+v", m.mode, m.pending)
+	}
+	m, cmd = press(t, m, "j", "enter") // pi
+	wantCalls(t, fb)                   // TmpDir is deferred to the command
 	m, _ = feed(t, m, cmd)
-	wantCalls(t, fb, "tmpdir", "new:tmp-1005-1200:/tmp/ks-fake")
+	wantCalls(t, fb, "tmpdir", "new:tmp-1005-1200:/tmp/ks-fake:pi")
 	if m.follow != "tmp-1005-1200" {
 		t.Fatalf("follow = %q", m.follow)
+	}
+}
+
+func TestKindChooserMovesAndBacksOutToTheName(t *testing.T) {
+	fb := &fakeBackend{agents: mockupAgents(), repos: []Repo{{Name: "mad01/zeta", Path: "/r/zeta"}}}
+	m := newTestModel(t, fb, "")
+	m, _ = press(t, m, "n")
+	m = update(t, m, reposMsg{repos: fb.repos})
+	m, _ = press(t, m, "zeta", "enter", "j", "j", "j") // clamps at shell
+	if m.mode != modeKind || m.kindIdx != 2 {
+		t.Fatalf("mode %v kindIdx %d, want the chooser on shell", m.mode, m.kindIdx)
+	}
+	m, _ = press(t, m, "esc")
+	if m.mode != modeName || m.input.Value() != "sug-zeta" || m.pending.kind != "shell" {
+		t.Fatalf("esc should reopen the name prompt keeping the kind: mode %v value %q pending %+v",
+			m.mode, m.input.Value(), m.pending)
+	}
+	m, _ = press(t, m, "-x", "enter")
+	if m.mode != modeKind || m.kindIdx != 2 {
+		t.Fatalf("enter should return to the chooser on shell: mode %v kindIdx %d", m.mode, m.kindIdx)
+	}
+	m, _ = run(t, m, "k", "enter")
+	wantCalls(t, fb, "new:sug-zeta-x:/r/zeta:pi")
+	if m.mode != modeList {
+		t.Fatalf("mode = %v", m.mode)
 	}
 }
 
@@ -257,7 +290,7 @@ func TestPickerFallsBackToNamePromptOnError(t *testing.T) {
 	m := newTestModel(t, fb, "")
 	m, _ = press(t, m, "n")
 	m = update(t, m, reposMsg{repos: fb.repos})
-	m, _ = run(t, m, "zeta", "enter")
+	m, _ = run(t, m, "zeta", "enter", "enter")
 	if m.mode != modeName || m.input.Value() != "sug-zeta" || !m.statusErr {
 		t.Fatalf(
 			"want name prompt with error: mode %v value %q status %q",
@@ -268,8 +301,8 @@ func TestPickerFallsBackToNamePromptOnError(t *testing.T) {
 	}
 	fb.fail = nil
 	fb.calls = nil
-	m, _ = run(t, m, "2", "enter")
-	wantCalls(t, fb, "new:sug-zeta2:/r/zeta")
+	m, _ = run(t, m, "2", "enter", "enter")
+	wantCalls(t, fb, "new:sug-zeta2:/r/zeta:claude")
 	if m.mode != modeList {
 		t.Fatalf("mode = %v", m.mode)
 	}
@@ -296,8 +329,8 @@ func TestNamePromptRejectsEmptyName(t *testing.T) {
 		t.Fatalf("empty name accepted: cmd %v mode %v status %q", cmd, m.mode, m.status)
 	}
 	wantCalls(t, fb)
-	m, _ = run(t, m, "ok", "enter")
-	wantCalls(t, fb, "new:ok:/r/zeta")
+	m, _ = run(t, m, "ok", "enter", "enter")
+	wantCalls(t, fb, "new:ok:/r/zeta:claude")
 }
 
 func TestTmpDirCreatedBeforeNewAndRemovedOnFailure(t *testing.T) {
@@ -306,7 +339,7 @@ func TestTmpDirCreatedBeforeNewAndRemovedOnFailure(t *testing.T) {
 	m := newTestModel(t, fb, "")
 	m, _ = press(t, m, "n")
 	m = update(t, m, reposMsg{})
-	m, _ = run(t, m, "enter")
+	m, _ = run(t, m, "enter", "enter")
 	if len(fb.calls) != 2 || fb.calls[0] != "tmpdir" {
 		t.Fatalf("calls = %v, want tmpdir then new", fb.calls)
 	}
@@ -319,7 +352,7 @@ func TestTmpDirCreatedBeforeNewAndRemovedOnFailure(t *testing.T) {
 
 	fb.fail = nil
 	fb.calls = nil
-	m, _ = run(t, m, "enter")
+	m, _ = run(t, m, "enter", "enter")
 	entries, _ := os.ReadDir(base)
 	if len(entries) != 1 || len(fb.calls) != 2 || fb.calls[0] != "tmpdir" {
 		t.Fatalf("want one scratch dir kept and tmpdir before new: %v %v", entries, fb.calls)

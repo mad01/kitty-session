@@ -102,7 +102,7 @@ func planCmux(agents []herdr.Agent) ([]cmuxItem, error) {
 			ws: cmux.Workspace{
 				Name:    name,
 				Dir:     a.Dir,
-				Command: launcher.ClaudeCmd(sess, launcher.ResumeStored),
+				Command: launcher.AgentCmd(sess, launcher.ResumeStored),
 			},
 			sessionID:    a.SessionID,
 			transcriptOK: statErr == nil,

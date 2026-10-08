@@ -19,7 +19,10 @@ func (m model) View() string {
 	case modePicker:
 		lines = m.pickerLines(inner)
 	case modeName:
-		lines = m.nameLines(inner)
+		lines = m.nameLines(inner, "name")
+	case modeKind:
+		popup := m.kindPopup(inner)
+		lines = overlay(m.nameLines(inner, "kind"), popup, m.popupTop(len(popup)), inner)
 	default:
 		lines = m.listLines(inner)
 	}
@@ -127,7 +130,8 @@ func (m model) rowLines(inner, n int) []string {
 	return lines
 }
 
-// renderRow draws one agent as two lines: dot and name, then the title.
+// renderRow draws one agent as two lines: dot, name and the kind badge of a
+// row that is not claude's, then the title.
 func (m model) renderRow(a Agent, selected bool, inner int) []string {
 	var bg lipgloss.TerminalColor = lipgloss.NoColor{}
 	marker := " "
@@ -144,13 +148,26 @@ func (m model) renderRow(a Agent, selected bool, inner int) []string {
 	if selected && m.mode == modeRename {
 		head = ansi.Truncate(m.input.View(), textWidth, "")
 	} else {
-		head = seg(nameStyle, bg, truncate(a.Name, textWidth))
+		head = m.nameWithBadge(a, bg, textWidth)
 	}
 	first := seg(markerStyle, bg, marker) + m.dot(a.State, bg) + seg(plainStyle, bg, " ") + head
 
 	second := m.titleLine(a, bg, textWidth)
 
 	return []string{padRow(first, inner, bg), padRow(second, inner, bg)}
+}
+
+// nameWithBadge is the name on a row's first line, followed by the kind
+// badge when the row is not claude's; the name gives way to the badge when
+// both do not fit.
+func (m model) nameWithBadge(a Agent, bg lipgloss.TerminalColor, textWidth int) string {
+	badge := kindBadge(a.Kind)
+	if badge == "" {
+		return seg(nameStyle, bg, truncate(a.Name, textWidth))
+	}
+	badge = " " + badge
+	name := truncate(a.Name, textWidth-ansi.StringWidth(badge))
+	return seg(nameStyle, bg, name) + seg(kindStyle, bg, badge)
 }
 
 // titleLine is a row's second line: Claude's title, or the session directory

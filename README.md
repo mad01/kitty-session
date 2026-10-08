@@ -2,6 +2,8 @@
 
 `ks` is a session manager for [kitty](https://sw.kovidgoyal.net/kitty/). It runs a kitty instance of its own in which every [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) session is a tab: the `ks` sidebar on the left, claude on the right. It tracks each session's state, brings every session back with one command, and lets you jump between them from the sidebar or shell scripts.
 
+A session's right-hand window does not have to be claude. Each session record carries an agent kind: `claude` (the default), `pi`, or `shell` for a plain kitty shell with no agent. Pass `--agent pi` or `--agent shell` to `ks new` and `ks tmp`, or pick the kind in the sidebar's new-agent flow; the sidebar shows a `pi` or `sh` badge after the name of a session that is not claude's. A reopen starts the same kind again, with `pi --session` picking up pi's own session file the way `claude --resume` does for claude.
+
 ## Screenshots
 
 ### Session list
