@@ -3,8 +3,9 @@ package sidebar
 import tea "github.com/charmbracelet/bubbletea"
 
 // kindOptions are the agent kinds the chooser offers, in display order, as
-// Backend.New takes them: the session.Agent* values. claude comes first and
-// is the default.
+// Backend.New takes them. They mirror session.Kinds; kind_test.go pins the
+// two together so the sidebar stays free of the session import. claude comes
+// first and is the default.
 var kindOptions = []string{"claude", "pi", "shell"}
 
 // kindBadge is the short label a row shows after its name for a kind other

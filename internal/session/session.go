@@ -29,6 +29,10 @@ const (
 	AgentShell  = "shell"
 )
 
+// Kinds lists every agent kind, claude first as the default, in the order
+// the CLI validates and the sidebar's chooser offers them.
+var Kinds = []string{AgentClaude, AgentPi, AgentShell}
+
 // idBytes is the length of a random session ID before hex encoding.
 const idBytes = 16
 

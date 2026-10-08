@@ -41,7 +41,7 @@ A reopen (bare `ks`, `ks open`, the sidebar's `enter` on a stopped row) runs `pi
 Three things have to be in place:
 
 1. `pi` on the PATH of whoever runs `ks`. Every launch forwards `PATH` into the session's windows, so a `pi` under `~/.local/bin` or a mise shim works too.
-2. The extension in `~/.pi/agent/extensions/`. The dotfiles recipe symlinks `pi/ks-agent-state.ts` from the ks checkout into that directory; pi loads every file there at startup. Without it a pi row shows `stopped` the moment its tab is out of sight and never changes.
+2. The extension in `~/.pi/agent/extensions/`. The dotfiles recipe symlinks `pi/ks-agent-state.ts` from the ks checkout into that directory; pi loads every file there at startup. Without it nothing writes the state file, so a pi row stays `idle` whatever pi is doing.
 3. `KS_EXE` in the session's environment, set by the launcher to the `ks` binary that opened the session. The extension runs that binary, so a branch build of `ks` reports to itself rather than to whatever `ks` is first on PATH. Unset, it falls back to `ks`.
 
 Check an open session with:
@@ -54,7 +54,7 @@ A pi session that never gets past `waiting` after you send a message has no work
 
 ## Limitations
 
-- **No title glyph.** The sidebar's second line shows the session directory, never a task title, and `ks list` has nothing to classify: a pi session with a stale state file reads as `waiting`.
+- **No title glyph.** The sidebar's second line shows the session directory, never a task title, and `ks list` has nothing to classify: it prints whatever the state file says, at any age, and `idle` without one.
 - **No `--agent` monitor.** The background Haiku classifier knows Claude Code's screen, not pi's. Install the extension instead.
 - **`ks import` stays claude-only.** herdr records for pi panes are skipped.
 - **Unverified on `SIGHUP`.** pi's source says its signal handler runs the shutdown handlers before exiting, which is what the state-file removal relies on; the extension hasn't been exercised against a real `ks quit` yet. Should the state file survive one, nothing breaks: a record whose window is gone shows `stopped` whatever the file says.

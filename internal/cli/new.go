@@ -38,16 +38,13 @@ func init() {
 // agentFlagUsage is the help text of the --agent flag on new and tmp.
 const agentFlagUsage = "agent kind: claude, pi or shell"
 
-// agentKinds are the values --agent accepts, the session.Agent* constants.
-var agentKinds = []string{session.AgentClaude, session.AgentPi, session.AgentShell}
-
-// parseKind checks an --agent value against agentKinds, before anything
+// parseKind checks an --agent value against session.Kinds, before anything
 // starts the instance on its account.
 func parseKind(s string) (string, error) {
-	if slices.Contains(agentKinds, s) {
+	if slices.Contains(session.Kinds, s) {
 		return s, nil
 	}
-	return "", fmt.Errorf("unknown agent %q (one of %s)", s, strings.Join(agentKinds, ", "))
+	return "", fmt.Errorf("unknown agent %q (one of %s)", s, strings.Join(session.Kinds, ", "))
 }
 
 func runNew(cmd *cobra.Command, args []string) error {

@@ -51,6 +51,7 @@ For everything else — first session, configuration, subcommands, hooks — see
 - [Command reference](docs/commands.md) — every subcommand and flag
 - [Repo finder](docs/repo-finder.md) — `ks repo` and its output formats
 - [Hooks and state detection](docs/hooks-and-state.md) — how `ks` knows what Claude is doing
+- [Sessions running pi](docs/pi.md): hosting the pi coding agent, its state, resume and install
 - [Summary tab](docs/summary-tab.md) — deprecated, kept for the record
 - [Architecture](docs/architecture.md) — package layout, data flow, extending `ks`
 - [Troubleshooting](docs/troubleshooting.md) — common failures and fixes
