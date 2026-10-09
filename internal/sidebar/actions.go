@@ -3,6 +3,7 @@ package sidebar
 import (
 	"errors"
 	"os"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,10 +25,12 @@ type doneMsg struct {
 	retry   *newAttempt // on failure, reopen the name prompt for this attempt
 }
 
-// newAttempt is a pending "new agent": the name, plus either the directory
-// or the request for a fresh scratch directory.
+// newAttempt is a pending "new agent": the name, the agent kind (one of
+// kindOptions; empty until chosen, and then claude), plus either the
+// directory or the request for a fresh scratch directory.
 type newAttempt struct {
 	name string
+	kind string
 	dir  string
 	tmp  bool
 }
@@ -175,22 +178,22 @@ func (m model) openPicker() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.picker.input.Focus(), m.reposCmd())
 }
 
-// pickDir turns the chosen picker entry into a new-agent attempt. A tmp
-// entry gets a time-stamped name like ks tmp; a repo without a suggested
-// name goes to the name prompt.
+// pickDir turns the chosen picker entry into a new-agent attempt and moves
+// on to the kind chooser. A tmp entry gets a time-stamped name like ks tmp;
+// a repo without a suggested name goes to the name prompt first.
 func (m model) pickDir() (tea.Model, tea.Cmd) {
 	item, ok := m.picker.selected()
 	if !ok {
 		return m, nil
 	}
 	if item.tmp {
-		return m.createAgent(newAttempt{name: "tmp-" + m.now().Format(tmpNameLayout), tmp: true})
+		return m.askKind(newAttempt{name: "tmp-" + m.now().Format(tmpNameLayout), tmp: true})
 	}
 	name := m.backend.SuggestName(item.path)
 	if name == "" {
 		return m.askName(newAttempt{dir: item.path})
 	}
-	return m.createAgent(newAttempt{name: name, dir: item.path})
+	return m.askKind(newAttempt{name: name, dir: item.path})
 }
 
 // askName opens the name prompt for a pending attempt.
@@ -202,14 +205,23 @@ func (m model) askName(a newAttempt) (model, tea.Cmd) {
 	return m, activate(&m.input, a.name)
 }
 
-// createAgent validates the name, then creates the session off the update
-// loop. A failure reopens the name prompt with the error shown.
+// askKind opens the kind chooser for a named attempt, with the cursor on
+// the attempt's kind (claude when none was chosen yet). The name prompt
+// stays on screen under the chooser, showing the name the agent will get.
+func (m model) askKind(a newAttempt) (model, tea.Cmd) {
+	m.mode = modeKind
+	m.pending = a
+	m.kindIdx = max(slices.Index(kindOptions, a.kind), 0)
+	m.input.Width = m.inputWidth()
+	m.input.SetValue(a.name)
+	m.input.Blur()
+	m.picker.input.Blur()
+	return m, nil
+}
+
+// createAgent creates the session off the update loop. A failure reopens
+// the name prompt with the error shown.
 func (m model) createAgent(a newAttempt) (tea.Model, tea.Cmd) {
-	a.name = strings.TrimSpace(a.name)
-	if a.name == "" {
-		m.setError(errNameRequired)
-		return m, nil
-	}
 	m.mode = modeList
 	m.input.Blur()
 	m.picker.input.Blur()
@@ -228,7 +240,7 @@ func newCmd(backend Backend, a newAttempt) tea.Cmd {
 				return doneMsg{err: err, retry: &a}
 			}
 		}
-		if err := backend.New(a.name, dir); err != nil {
+		if err := backend.New(a.name, dir, a.kind); err != nil {
 			if a.tmp && dir != "" {
 				_ = os.RemoveAll(dir)
 			}

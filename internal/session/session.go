@@ -20,6 +20,19 @@ const (
 	StatusStopped = "stopped"
 )
 
+// Agent kinds for Session.Agent: the program in the session's right-hand
+// window. An empty Agent, as written by ks versions that predate the field,
+// means claude; use Kind to read it.
+const (
+	AgentClaude = "claude"
+	AgentPi     = "pi"
+	AgentShell  = "shell"
+)
+
+// Kinds lists every agent kind, claude first as the default, in the order
+// the CLI validates and the sidebar's chooser offers them.
+var Kinds = []string{AgentClaude, AgentPi, AgentShell}
+
 // idBytes is the length of a random session ID before hex encoding.
 const idBytes = 16
 
@@ -52,6 +65,15 @@ type Session struct {
 	// ClaudeTranscriptPath is the transcript_path from that same hook. The
 	// launcher only resumes while this file still exists.
 	ClaudeTranscriptPath string `json:"claude_transcript_path,omitempty"`
+	// Agent is the program in the session's right-hand window: AgentClaude,
+	// AgentPi or AgentShell. Empty means claude; read it through Kind.
+	Agent string `json:"agent,omitempty"`
+	// PiSessionID and PiSessionPath are pi's session id and session file
+	// from the last session_start the ks pi extension reported, used for
+	// pi --session on reopen while the file still exists. Only AgentPi
+	// records carry them.
+	PiSessionID   string `json:"pi_session_id,omitempty"`
+	PiSessionPath string `json:"pi_session_path,omitempty"`
 	// FocusedAt is when the launcher last created or focused the session.
 	// Attach brings the most recently focused session to the front.
 	FocusedAt time.Time `json:"focused_at,omitzero"`
@@ -88,6 +110,15 @@ func NewID() string {
 		panic("session: crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
+}
+
+// Kind returns the session's agent kind, AgentClaude for records written
+// before the field existed.
+func (s *Session) Kind() string {
+	if s.Agent == "" {
+		return AgentClaude
+	}
+	return s.Agent
 }
 
 // IsActive reports whether the user has not stopped the session. Records

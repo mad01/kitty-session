@@ -33,7 +33,6 @@ func (f *fakeBackend) record(format string, args ...any) error {
 
 func (f *fakeBackend) List() ([]Agent, error)       { return f.agents, nil }
 func (f *fakeBackend) Focus(name string) error      { return f.record("focus:%s", name) }
-func (f *fakeBackend) New(name, dir string) error   { return f.record("new:%s:%s", name, dir) }
 func (f *fakeBackend) Restore(name string) error    { return f.record("restore:%s", name) }
 func (f *fakeBackend) Trashed() ([]string, error)   { return f.trashed, nil }
 func (f *fakeBackend) FocusAgentWindow() error      { return f.record("focus-agent") }
@@ -71,6 +70,10 @@ func (f *fakeBackend) PinWidth(cols int) error {
 }
 
 func (f *fakeBackend) Focused() (bool, error) { return f.focused, f.focusErr }
+
+func (f *fakeBackend) New(name, dir, kind string) error {
+	return f.record("new:%s:%s:%s", name, dir, kind)
+}
 
 var errFake = errors.New("fake failure")
 

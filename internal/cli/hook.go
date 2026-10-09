@@ -57,7 +57,7 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return nil // a claude nested inside the session, not the one ks launched
 	}
 
-	payload, err := readHookPayload(cmd.InOrStdin())
+	payload, err := readHookPayload[hookPayload](cmd.InOrStdin())
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,10 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	store, sess := loadHookSession(stderr, os.Getenv("KS_SESSION_ID"), name)
+	store, sess, err := loadHookSession(os.Getenv("KS_SESSION_ID"), name)
+	if err != nil {
+		hookWarn(stderr, err)
+	}
 	if sess != nil {
 		name = sess.Name // state files follow the record's current name
 	}
@@ -89,8 +92,10 @@ func runHook(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func readHookPayload(r io.Reader) (hookPayload, error) {
-	var payload hookPayload
+// readHookPayload decodes the JSON object a hook handler is given on stdin:
+// hookPayload for _hook, piHookPayload for _pi-hook.
+func readHookPayload[T any](r io.Reader) (T, error) {
+	var payload T
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return payload, fmt.Errorf("cannot read stdin: %w", err)
@@ -122,21 +127,20 @@ func stateForEvent(p hookPayload) string {
 }
 
 // loadHookSession returns the record the event belongs to, or a nil session
-// with the reason on stderr. Lookup is by KS_SESSION_ID first, so a renamed
-// session still finds its record, then by KS_SESSION_NAME for records that
-// predate the id (findSession).
-func loadHookSession(stderr io.Writer, id, name string) (*session.Store, *session.Session) {
+// with the reason as the error; the store still comes back when only the
+// lookup failed. Lookup is by KS_SESSION_ID first, so a renamed session still
+// finds its record, then by KS_SESSION_NAME for records that predate the id
+// (findSession). Both hook handlers share it.
+func loadHookSession(id, name string) (*session.Store, *session.Session, error) {
 	store, err := session.NewStore()
 	if err != nil {
-		hookWarn(stderr, err)
-		return nil, nil
+		return nil, nil, err
 	}
 	sess, err := findSession(store, id, name)
 	if err != nil {
-		hookWarn(stderr, err)
-		return store, nil
+		return store, nil, err
 	}
-	return store, sess
+	return store, sess, nil
 }
 
 // recordClaudeSession stores Claude's session_id and transcript path on the

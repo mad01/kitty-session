@@ -15,7 +15,7 @@ var keyHelps = []keyHelp{
 	{"enter", "focus / reopen"},
 	{"1-9", "jump"},
 	{"l tab q", "to agent"},
-	{"n", "new"},
+	{"n", "new (repo, kind)"},
 	{"r", "rename"},
 	{"c", "close keep"},
 	{"d", "delete"},

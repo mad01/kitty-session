@@ -42,7 +42,11 @@ func (s State) String() string {
 
 // Agent is one row of the sidebar.
 type Agent struct {
-	Name  string
+	Name string
+	// Kind is the session's agent kind as session.Kind reports it: claude,
+	// pi or shell. Empty counts as claude. Rows of another kind than claude
+	// carry a badge after the name.
+	Kind  string
 	Dir   string
 	Title string // Claude's tab title, already stripped of its state glyph; empty falls back to Dir
 	State State
@@ -72,8 +76,9 @@ type Backend interface {
 	List() ([]Agent, error)
 	// Focus brings the named session's tab to the front, reopening it if its tab is gone.
 	Focus(name string) error
-	// New creates a session rooted at dir; an empty name derives one from dir.
-	New(name, dir string) error
+	// New creates a session of the given agent kind (claude, pi or shell;
+	// empty means claude) rooted at dir; an empty name derives one from dir.
+	New(name, dir, kind string) error
 	// SuggestName returns the default session name for dir, or "" when it has none.
 	SuggestName(dir string) string
 	// TmpDir creates and returns a fresh scratch directory for the picker's tmp entry.

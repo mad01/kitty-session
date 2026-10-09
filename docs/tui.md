@@ -19,8 +19,8 @@ Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instanc
 
 The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Its border is light green while the sidebar window has the keyboard and muted gray otherwise, so the frame tells you which side of the tab has focus. Under the `agents … tab order` header each agent takes two lines:
 
-- A dot for the state, then the name. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background.
-- Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one.
+- A dot for the state, then the name. A session whose agent is not claude carries a badge after the name: `pi` for a pi session, `sh` for a plain shell. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background.
+- Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one. A pi or shell row shows its window's title the same way, or the directory.
 
 The footer has two labels, `new` and `menu`, and the line above it shows the result of the last action or its error until the next key. The list refreshes every three seconds and after every action; the `working` and `input` dots pulse.
 
@@ -34,7 +34,7 @@ The footer has two labels, `new` and `menu`, and the line above it shows the res
 | `○` | `idle` | Claude is at its prompt and the result has been seen |
 | `·` | `stopped` | The record is stopped, or no claude window carries the session's tag |
 
-Each row's state comes from one `kitty @ ls` snapshot plus the session's state file. First match wins:
+Each row's state comes from one `kitty @ ls` snapshot plus the session's state file. The rules depend on the agent kind. A shell row is `stopped` when its record is stopped or its window is gone, and `idle` otherwise: nothing reports a shell's state. A pi row has no title glyph to read, so its state file decides alone, whatever its age; the ks pi extension writes it (see [pi](pi.md)). `input` and `working` show as they say. `idle` is `done` when the file is newer than the record's `viewed_at` and `idle` otherwise. Anything else (`waiting`, no file) is `idle`. For a claude row, first match wins:
 
 1. Record `stopped`, or no claude window tagged with the session's id: `stopped`.
 2. State file says `input` and is less than 10 s old: `input`.
@@ -58,7 +58,7 @@ Rows follow the tab order of the ks instance: the top row is the first tab, whic
 | `1`-`9` | Jump to that row and focus it |
 | `enter` | Focus the agent under the cursor; a tab that is gone is recreated |
 | `l`, `tab`, `q` | Hand the keyboard to this tab's claude window |
-| `n` | New agent: open the repo picker |
+| `n` | New agent: the repo picker, then the kind (claude, pi or shell) |
 | `r` | Rename the agent under the cursor |
 | `c` | Close its tab, keeping the record (asks first) |
 | `d` | Delete it: close the tab and trash the record (asks first) |
@@ -81,7 +81,9 @@ Left click selects and focuses a row, opens the picker from the `new` label, ope
 
 The picker shows `tmp` first, then every git repository under the configured `dirs`, scanned while you type. Typing filters the list (fuzzy); `↑`/`↓` or `ctrl+p`/`ctrl+n` move, `enter` picks, `esc` goes back. `tmp` creates a scratch directory under `tmpdir`, like `ks tmp`.
 
-The session name is the directory's base name plus the checked-out git branch, lower-cased with other characters collapsed to hyphens (`kitty-session-main`). When that name is free the tab is created at once. When it is taken, or a directory has no name to offer, a name prompt opens with the suggestion and the reason; `enter` creates, `esc` returns to the picker.
+The session name is the directory's base name plus the checked-out git branch, lower-cased with other characters collapsed to hyphens (`kitty-session-main`). When a directory has no name to offer, a name prompt opens first; `enter` takes the name on, `esc` returns to the picker.
+
+The last step is the kind: a small popup over the name screen listing `claude`, `pi` and `shell`, with the cursor on `claude`. `j`/`k` or the arrows move, `enter` creates the session with that kind (so `enter` alone gives you claude, as before), `esc` goes back to the name prompt with the chosen kind remembered. When the name turns out to be taken, the name prompt reopens with the reason; `enter` there returns to the kind popup.
 
 ## Rename (`r`)
 

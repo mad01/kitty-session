@@ -2,13 +2,19 @@
 
 `ks` shows a live state badge next to every session: `working`, `idle`, `input`, `waiting`, or `stopped`. This doc explains where each value comes from.
 
-There are three ways `ks` can learn a session's state, in preference order:
+Where it comes from depends on the session's agent kind (the `agent` field of the record; see [Command reference](commands.md#ks-new)):
+
+- **claude**: the three sources below, in preference order. This is the bulk of this doc.
+- **pi**: the ks pi extension, `pi/ks-agent-state.ts`, which reports pi's lifecycle events to the hidden `ks _pi-hook` command; that writes the same state file and keeps the record's `pi_session_id` and `pi_session_path` current. There is no title glyph and no text classifier for pi, so the state file is the only source, whatever its age. See [pi](pi.md).
+- **shell**: nothing. A shell session has no state file and shows `idle` while its window is there, `stopped` otherwise.
+
+There are three ways `ks` can learn a claude session's state, in preference order:
 
 1. **Claude Code hooks** (most accurate; preferred)
 2. **Background Haiku agent** (optional fallback)
 3. **Terminal text heuristics** (always-on fallback)
 
-All three write or read through the same interface: a state file at `~/.config/ks/state/<session-name>.json`.
+All three write or read through the same interface: a state file at `~/.config/ks/state/<session-name>.json`, the file the pi extension writes too.
 
 ## State file
 
@@ -57,7 +63,7 @@ An install made before an event was added to `ks` lacks that event. The sidebar'
 
 `Notification` is registered for `permission_prompt` and `elicitation_dialog` only. Claude Code also sends `idle_prompt` after about a minute at an empty prompt. Mapping it to `input` would turn every idle session into a false "waiting on you" and bury the real ones. `done` and `idle` already cover that case. Should another type ever belong here, it is one more alternative in the `Notification` matcher in `internal/hooks/hooks.go` and a case in `stateForEvent` in `internal/cli/hook.go`.
 
-Every launch path (`ks new`, `ks open`, `ks tmp`, the sidebar) exports two variables into both of the session's windows: `KS_SESSION_NAME=<name>` and `KS_SESSION_ID=<id>`. The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the sidebar does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
+Every launch path (`ks new`, `ks open`, `ks tmp`, the sidebar) exports three variables into both of the session's windows: `KS_SESSION_NAME=<name>`, `KS_SESSION_ID=<id>` and `KS_EXE=<path of the ks binary>` (the pi extension runs `$KS_EXE _pi-hook`, so it reaches the build that made the session). The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the sidebar does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
 
 Two more guards keep the record honest:
 
@@ -147,7 +153,7 @@ ls ~/.config/ks/state/
 cat ~/.config/ks/state/<name>.json
 ```
 
-`ks list` prints the current state alongside the name and directory. The sidebar's dot is computed separately (it adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it), so the two can differ.
+`ks list` prints the current state alongside the name, the agent kind and the directory. The sidebar's dot is computed separately (it adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it), so the two can differ. For a pi session both read the state file alone; for a shell both say `idle`.
 
 ## Cleaning state
 

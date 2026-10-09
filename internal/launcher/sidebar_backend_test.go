@@ -228,6 +228,105 @@ func TestResolveState(t *testing.T) {
 			sidebar.StateInput,
 		},
 		{
+			"pi: stopped record",
+			stateInput{kind: session.AgentPi, hasWindow: true, fileState: "working", fileAt: fresh},
+			sidebar.StateStopped,
+		},
+		{
+			"pi: window gone",
+			stateInput{kind: session.AgentPi, active: true, fileState: "working", fileAt: fresh},
+			sidebar.StateStopped,
+		},
+		{
+			"pi: fresh input",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "input", fileAt: fresh,
+			},
+			sidebar.StateInput,
+		},
+		{
+			"pi: fresh working",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "working", fileAt: fresh,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"pi: input hours old stays input",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "input", fileAt: hoursOld,
+			},
+			sidebar.StateInput,
+		},
+		{
+			"pi: working hours old stays working",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "working", fileAt: hoursOld,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"pi: idle after last view is done",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "idle", fileAt: stale, viewedAt: viewed,
+			},
+			sidebar.StateDone,
+		},
+		{
+			"pi: idle before last view is idle",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "idle", fileAt: viewed, viewedAt: stale,
+			},
+			sidebar.StateIdle,
+		},
+		{
+			"pi: a working title glyph means nothing",
+			stateInput{kind: session.AgentPi, active: true, hasWindow: true, title: "◐ busy"},
+			sidebar.StateIdle,
+		},
+		{
+			"pi: waiting is idle",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "waiting", fileAt: fresh,
+			},
+			sidebar.StateIdle,
+		},
+		{
+			"pi: no state file",
+			stateInput{kind: session.AgentPi, active: true, hasWindow: true},
+			sidebar.StateIdle,
+		},
+		{
+			"shell: stopped record",
+			stateInput{kind: session.AgentShell, hasWindow: true},
+			sidebar.StateStopped,
+		},
+		{
+			"shell: window gone",
+			stateInput{kind: session.AgentShell, active: true},
+			sidebar.StateStopped,
+		},
+		{
+			"shell: alive is idle whatever the title",
+			stateInput{kind: session.AgentShell, active: true, hasWindow: true, title: "◐ make"},
+			sidebar.StateIdle,
+		},
+		{
+			"shell: a stray state file is ignored",
+			stateInput{
+				kind: session.AgentShell, active: true, hasWindow: true,
+				fileState: "input", fileAt: fresh,
+			},
+			sidebar.StateIdle,
+		},
+		{
 			"stopped record with an input file",
 			stateInput{hasWindow: true, title: "✳ Claude Code", fileState: "input", fileAt: hoursOld},
 			sidebar.StateStopped,
@@ -315,6 +414,55 @@ func TestListMatchesWindowsByTagAndFillsRows(t *testing.T) {
 	}
 	if n := countCalls(f, "Windows"); n != 1 {
 		t.Errorf("List took %d snapshots, want 1: %v", n, f.calls)
+	}
+}
+
+// TestListReportsKind checks that each row carries its record's kind and
+// that the kind picks the state rules: a pi row follows its state file with
+// no title to read, a shell row is idle.
+func TestListReportsKind(t *testing.T) {
+	b, f, _ := newTestBackend(t)
+	states := fakeStates{}
+	b.readState = states.read
+
+	pi := session.New("pi-one", "/work/pi", 0, 0)
+	pi.Agent = session.AgentPi
+	f.addTab(pi, true)
+	f.find(pi.KittyWindowID).Title = "pi"
+	states["pi-one"] = struct {
+		state string
+		at    time.Time
+	}{"input", b.l.now().Add(-time.Hour)}
+
+	sh := session.New("sh-one", "/work/sh", 0, 0)
+	sh.Agent = session.AgentShell
+	f.addTab(sh, true)
+	f.find(sh.KittyWindowID).Title = "◐ make"
+
+	old := session.New("old", "/work/old", 0, 0) // a record from before the field
+	f.addTab(old, true)
+
+	for _, s := range []*session.Session{pi, sh, old} {
+		if err := b.l.store.Save(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agents, err := b.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byName := map[string]sidebar.Agent{}
+	for _, a := range agents {
+		byName[a.Name] = a
+	}
+	if a := byName["pi-one"]; a.Kind != session.AgentPi || a.State != sidebar.StateInput {
+		t.Errorf("pi row = %+v, want kind pi at input", a)
+	}
+	if a := byName["sh-one"]; a.Kind != session.AgentShell || a.State != sidebar.StateIdle {
+		t.Errorf("shell row = %+v, want kind shell at idle", a)
+	}
+	if a := byName["old"]; a.Kind != session.AgentClaude {
+		t.Errorf("old row kind = %q, want claude", a.Kind)
 	}
 }
 
@@ -557,17 +705,23 @@ func TestShellSplitAndFocusAgentWindow(t *testing.T) {
 func TestSessionActions(t *testing.T) {
 	b, f, _ := newTestBackend(t)
 
-	if err := b.New("", "/work/Fresh Dir"); err != nil {
+	if err := b.New("", "/work/Fresh Dir", ""); err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if !b.l.store.Exists("fresh-dir") {
 		t.Error("New without a name did not derive one from the directory")
 	}
-	if err := b.New("fresh-dir", "/work/x"); !errors.Is(err, ErrExists) {
+	if err := b.New("fresh-dir", "/work/x", ""); !errors.Is(err, ErrExists) {
 		t.Errorf("New with a taken name: %v, want ErrExists", err)
 	}
-	if err := b.New("", ""); err == nil {
+	if err := b.New("", "", ""); err == nil {
 		t.Error("New with nothing to name it from returned nil")
+	}
+	if err := b.New("pi-one", "/work/p", session.AgentPi); err != nil {
+		t.Fatalf("New pi: %v", err)
+	}
+	if got, err := b.l.store.Load("pi-one"); err != nil || got.Agent != session.AgentPi {
+		t.Errorf("New with a kind stored Agent %q (%v), want pi", got.Agent, err)
 	}
 
 	if err := b.Rename("fresh-dir", "renamed"); err != nil {

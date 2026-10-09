@@ -17,6 +17,7 @@ const (
 	modeMenu                // the footer menu popup
 	modePicker              // the repo picker for a new agent
 	modeName                // naming a new agent after the picker
+	modeKind                // choosing the new agent's kind, the last step before it is created
 	modeRename              // inline rename of the cursor row
 	modeConfirm             // y/n before close or delete
 	modeRestore             // picking a trashed session to restore
@@ -104,7 +105,8 @@ type model struct {
 
 	confirm  confirmAction
 	target   string     // agent the confirm, rename or restore acts on
-	pending  newAttempt // new agent awaiting a name
+	pending  newAttempt // new agent awaiting a name or a kind
+	kindIdx  int        // cursor in the kind chooser, an index into kindOptions
 	trashed  []string
 	trashIdx int
 	follow   string // agent to put the cursor on after the next List

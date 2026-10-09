@@ -141,7 +141,7 @@ func (b *SidebarBackend) markViewed(sess *session.Session) (*session.Session, er
 // position of the session's tab in kitty's order, zero without one.
 func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int) sidebar.Agent {
 	w := lv.claude
-	in := stateInput{active: sess.IsActive(), viewedAt: sess.ViewedAt}
+	in := stateInput{kind: sess.Kind(), active: sess.IsActive(), viewedAt: sess.ViewedAt}
 	if w != nil {
 		in.hasWindow, in.title = true, w.Title
 	}
@@ -151,6 +151,7 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 	st := resolveState(in)
 	return sidebar.Agent{
 		Name:    sess.Name,
+		Kind:    in.kind,
 		Dir:     sess.Dir,
 		Title:   b.title(in, sess.Dir),
 		State:   st,
@@ -171,23 +172,33 @@ func (b *SidebarBackend) waiting(st sidebar.State, fileAt time.Time) time.Durati
 
 // stateInput is everything resolveState looks at for one session.
 type stateInput struct {
+	kind      string // the session's agent kind, as session.Kind reports it
 	active    bool   // the record is not stopped
-	hasWindow bool   // the claude window is in the instance
-	title     string // the claude window's title
+	hasWindow bool   // the agent window is in the instance
+	title     string // the agent window's title
 	fileState string // the state file's state, "" without a file
 	fileAt    time.Time
 	viewedAt  time.Time
 }
 
-// resolveState picks the sidebar state for one session. First match wins:
+// resolveState picks the sidebar state for one session. Whatever the kind,
+// a stopped record or a missing agent window is stopped. A shell session is
+// idle otherwise: nothing reports its state. For claude, first match wins:
 //
-//	record stopped, or claude window gone           → stopped
 //	state file fresh and input                      → input
 //	state file fresh and working                    → working
 //	title glyph working                             → working
 //	state file input, whatever its age              → input
 //	title glyph idle (✳)                            → done if the state file says idle later than viewed_at, else idle
 //	no glyph: state file working                    → working
+//	anything else (idle, waiting, no state file)    → idle
+//
+// A pi session has no title glyph, so only the state file, written by the ks
+// pi extension, speaks:
+//
+//	state file input, whatever its age              → input
+//	state file working, whatever its age            → working
+//	state file idle later than viewed_at            → done
 //	anything else (idle, waiting, no state file)    → idle
 //
 // A fresh working state file outranks the ✳ idle title because ✳ is also one
@@ -206,6 +217,19 @@ func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
 	}
+	switch in.kind {
+	case session.AgentShell:
+		return sidebar.StateIdle
+	case session.AgentPi:
+		return fileOnlyState(in)
+	default:
+		return claudeState(in)
+	}
+}
+
+// claudeState is resolveState's claude branch: the state file and the title
+// glyph arbitrated as the doc comment's table says.
+func claudeState(in stateInput) sidebar.State {
 	fileState := claude.ParseState(in.fileState)
 	fresh := state.IsFresh(in.fileAt)
 	if fresh && fileState == claude.StateNeedsInput {
@@ -233,6 +257,24 @@ func resolveState(in stateInput) sidebar.State {
 	return sidebar.StateIdle
 }
 
+// fileOnlyState is resolveState's pi branch: the state file alone, with no
+// title to arbitrate against, so its age plays no part.
+func fileOnlyState(in stateInput) sidebar.State {
+	switch claude.ParseState(in.fileState) {
+	case claude.StateNeedsInput:
+		return sidebar.StateInput
+	case claude.StateWorking:
+		return sidebar.StateWorking
+	case claude.StateIdle:
+		if in.fileAt.After(in.viewedAt) {
+			return sidebar.StateDone
+		}
+		return sidebar.StateIdle
+	default:
+		return sidebar.StateIdle
+	}
+}
+
 // title is the claude window's title minus its state glyph, or the session
 // directory with $HOME shortened to ~ when there is no window or no title.
 func (b *SidebarBackend) title(in stateInput, dir string) string {
@@ -251,16 +293,17 @@ func (b *SidebarBackend) Focus(name string) error {
 	return err
 }
 
-// New creates a session rooted at dir. An empty name takes SuggestName's.
-// ErrExists comes back unchanged so the UI can ask for another name.
-func (b *SidebarBackend) New(name, dir string) error {
+// New creates a session of the given agent kind rooted at dir; an empty
+// kind means claude. An empty name takes SuggestName's. ErrExists comes back
+// unchanged so the UI can ask for another name.
+func (b *SidebarBackend) New(name, dir, kind string) error {
 	if name == "" {
 		name = SuggestName(dir)
 	}
 	if name == "" {
 		return errors.New("launcher: a session name is required")
 	}
-	_, err := b.l.Open(Request{Name: name, Dir: dir, Resume: ResumeNone})
+	_, err := b.l.Open(Request{Name: name, Dir: dir, Resume: ResumeNone, Agent: kind})
 	return err
 }
 

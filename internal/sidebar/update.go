@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -81,6 +83,8 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updatePicker(msg)
 	case modeName:
 		return m.updateName(msg)
+	case modeKind:
+		return m.updateKind(msg)
 	case modeRename:
 		return m.updateRename(msg)
 	case modeConfirm:
@@ -215,7 +219,8 @@ func (m model) updateRestore(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateName edits the name of a new agent after the picker.
+// updateName edits the name of a new agent after the picker. Enter takes a
+// non-empty name on to the kind chooser.
 func (m model) updateName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -224,8 +229,12 @@ func (m model) updateName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.picker.input.Focus()
 	case "enter":
 		a := m.pending
-		a.name = m.input.Value()
-		return m.createAgent(a)
+		a.name = strings.TrimSpace(m.input.Value())
+		if a.name == "" {
+			m.setError(errNameRequired)
+			return m, nil
+		}
+		return m.askKind(a)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
