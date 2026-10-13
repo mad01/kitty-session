@@ -267,6 +267,14 @@ type Window struct {
 	// Focused is true when the window has keyboard focus: the active window
 	// of the active tab in the OS window the user is typing in.
 	Focused bool
+	// Status is the state of the most urgent Program Status Protocol record
+	// the window carries, "" when it carries none: a kitty older than the
+	// protocol, an empty list, or only states ks does not know. Records live
+	// with the window: kitty drops done and error records when the window
+	// is focused or gets a keypress, and working, blocked and idle ones when
+	// the shell prints a new prompt or the process exits. A closed window
+	// takes its records with it.
+	Status ProgramState
 }
 
 // ls JSON shapes, limited to the fields ks reads.
@@ -286,6 +294,7 @@ type (
 		Columns   int               `json:"columns"`
 		IsFocused bool              `json:"is_focused"`
 		UserVars  map[string]string `json:"user_vars"`
+		Status    []lsProgramStatus `json:"program_status"`
 	}
 )
 
@@ -320,6 +329,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					Home:      w.UserVars[HomeVar] != "",
 					HomeAgent: w.UserVars[HomeAgentVar] != "",
 					Focused:   w.IsFocused,
+					Status:    mostUrgent(w.Status),
 				})
 			}
 		}

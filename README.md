@@ -4,6 +4,8 @@
 
 A session's right-hand window does not have to be claude. Each session record carries an agent kind: `claude` (the default), `pi`, or `shell` for a plain kitty shell with no agent. Pass `--agent pi` or `--agent shell` to `ks new` and `ks tmp`, or pick the kind in the sidebar's new-agent flow; the sidebar shows a `pi` or `sh` badge after the name of a session that is not claude's. A reopen starts the same kind again, with `pi --session` picking up pi's own session file the way `claude --resume` does for claude.
 
+The state next to each session comes from the agent itself where it can. Claude Code and pi report what they are doing through the Program Status Protocol (Operating System Command 7501), and kitty hands those reports to `ks` with the window list it already polls. That needs a kitty newer than 0.49.2. On older releases, and for what the protocol does not carry (the session id a reopen resumes with), `ks` relies on Claude Code hooks, the window title and the pane text.
+
 ## Screenshots
 
 ### Session list

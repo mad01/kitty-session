@@ -28,23 +28,29 @@ The footer has two labels, `new` and `menu`, and the line above it shows the res
 
 | Dot | State | Meaning |
 |---|---|---|
-| `●` pulsing red | `input` | Claude is waiting on you: a permission prompt or a question. It stays until you answer; after a minute the title line leads with how long (`waiting 12m`) |
-| `●` | `done` | Claude finished a turn and you have not looked at the tab since |
+| `●` pulsing red | `input` | The agent is waiting on you: a permission prompt or a question. It stays until you answer; after a minute the title line leads with how long (`waiting 12m`) |
+| `✗` in the error colour | `error` | The agent reported a failure and stopped. Only a program status record produces it |
+| `●` | `done` | The agent finished a turn and you have not looked at the tab since |
 | `●` pulsing amber | `working` | Claude is processing |
 | `○` | `idle` | Claude is at its prompt and the result has been seen |
 | `·` | `stopped` | The record is stopped, or no claude window carries the session's tag |
 
-Each row's state comes from one `kitty @ ls` snapshot plus the session's state file. The rules depend on the agent kind. A shell row is `stopped` when its record is stopped or its window is gone, and `idle` otherwise: nothing reports a shell's state. A pi row has no title glyph to read, so its state file decides alone, whatever its age; the ks pi extension writes it (see [pi](pi.md)). `input` and `working` show as they say. `idle` is `done` when the file is newer than the record's `viewed_at` and `idle` otherwise. Anything else (`waiting`, no file) is `idle`. For a claude row, first match wins:
+Each row's state comes from one `kitty @ ls` snapshot plus the session's state file. Three rules come first, for every kind:
 
-1. Record `stopped`, or no claude window tagged with the session's id: `stopped`.
-2. State file says `input` and is less than 10 s old: `input`.
-3. State file says `working` and is less than 10 s old: `working`. A fresh working file outranks the `✳` title below, because `✳` is also one of Claude's spinner frames, so a snapshot mid-turn can catch it.
-4. Claude's title starts with a spinner glyph: `working`.
-5. State file says `input`, however old: `input`. The hooks write `input` when a prompt appears. Nothing replaces it until the next event (your next message, a tool call, the end of the turn, the session ending), so an unanswered prompt keeps its row red for hours. The spinner title of rule 4 is the one thing that outranks it. It means you have answered and Claude is mid-turn, which the hooks do not report until its next tool call.
-6. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
-7. No glyph: the state file's `working` as is; `idle`, `waiting`, or no file at all: `idle`.
+1. Record `stopped`, or no agent window tagged with the session's id: `stopped`.
+2. State file less than 10 s old: the kind's own rules below. The hooks saw an event the record may not reflect yet.
+3. The agent window carries a program status record, an Operating System Command 7501 report from the program (see [Hooks and state detection](hooks-and-state.md#1-program-status-osc-7501-preferred)): `blocked` is `input`; `working`, `error` and `idle` are themselves; `done` is `done`, or `idle` on the tab you are looking at. The record is the program's own word. kitty 0.49.2 and older pass no records.
 
-`viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. Without the hooks there is no state file, and `done` and `input` never appear; the title glyph still gives `working` and `idle`.
+Without a record, or with a fresh state file, the rules depend on the agent kind. A shell row is `idle`: nothing else reports a shell's state. A pi row has no title glyph to read, so its state file decides alone, whatever its age; the ks pi extension writes it (see [pi](pi.md)). `input` and `working` show as they say. `idle` is `done` when the file is newer than the record's `viewed_at` and `idle` otherwise. Anything else (`waiting`, no file) is `idle`. For a claude row, first match wins:
+
+4. State file says `input` and is less than 10 s old: `input`.
+5. State file says `working` and is less than 10 s old: `working`. A fresh working file outranks the `✳` title below, because `✳` is also one of Claude's spinner frames, so a snapshot mid-turn can catch it.
+6. Claude's title starts with a spinner glyph: `working`.
+7. State file says `input`, however old: `input`. The hooks write `input` when a prompt appears. Nothing replaces it until the next event (your next message, a tool call, the end of the turn, the session ending), so an unanswered prompt keeps its row red for hours. The spinner title of rule 6 is the one thing that outranks it. It means you have answered and Claude is mid-turn, which the hooks do not report until its next tool call.
+8. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
+9. No glyph: the state file's `working` as is; `idle`, `waiting`, or no file at all: `idle`.
+
+`viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. A `done` record needs none of that, with one catch: kitty drops it on the next focus-in or keypress in the window, not on focus-out. The sidebar reads it as `idle` while its tab is active, but a result you looked at without pressing a key shows as `done` again once you switch to another tab, until the next visit. Without the hooks there is no state file. On a kitty that passes program status, `input`, `done` and `error` still come from the record. The `waiting 12m` age on an `input` row does not: it is read from the state file, so it stays at zero. On an older kitty only the title glyph is left, which gives `working` and `idle`.
 
 ### Sort
 

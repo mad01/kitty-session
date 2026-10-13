@@ -10,6 +10,7 @@ var (
 	colorMuted   = lipgloss.AdaptiveColor{Light: "#A0A1A7", Dark: "#636363"} // gray
 	colorFocus   = lipgloss.AdaptiveColor{Light: "#7BC96F", Dark: "#A6E3A1"} // light green
 	colorDanger  = lipgloss.AdaptiveColor{Light: "#E45649", Dark: "#ED567A"} // red / coral
+	colorError   = lipgloss.AdaptiveColor{Light: "#A4161A", Dark: "#FF5555"} // deep red, the error dot
 	colorTextPri = lipgloss.AdaptiveColor{Light: "#383A42", Dark: "#FFFDF5"} // foreground
 	colorTextSec = lipgloss.AdaptiveColor{Light: "#696C77", Dark: "#C1C6B2"} // dimmed foreground
 	colorOwnBG   = lipgloss.AdaptiveColor{Light: "#ECECEE", Dark: "#262A33"} // this tab's row
@@ -47,6 +48,7 @@ var (
 	markerStyle = lipgloss.NewStyle().Foreground(colorAccent)
 	plainStyle  = lipgloss.NewStyle()
 
+	dotError   = lipgloss.NewStyle().Foreground(colorError) // steady, unlike the input pulse
 	dotDone    = lipgloss.NewStyle().Foreground(colorTeal)
 	dotIdle    = lipgloss.NewStyle().Foreground(colorSuccess)
 	dotStopped = lipgloss.NewStyle().Foreground(colorMuted)
@@ -89,6 +91,7 @@ const (
 	dotFilled = "●"
 	dotHollow = "○"
 	dotFaint  = "·"
+	dotCross  = "✗" // the error row, told apart from done and input without colour
 	ownMarker = "▌"
 	ellipsis  = "…"
 )

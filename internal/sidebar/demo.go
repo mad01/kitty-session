@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// DemoBackend is an in-memory Backend with eight fake agents covering every
+// DemoBackend is an in-memory Backend with nine fake agents covering every
 // state and agent kind and a fake repo list, so the sidebar can be reviewed
 // in any terminal without kitty. Mutations are kept in memory; nothing touches the system.
 type DemoBackend struct {
@@ -58,6 +58,11 @@ func NewDemoBackend() *DemoBackend {
 			{
 				Name: "dotfiles-sh", Kind: "shell", Dir: filepath.Join(src, "dotfiles"),
 				State: StateIdle, Tab: 7,
+			},
+			{
+				Name: "brain", Dir: filepath.Join(src, "brain"),
+				Title: "Push rejected: the remote has newer commits",
+				State: StateError, Tab: 8,
 			},
 			{
 				Name: "dotfiles", Dir: filepath.Join(src, "dotfiles"),

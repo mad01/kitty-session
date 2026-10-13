@@ -206,11 +206,14 @@ func shortDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh%02dm", minutes/60, minutes%60)
 }
 
-// dot returns the styled state glyph; working and input pulse with the frame.
+// dot returns the styled state glyph; working and input pulse with the frame,
+// error is a steady red cross.
 func (m model) dot(s State, bg lipgloss.TerminalColor) string {
 	switch s {
 	case StateInput:
 		return seg(pulse(inputPulse, m.frame), bg, dotFilled)
+	case StateError:
+		return seg(dotError, bg, dotCross)
 	case StateDone:
 		return seg(dotDone, bg, dotFilled)
 	case StateWorking:

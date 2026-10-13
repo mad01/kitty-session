@@ -107,11 +107,13 @@ Print one line per session to stdout: the name, the agent kind (`claude`, `pi` o
 State detection:
 
 1. If the record is `stopped`, or no window tagged with the session's id matches its agent window → `stopped`.
-2. A `shell` session is `idle` from here on: nothing reports its state. A `pi` session shows its state file's value whatever its age (the ks pi extension writes it) and `idle` without one.
-3. For a `claude` session, if a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
-4. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
+2. If the session's state file is less than 10 seconds old → the kind's own rules below, for every kind. The hooks saw an event the record may not reflect yet.
+3. Otherwise, if that window carries a program status record (Operating System Command 7501, the Program Status Protocol; kitty master, not 0.49.2 or older) → its state, for every kind: `blocked` prints `input`; `working`, `error` and `idle` print as they are; `done` prints `done`, or `idle` when its tab is the active one.
+4. A `shell` session is `idle` from here on: nothing else reports its state. A `pi` session shows its state file's value whatever its age (the ks pi extension writes it) and `idle` without one.
+5. For a `claude` session, if a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
+6. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
 
-The sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text and adds `done`); see [Sidebar guide](tui.md#states).
+Steps 1 to 3 are shared with the sidebar. Past them the sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text, and keeps an `input` file until a later hook replaces it); see [Sidebar guide](tui.md#states).
 
 When the instance is not running every active session prints `stopped` and a last line says `ks instance not running`. Prints `no sessions` if no session files are found.
 
@@ -305,7 +307,7 @@ See [Hooks and state detection](hooks-and-state.md) for the full event-to-state 
 Usage: ks _sidebar-demo [--width <cols>] [--session <name>]
 ```
 
-Run the sidebar on eight fake agents covering every state and agent kind, with an in-memory backend: no kitty, no session files, nothing touched. A development aid for reviewing the look in any terminal. `--width` sets the frame width (default 36); `--session` names the fake agent treated as this tab's own (default `kitty-session`).
+Run the sidebar on nine fake agents covering every state and agent kind, with an in-memory backend: no kitty, no session files, nothing touched. A development aid for reviewing the look in any terminal. `--width` sets the frame width (default 36); `--session` names the fake agent treated as this tab's own (default `kitty-session`).
 
 ## Scripting recipes
 

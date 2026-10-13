@@ -12,6 +12,8 @@ type State int
 const (
 	// StateInput means Claude is waiting on the user: a permission prompt or a question.
 	StateInput State = iota
+	// StateError means the agent reported a failure and stopped.
+	StateError
 	// StateDone means Claude finished and the user has not looked at the result yet.
 	StateDone
 	// StateWorking means Claude is processing.
@@ -27,6 +29,8 @@ func (s State) String() string {
 	switch s {
 	case StateInput:
 		return "input"
+	case StateError:
+		return "error"
 	case StateDone:
 		return "done"
 	case StateWorking:

@@ -59,6 +59,8 @@ func TestResolveState(t *testing.T) {
 	stale := now.Add(-time.Minute)
 	viewed := now.Add(-10 * time.Minute)
 	hoursOld := now.Add(-3 * time.Hour)
+	blocked, working, done := kitty.ProgramBlocked, kitty.ProgramWorking, kitty.ProgramDone
+	failed, idle := kitty.ProgramError, kitty.ProgramIdle
 	tests := []struct {
 		name string
 		in   stateInput
@@ -342,6 +344,105 @@ func TestResolveState(t *testing.T) {
 			},
 			sidebar.StateIdle,
 		},
+		{
+			"record: blocked is input under the idle glyph",
+			stateInput{active: true, hasWindow: true, title: "✳ Claude Code", report: blocked},
+			sidebar.StateInput,
+		},
+		{
+			"record: working under the idle glyph",
+			stateInput{active: true, hasWindow: true, title: "✳ Claude Code", report: working},
+			sidebar.StateWorking,
+		},
+		{
+			"record: done when the state file was seen",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				fileState: "idle", fileAt: viewed, viewedAt: stale, report: done,
+			},
+			sidebar.StateDone,
+		},
+		{
+			"record: done on the active tab is idle",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				report: done, tabActive: true,
+			},
+			sidebar.StateIdle,
+		},
+		{
+			"record: error",
+			stateInput{active: true, hasWindow: true, title: "✳ Claude Code", report: failed},
+			sidebar.StateError,
+		},
+		{
+			"record: idle under a working glyph",
+			stateInput{active: true, hasWindow: true, title: "◐ busy", report: idle},
+			sidebar.StateIdle,
+		},
+		{
+			"record: a fresh working state file outranks a blocked record",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				fileState: "working", fileAt: fresh, report: blocked,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"record: blocked outranks a stale working state file",
+			stateInput{
+				active: true, hasWindow: true, title: "◐ busy",
+				fileState: "working", fileAt: stale, report: blocked,
+			},
+			sidebar.StateInput,
+		},
+		{
+			"record: pi blocked over a stale idle state file",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "idle", fileAt: viewed, viewedAt: stale, report: blocked,
+			},
+			sidebar.StateInput,
+		},
+		{
+			"record: pi fresh working state file outranks a blocked record",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "working", fileAt: fresh, report: blocked,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"record: shell working",
+			stateInput{kind: session.AgentShell, active: true, hasWindow: true, report: working},
+			sidebar.StateWorking,
+		},
+		{
+			"record: shell with a fresh state file is idle, its own rule",
+			stateInput{
+				kind: session.AgentShell, active: true, hasWindow: true,
+				fileState: "input", fileAt: fresh, report: working,
+			},
+			sidebar.StateIdle,
+		},
+		{
+			"record: unknown state falls through to the kind's rules",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				report: kitty.ProgramState("paused"),
+			},
+			sidebar.StateIdle,
+		},
+		{
+			"record: stopped record stays stopped",
+			stateInput{hasWindow: true, title: "✳ Claude Code", report: blocked},
+			sidebar.StateStopped,
+		},
+		{
+			"record: window gone stays stopped",
+			stateInput{active: true, report: blocked},
+			sidebar.StateStopped,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -414,6 +515,78 @@ func TestListMatchesWindowsByTagAndFillsRows(t *testing.T) {
 	}
 	if n := countCalls(f, "Windows"); n != 1 {
 		t.Errorf("List took %d snapshots, want 1: %v", n, f.calls)
+	}
+}
+
+// TestListReadsTheProgramStatus checks that a row follows its window's
+// Program Status record over the title and a stale state file, that only a
+// state file saying input gives an input row its waiting time, that done on
+// the active tab reads idle, and that a window without a record keeps the
+// old rules.
+func TestListReadsTheProgramStatus(t *testing.T) {
+	b, f, _ := newTestBackend(t)
+	states := fakeStates{}
+	b.readState = states.read
+	now := b.l.now()
+	type entry = struct {
+		state string
+		at    time.Time
+	}
+
+	asked := session.New("asked", "/work/asked", 0, 0) // blocked over a stale working file
+	f.addTab(asked, true)
+	f.find(asked.KittyWindowID).Status = kitty.ProgramBlocked
+	states["asked"] = entry{"working", now.Add(-time.Minute)}
+
+	seen := session.New("seen", "/work/seen", 0, 0) // blocked over an old idle file
+	f.addTab(seen, true)
+	f.find(seen.KittyWindowID).Status = kitty.ProgramBlocked
+	states["seen"] = entry{"idle", now.Add(-time.Hour)}
+
+	prompt := session.New("prompt", "/work/prompt", 0, 0) // blocked, and the file says so
+	f.addTab(prompt, true)
+	f.find(prompt.KittyWindowID).Status = kitty.ProgramBlocked
+	states["prompt"] = entry{"input", now.Add(-time.Hour)}
+
+	failed := session.New("failed", "/work/failed", 0, 0)
+	failed.Agent = session.AgentShell
+	f.addTab(failed, true)
+	f.find(failed.KittyWindowID).Status = kitty.ProgramError
+
+	shown := session.New("shown", "/work/shown", 0, 0) // done on the active tab
+	f.addTab(shown, true)
+	f.find(shown.KittyWindowID).Status = kitty.ProgramDone
+	f.find(shown.KittyWindowID).TabActive = true
+
+	plain := session.New("plain", "/work/plain", 0, 0) // no record: the ✳ title rules
+	f.addTab(plain, true)
+
+	for _, s := range []*session.Session{asked, seen, prompt, failed, shown, plain} {
+		if err := b.l.store.Save(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agents, err := b.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	byName := map[string]sidebar.Agent{}
+	for _, a := range agents {
+		byName[a.Name] = a
+	}
+	want := map[string]sidebar.Agent{
+		"asked":  {State: sidebar.StateInput},
+		"seen":   {State: sidebar.StateInput},
+		"prompt": {State: sidebar.StateInput, Waiting: time.Hour},
+		"failed": {State: sidebar.StateError},
+		"shown":  {State: sidebar.StateIdle},
+		"plain":  {State: sidebar.StateIdle},
+	}
+	for name, w := range want {
+		if a := byName[name]; a.State != w.State || a.Waiting != w.Waiting {
+			t.Errorf("%s = %s waiting %s, want %s waiting %s",
+				name, a.State, a.Waiting, w.State, w.Waiting)
+		}
 	}
 }
 
