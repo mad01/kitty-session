@@ -41,7 +41,7 @@ cmd/ks
 | `internal/hooks` | `Install`, `Uninstall` and `Installed` for the six ks matcher groups in `~/.claude/settings.json`; other tools' entries are kept. |
 | `internal/herdr` | `Load(path)` parses herdr's `session.json` (format version 3 only), `Agents()` flattens workspaces, tabs and panes into the claude panes ks can import plus the skipped ones with a reason, `Running(dir)` dials `herdr.sock` to tell whether herdr still owns them. Stdlib only; `ks import` does the wiring. |
 | `internal/procinfo` | `ParentOf(pid)` and `CommOf(pid)` via the darwin `kern.proc.pid` sysctl; `ErrUnsupported` elsewhere. Used by the hook to tell the Claude kitty launched from one nested inside the session. |
-| `internal/kitty` | `Client`: every `kitty @` call against one `--to` socket; `Start` runs the kitty binary itself. Parses `@ ls` JSON into `Window` values. No knowledge of sessions beyond `SessionVar`, the user variable that tags ks windows. |
+| `internal/kitty` | `Client`: every `kitty @` call against one `--to` socket; `Start` runs the kitty binary itself. Parses `@ ls` JSON into `Window` values, reducing each window's Operating System Command (OSC) 7501 `program_status` records to `Window.Status`, the most urgent state, empty without any. No knowledge of sessions beyond `SessionVar`, the user variable that tags ks windows. |
 | `internal/session` | `Session` struct and `Store` (save/load/list/delete/rename/restore) backed by `~/.config/ks/sessions/`. |
 | `internal/state` | JSON state files under `~/.config/ks/state/`. Freshness predicates. |
 | `internal/claude` | Terminal-text classifier (`DetectState`), tab-title glyph parser (`ParseTitle`), and the transcript path helpers behind the `--resume` decision. |
@@ -156,8 +156,11 @@ SidebarBackend.List():
         lv = findLive(all, sess)                       # claude/sidebar windows tagged with sess.ID
         if sess is the own session and lv's tab is_active:
             stamp viewed_at (reload, save), at most every 10 s
-        resolveState(record status, claude window present?, its title, state file, viewed_at):
-            !IsActive or no claude window             → stopped
+        resolveState(record status, agent window present?, its Status, its title, state file, viewed_at):
+            !IsActive or no agent window              → stopped
+            state file < 10 s old, any kind           → skip the record: the kind's own rules below
+            Window.Status (OSC 7501 record), any kind → blocked → input; working, error, idle as is; done → done, or idle on the active tab
+            -- the rest only without a record or with a fresh file; claude shown, pi reads the file alone, shell is idle
             state file input, < 10 s old              → input
             state file working, < 10 s old            → working   (a fresh working file outranks a ✳ title)
             ParseTitle(title) == working              → working
@@ -169,7 +172,9 @@ SidebarBackend.List():
             reapIfGone(all, lv)                        # claude seen then gone, or never seen for 30 s → closeTabs (reap.go)
 ```
 
-`ks list` has its own, older chain: `stopped` when the record is stopped or `Launcher.Alive` says no, a fresh state file's value if there is one, else `DetectState(kitty.GetText(...))` on the pane text. It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.
+`Window.Status` comes out of the same `ls` snapshot. kitty lists a window's Program Status Protocol (OSC 7501) records under `program_status`; the parser keeps the most urgent state (blocked, error, done, working, idle) and reads nothing else from a record. `launcher.ReportedState` gates it behind the state file's freshness and maps it; the sidebar and `ks list` share it. Only kitty master after 2026-10-13 fills it; see [Hooks and state detection](hooks-and-state.md#1-program-status-osc-7501-preferred).
+
+`ks list` has its own, older chain for the kind's own rules: `stopped` when the record is stopped or no tagged agent window is in the snapshot, `launcher.ReportedState` when it answers, a fresh state file's value if there is one, else `DetectState(kitty.GetText(...))` on the pane text. It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.
 
 ## Kitty protocol usage
 
@@ -179,7 +184,7 @@ SidebarBackend.List():
 |---|---|
 | `Start(opts)` | `kitty --detach --listen-on <socket> -o allow_remote_control=yes -o tab_bar_style=hidden -o window_border_width=0 -o window_margin_width=0 -o window_padding_width=3 -o macos_quit_when_last_window_closed=yes [-o <override>...] --title ks -- <command>`, with the caller's environment minus the Claude Code session markers and every `KS_*` / `KITTY_*` (keeping `KITTY_CONFIG_DIRECTORY` and the user's other `CLAUDE_*` configuration). No config file is written; a user's `kitty_overrides` may carry `map` lines, which kitty accepts through `-o`. Started with a 5 s deadline and closed stdin so a non-detaching kitty cannot block ks. |
 | `Ping()` | `ls`, 2 s timeout |
-| `Windows()` | `ls`, parsed into `Window{ID, TabID, TabTitle, TabActive, Title, Columns, SessionID}` |
+| `Windows()` | `ls`, parsed into `Window{ID, TabID, TabTitle, TabActive, Title, Columns, SessionID, Status}`; `Status` is the most urgent `program_status` state, empty without one |
 | `AnyWindow`, `TabExists`, `WindowExists`, `FindTabForWindow`, `WindowColumns`, `WindowTitle` | Walk one `Windows()` snapshot |
 | `LaunchTab(Launch)` | `launch --type=tab --match=id:<win> [--keep-focus] --cwd=<dir> --env <marker>... --env K=V... --var K=V... -- <command>` (a bare `--env NAME` unsets) |
 | `LaunchVSplit(Launch)` | `launch --type=window --location=vsplit --bias=<n> --match=id:<win> [--keep-focus] --cwd=<dir> --env ... --var ... -- <command>` |

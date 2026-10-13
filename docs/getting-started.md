@@ -79,7 +79,7 @@ If your Claude sessions live in [herdr](https://github.com/herdrdev/herdr), move
 
 ## Install Claude Code hooks (optional, recommended)
 
-The sidebar shows a live state for each session: `input`, `done`, `working`, `idle` or `stopped`. The most accurate source for that state is Claude Code's own hook events, written by a hidden `ks _hook` handler. Wire them up once with:
+The sidebar shows a live state for each session: `input`, `error`, `done`, `working`, `idle` or `stopped`. On a kitty newer than 0.49.2 Claude Code reports that state itself (see [Hooks and state detection](hooks-and-state.md)). Everywhere else the most accurate source is Claude Code's own hook events, written by a hidden `ks _hook` handler. The hooks also carry the session id a reopen resumes with, so wire them up either way:
 
 ```bash
 ks hooks install

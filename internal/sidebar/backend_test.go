@@ -51,12 +51,26 @@ func TestSortAgents(t *testing.T) {
 
 func TestStateString(t *testing.T) {
 	want := map[State]string{
-		StateInput: "input", StateDone: "done", StateWorking: "working",
-		StateIdle: "idle", StateStopped: "stopped", State(99): "unknown",
+		StateInput: "input", StateError: "error", StateDone: "done",
+		StateWorking: "working", StateIdle: "idle", StateStopped: "stopped",
+		State(99): "unknown",
 	}
 	for s, label := range want {
 		if s.String() != label {
 			t.Errorf("State(%d).String() = %q, want %q", int(s), s.String(), label)
+		}
+	}
+}
+
+// TestStateOrder pins the enum to its documented order, from the state that
+// needs the user most to the one that needs them least, with error between
+// input and done.
+func TestStateOrder(t *testing.T) {
+	order := []State{StateInput, StateError, StateDone, StateWorking, StateIdle, StateStopped}
+	for i := 1; i < len(order); i++ {
+		if order[i-1] >= order[i] {
+			t.Errorf("%s (%d) should sort before %s (%d)",
+				order[i-1], int(order[i-1]), order[i], int(order[i]))
 		}
 	}
 }

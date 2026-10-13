@@ -353,3 +353,77 @@ func TestSetUserVars(t *testing.T) {
 		t.Errorf("calls = %v, want %v", *calls, want)
 	}
 }
+
+// lsWithStatus is a one-window `kitty @ ls` whose window carries the given
+// program_status value, or no such key at all when records is empty, the way
+// a kitty older than the protocol reports it.
+func lsWithStatus(records string) []byte {
+	key := ""
+	if records != "" {
+		key = `,"program_status":` + records
+	}
+	return []byte(`[{"id":1,"tabs":[{"id":1,"title":"demo","is_active":true,"windows":[` +
+		`{"id":3,"title":"claude","columns":119,"is_focused":true` + key + `}]}]}]`)
+}
+
+func TestProgramStatus(t *testing.T) {
+	// full is a record as kitty prints it: every field, nulls where the
+	// program set nothing.
+	const full = `{"id":"","state":"working","kind":null,"progress":null,` +
+		`"app":"","title":"","msg":""}`
+	tests := []struct {
+		name    string
+		records string
+		want    ProgramState
+	}{
+		{name: "a kitty without the key"},
+		{name: "an empty list", records: `[]`},
+		{
+			name:    "one working record, nulls and all",
+			records: `[` + full + `]`,
+			want:    ProgramWorking,
+		},
+		{
+			name:    "a progress value parses",
+			records: `[{"state":"working","progress":42,"msg":"building"}]`,
+			want:    ProgramWorking,
+		},
+		{
+			name:    "two equally urgent records read as that state",
+			records: `[{"state":"working","msg":"first"},{"state":"working","msg":"second"}]`,
+			want:    ProgramWorking,
+		},
+		{
+			name: "blocked beats a later working record",
+			records: `[{"state":"blocked","kind":"question","msg":"which?"},` +
+				`{"state":"working","msg":"later"}]`,
+			want: ProgramBlocked,
+		},
+		{
+			name: "the ladder: error beats done beats working beats idle",
+			records: `[{"state":"error","msg":"boom"},{"state":"done"},` +
+				`{"state":"working"},{"state":"idle"}]`,
+			want: ProgramError,
+		},
+		{
+			name:    "a state ks does not know is skipped",
+			records: `[{"state":"working"},{"state":"paused"}]`,
+			want:    ProgramWorking,
+		},
+		{name: "only a state ks does not know", records: `[{"state":"paused"}]`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			windows, err := parseWindows(lsWithStatus(tc.records))
+			if err != nil {
+				t.Fatalf("parseWindows: %v", err)
+			}
+			if len(windows) != 1 {
+				t.Fatalf("parsed %d windows, want 1", len(windows))
+			}
+			if got := windows[0].Status; got != tc.want {
+				t.Errorf("Status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

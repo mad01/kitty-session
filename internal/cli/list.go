@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/mad01/kitty-session/internal/session"
+	"github.com/mad01/kitty-session/internal/sidebar"
 	"github.com/mad01/kitty-session/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +23,13 @@ var listCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(listCmd)
 }
+
+// readState reads a session's state file; tests substitute a fake.
+var readState = state.Read
+
+// stoppedLabel is what the state column prints for a session without a live
+// agent window, in the vocabulary the sidebar shares.
+var stoppedLabel = sidebar.StateStopped.String()
 
 func runList(cmd *cobra.Command, args []string) error {
 	w, err := offlineWiring()
@@ -41,7 +50,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	all, lsErr := w.kitty.Windows()
 	down := lsErr != nil
 	for _, sess := range sessions {
-		st := claude.StateStopped
+		st := stoppedLabel
 		if !down {
 			st = listState(w.kitty, all, sess)
 		}
@@ -53,30 +62,50 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// listState resolves a session's state from one instance snapshot: the
-// record's own status first, then whether its agent window is in the
-// snapshot. A shell is idle from there on, since nothing reports its state.
-// A pi session reads its state file, whatever its age, and is idle without
-// one. A claude session reads a fresh state file, then the terminal text.
-func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) claude.State {
+// listState resolves the state label ks list prints for a session from one
+// instance snapshot, in the sidebar's order: the record's own status first,
+// then whether its agent window is in the snapshot, then the window's
+// Program Status Protocol record when kitty lists one and no fresh state
+// file outranks it (launcher.ReportedState, shared with the sidebar), and
+// the kind's own rules last, in kindState.
+func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) string {
 	if !sess.IsActive() {
-		return claude.StateStopped
+		return stoppedLabel
 	}
 	w, ok := launcher.ClaudeWindow(all, sess)
 	if !ok {
-		return claude.StateStopped
+		return stoppedLabel
 	}
+	file, fileAt, err := readState(sess.Name)
+	if err != nil { // no state file
+		file, fileAt = "", time.Time{}
+	}
+	if st, ok := launcher.ReportedState(w.Status, fileAt, w.TabActive); ok {
+		return st.String()
+	}
+	return kindState(c, w, sess, file, fileAt).String()
+}
+
+// kindState is listState by the kind's own rules: without a Program Status
+// record, or with a fresh state file. file and fileAt are the state file's
+// state and stamp, empty and zero without one. A shell is idle, since
+// nothing else reports its state. A pi session reads its state file,
+// whatever its age, and is idle without one. A claude session reads a fresh
+// state file, then the terminal text of its window.
+func kindState(
+	c *kitty.Client, w kitty.Window, sess *session.Session, file string, fileAt time.Time,
+) claude.State {
 	switch sess.Kind() {
 	case session.AgentShell:
 		return claude.StateIdle
 	case session.AgentPi:
-		if s, _, err := state.Read(sess.Name); err == nil {
-			return claude.ParseState(s)
+		if file != "" {
+			return claude.ParseState(file)
 		}
 		return claude.StateIdle
 	}
-	if s, t, err := state.Read(sess.Name); err == nil && state.IsFresh(t) {
-		return claude.ParseState(s)
+	if state.IsFresh(fileAt) {
+		return claude.ParseState(file)
 	}
 	text, err := c.GetText(w.ID)
 	if err != nil {

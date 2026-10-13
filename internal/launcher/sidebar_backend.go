@@ -141,9 +141,12 @@ func (b *SidebarBackend) markViewed(sess *session.Session) (*session.Session, er
 // position of the session's tab in kitty's order, zero without one.
 func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int) sidebar.Agent {
 	w := lv.claude
-	in := stateInput{kind: sess.Kind(), active: sess.IsActive(), viewedAt: sess.ViewedAt}
+	in := stateInput{
+		kind: sess.Kind(), active: sess.IsActive(), viewedAt: sess.ViewedAt,
+		tabActive: lv.tabActive(),
+	}
 	if w != nil {
-		in.hasWindow, in.title = true, w.Title
+		in.hasWindow, in.title, in.report = true, w.Title, w.Status
 	}
 	if s, at, err := b.readState(sess.Name); err == nil {
 		in.fileState, in.fileAt = s, at
@@ -155,16 +158,24 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 		Dir:     sess.Dir,
 		Title:   b.title(in, sess.Dir),
 		State:   st,
-		Waiting: b.waiting(st, in.fileAt),
+		Waiting: b.waiting(st, in.fileState, in.fileAt),
 		Tab:     tab,
 		Own:     own,
 	}
 }
 
 // waiting is how long an input row has been waiting on the user: the age of
-// the state file that reported the prompt. Every other state reports zero.
-func (b *SidebarBackend) waiting(st sidebar.State, fileAt time.Time) time.Duration {
-	if st != sidebar.StateInput || fileAt.IsZero() {
+// the state file that reported the prompt, so only when the file itself
+// says input. Every other row reports zero, an input row the record alone
+// made included: a Program Status record carries no time, so without hooks
+// the age reads zero even when the record says blocked.
+func (b *SidebarBackend) waiting(
+	st sidebar.State, fileState string, fileAt time.Time,
+) time.Duration {
+	if st != sidebar.StateInput || claude.ParseState(fileState) != claude.StateNeedsInput {
+		return 0
+	}
+	if fileAt.IsZero() {
 		return 0
 	}
 	return max(b.l.now().Sub(fileAt), 0)
@@ -179,11 +190,24 @@ type stateInput struct {
 	fileState string // the state file's state, "" without a file
 	fileAt    time.Time
 	viewedAt  time.Time
+	tabActive bool // the session's tab is the one its OS window shows
+	// report is the state of the agent window's Program Status record, ""
+	// without one.
+	report kitty.ProgramState
 }
 
 // resolveState picks the sidebar state for one session. Whatever the kind,
-// a stopped record or a missing agent window is stopped. A shell session is
-// idle otherwise: nothing reports its state. For claude, first match wins:
+// a stopped record or a missing agent window is stopped. Two rules then
+// apply whatever the kind, in this order:
+//
+//	state file fresh (state.IsFresh)                → the kind's own rules below: the hooks saw the event
+//	agent window has a Program Status record        → blocked is input; working, done, error and idle are themselves, except done on the active tab, which is idle
+//
+// The record (OSC 7501, mapped by ProgramState and gated by ReportedState)
+// is the program's own word, so a shell running a program that speaks the
+// protocol reports through it too. Without a record, or with a fresh state
+// file, a shell session is idle, since nothing else reports its state, and
+// for claude, first match wins:
 //
 //	state file fresh and input                      → input
 //	state file fresh and working                    → working
@@ -193,8 +217,8 @@ type stateInput struct {
 //	no glyph: state file working                    → working
 //	anything else (idle, waiting, no state file)    → idle
 //
-// A pi session has no title glyph, so only the state file, written by the ks
-// pi extension, speaks:
+// A pi session has no title glyph, so without a record, or with a fresh
+// state file, only the state file, written by the ks pi extension, speaks:
 //
 //	state file input, whatever its age              → input
 //	state file working, whatever its age            → working
@@ -216,6 +240,9 @@ type stateInput struct {
 func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
+	}
+	if st, ok := ReportedState(in.report, in.fileAt, in.tabActive); ok {
+		return st
 	}
 	switch in.kind {
 	case session.AgentShell:

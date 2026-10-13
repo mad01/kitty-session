@@ -4,7 +4,7 @@
 
 ## State
 
-pi has no hooks and sets no title glyph, so none of the three sources in [Hooks and state detection](hooks-and-state.md) see it. Its state comes from a pi extension instead, `pi/ks-agent-state.ts` in this repo. The extension listens to pi's lifecycle events and runs a hidden `ks _pi-hook` for each one, with a JSON payload on stdin:
+pi has no Claude Code hooks and sets no title glyph. Since pi 1.1.0 it reports its state through the Program Status Protocol (Operating System Command 7501), which ks reads first on a kitty that passes it (see [Hooks and state detection](hooks-and-state.md#1-program-status-osc-7501-preferred)). None of the other sources there see pi. The rest of its state, and all of it on an older kitty, comes from a pi extension, `pi/ks-agent-state.ts` in this repo. The extension listens to pi's lifecycle events and runs a hidden `ks _pi-hook` for each one, with a JSON payload on stdin:
 
 ```json
 {"event": "session_start", "reason": "startup", "session_id": "...", "session_file": "/Users/you/.pi/agent/sessions/--repo--/2026-10-08T10-00-00_....jsonl"}
@@ -41,7 +41,7 @@ A reopen (bare `ks`, `ks open`, the sidebar's `enter` on a stopped row) runs `pi
 Three things have to be in place:
 
 1. `pi` on the PATH of whoever runs `ks`. Every launch forwards `PATH` into the session's windows, so a `pi` under `~/.local/bin` or a mise shim works too.
-2. The extension in `~/.pi/agent/extensions/`. The dotfiles recipe symlinks `pi/ks-agent-state.ts` from the ks checkout into that directory; pi loads every file there at startup. Without it nothing writes the state file, so a pi row stays `idle` whatever pi is doing.
+2. The extension in `~/.pi/agent/extensions/`. The dotfiles recipe symlinks `pi/ks-agent-state.ts` from the ks checkout into that directory; pi loads every file there at startup. Without it nothing writes the state file, so on a kitty without program status a pi row stays `idle` whatever pi is doing.
 3. `KS_EXE` in the session's environment, set by the launcher to the `ks` binary that opened the session. The extension runs that binary, so a branch build of `ks` reports to itself rather than to whatever `ks` is first on PATH. Unset, it falls back to `ks`.
 
 Check an open session with:

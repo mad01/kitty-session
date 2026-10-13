@@ -339,6 +339,36 @@ func TestViewWaitLabelOnInputRows(t *testing.T) {
 	assertGeometry(t, m, DefaultWidth, testLines)
 }
 
+// TestViewErrorRow checks an error row draws a cross, so it differs from a
+// done or input row before any colour, in its own steady colour rather than
+// the input pulse.
+func TestViewErrorRow(t *testing.T) {
+	withColour(t)
+	fb := &fakeBackend{agents: []Agent{
+		{Name: "broken", Title: "Push rejected", State: StateError, Tab: 1},
+		{Name: "finished", Title: "Done", State: StateDone, Tab: 2},
+	}}
+	m := newTestModel(t, fb, "demo")
+	got := lines(m)
+	want := map[int]string{
+		3: "│ ✗ broken                         │",
+		4: "│   Push rejected                  │",
+		5: "│ ● finished                       │",
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("line %d\n got %q\nwant %q", i, got[i], w)
+		}
+	}
+	errDot, doneDot := m.dot(StateError, nil), m.dot(StateDone, nil)
+	if errDot == doneDot || errDot == m.dot(StateInput, nil) {
+		t.Errorf("error dot %q is not its own colour (done %q)", errDot, doneDot)
+	}
+	if got := dotError.GetForeground(); got != colorError {
+		t.Errorf("error dot colour = %v, want %v", got, colorError)
+	}
+}
+
 func TestViewKindBadge(t *testing.T) {
 	fb := &fakeBackend{agents: []Agent{
 		{Name: "events", Kind: "pi", Title: "pi", State: StateWorking, Tab: 1},

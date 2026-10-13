@@ -67,13 +67,19 @@ See [Configuration](configuration.md).
 
 Check with `ls <configured-dir>` and confirm you expected repos there.
 
+## No `program_status` on kitty 0.49.2 or older
+
+Claude Code (2.1.295 and later) and pi (1.1.0 and later) report their state to the terminal through the Program Status Protocol (Operating System Command 7501). They do so only after kitty answers their startup probe, and releases up to 0.49.2 do not. The sign: `kitty @ --to unix:$HOME/.config/ks/kitty.sock ls` has no `program_status` key under any window (verified on 0.48.2). A kitty that supports the protocol lists one for every window, an empty list for a program that stays silent. `error` never appears in the sidebar either. Nothing is broken: the badge comes from the hooks, the title glyph and the pane text as before. For the protocol, run a kitty built from master after 2026-10-13 ([kovidgoyal/kitty#10638](https://github.com/kovidgoyal/kitty/issues/10638)) or the next release, then `ks quit` and start again. A claude started under the old kitty stays silent until it restarts. See [Hooks and state detection](hooks-and-state.md#1-program-status-osc-7501-preferred).
+
 ## State badge is always `waiting`
 
-You haven't installed the Claude Code hooks and you aren't running the `--agent` monitor. The fallback terminal classifier is conservative. It only returns `working` when it sees one of the specific signal words or a spinner character, and only `idle` when the last line is exactly `>`. Anything else becomes `waiting`.
+Your kitty passes no program status (above), you haven't installed the Claude Code hooks and you aren't running the `--agent` monitor. The fallback terminal classifier is conservative. It only returns `working` when it sees one of the specific signal words or a spinner character, and only `idle` when the last line is exactly `>`. Anything else becomes `waiting`.
 
 Fix: `ks hooks install`. See [Hooks and state detection](hooks-and-state.md).
 
 ## State badge stuck on `working`
+
+On a kitty that passes program status the record the agent last wrote decides once the state file is older than 10 seconds; look at `program_status` in the `ls` output first. A claude or pi window has no shell prompt, so kitty keeps its `working` record until the program replaces it. Without a record the file rules apply.
 
 A `working` state file is trusted for 10 seconds. After that `ks list` classifies the pane text and the sidebar follows the title glyph. A badge stuck on `working` past that means the pane still reads as busy, or a spinner glyph is still in the title.
 
