@@ -1,6 +1,9 @@
 package claude
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDetectState(t *testing.T) {
 	tests := []struct {
@@ -9,39 +12,49 @@ func TestDetectState(t *testing.T) {
 		want State
 	}{
 		{
-			name: "idle prompt",
+			name: "prompt box at rest",
+			text: "Some previous output\n" + promptBoxText,
+			want: StateIdle,
+		},
+		{
+			name: "prompt box no trailing newline",
+			text: strings.TrimRight(promptBoxText, "\n"),
+			want: StateIdle,
+		},
+		{
+			name: "a bare chevron is not the prompt box",
 			text: "Some previous output\n\n>\n",
-			want: StateIdle,
+			want: StateWaiting,
 		},
 		{
-			name: "idle prompt no trailing newline",
-			text: "Some previous output\n\n>",
-			want: StateIdle,
+			name: "bash permission dialog",
+			text: bashDialogText,
+			want: StateNeedsInput,
 		},
 		{
-			name: "permission prompt y/n",
+			name: "question menu",
+			text: questionMenuText,
+			want: StateNeedsInput,
+		},
+		{
+			name: "a y/n line alone is no dialog",
 			text: "Claude wants to run a command\nAllow? (y/n)\n",
-			want: StateNeedsInput,
+			want: StateWaiting,
 		},
 		{
-			name: "allow with yes/no",
-			text: "Do you allow this action?\nAllow  Yes  No\n",
-			want: StateNeedsInput,
-		},
-		{
-			name: "do you want to",
-			text: "Do you want to continue with this change?\n",
-			want: StateNeedsInput,
-		},
-		{
-			name: "working state with tool output",
-			text: "Reading file foo.go...\nAnalyzing code...\n",
+			name: "running turn",
+			text: workingTurnText,
 			want: StateWorking,
 		},
 		{
-			name: "working state with spinner",
+			name: "braille spinner",
 			text: "⠙ Processing files...\n",
 			want: StateWorking,
+		},
+		{
+			name: "activity words alone are no signal",
+			text: "Reading file foo.go...\nAnalyzing code...\n",
+			want: StateWaiting,
 		},
 		{
 			name: "empty text",
@@ -54,16 +67,6 @@ func TestDetectState(t *testing.T) {
 			want: StateWaiting,
 		},
 		{
-			name: "prompt with text after chevron",
-			text: "Some output\n> some user input",
-			want: StateWaiting,
-		},
-		{
-			name: "approve prompt",
-			text: "Claude wants to edit a file\nApprove? Yes / No\n",
-			want: StateNeedsInput,
-		},
-		{
 			name: "welcome screen",
 			text: " ╭──────────────────────────────────╮\n │ ✻ Welcome to Claude Code!       │\n │                                  │\n │ /help for help                   │\n ╰──────────────────────────────────╯\n",
 			want: StateWaiting,
@@ -74,9 +77,14 @@ func TestDetectState(t *testing.T) {
 			want: StateWaiting,
 		},
 		{
-			name: "claude actively building",
-			text: "Building the project...\nCompiling main.go\n",
-			want: StateWorking,
+			name: "dialog over a running turn is input",
+			text: workingTurnText + "\n" + bashDialogText,
+			want: StateNeedsInput,
+		},
+		{
+			name: "transcript viewer leaves the state alone",
+			text: transcriptViewerText,
+			want: StateWaiting,
 		},
 	}
 

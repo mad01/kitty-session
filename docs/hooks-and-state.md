@@ -36,7 +36,7 @@ The last three write or read through the same interface: a state file at `~/.con
 `internal/state/file.go` has one threshold: `freshness = 10 * time.Second`, behind `IsFresh`. A state file younger than that is **fresh**. A fresh file also outranks a program status record (section 1): the hooks saw an event the record may not reflect yet. Past the threshold the record, when kitty lists one, decides; the rules below apply without one.
 
 - `ks list` trusts a fresh file outright, whatever it says. An older file is ignored and the pane text is classified instead (section 4), with one exception. A stale `error` keeps printing `error` unless the pane text shows Claude working, so `ks list` and the sidebar agree on a failed turn.
-- The sidebar lets a fresh `input`, `error` or `working` win over the title glyph. Past 10 s the glyph leads, with one exception: an `input` or `error` entry counts whatever its age, until a later hook replaces it. That keeps an unanswered prompt or a failed turn visible. Only a working title glyph outranks a stale one. Its full order is in [Sidebar guide](tui.md#states).
+- The sidebar lets a fresh `input`, `error` or `working` win over the title glyph. Past 10 s the glyph leads, with one exception: an `input` or `error` entry counts whatever its age, until a later hook replaces it. That keeps an unanswered prompt or a failed turn visible. Only a working title glyph outranks a stale one. A stale `input` has one more way out. The session's own sidebar re-reads the screen (section 4) and, once the dialog is gone, rewrites the file to `idle` at the prompt box or `working` mid-turn. A prompt you dismissed clears that way. Its full order is in [Sidebar guide](tui.md#states).
 
 ## 1. Program status, OSC 7501 (preferred)
 
@@ -115,7 +115,9 @@ An install made before an event was added to `ks` lacks that event. The sidebar'
 
 `Notification` is registered for `permission_prompt` and `elicitation_dialog` only. Claude Code also sends `idle_prompt` after about a minute at an empty prompt. Mapping it to `input` would turn every idle session into a false "waiting on you" and bury the real ones. `done` and `idle` already cover that case. Should another type ever belong here, it is one more alternative in the `Notification` matcher in `internal/hooks/hooks.go` and a case in `stateForEvent` in `internal/cli/hook.go`.
 
-Claude Code fires no hook when you dismiss a prompt with Escape or deny it by hand, and `Stop` does not run on an interrupt. An `input` row set by a prompt you dismissed stays `input` until the next event the hooks see: in practice your next message (`UserPromptSubmit`), a `/clear` (`SessionStart`) or an exit (`SessionEnd`). On a kitty that passes program status the record takes over after ten seconds.
+Claude Code fires no hook when you dismiss a prompt with Escape or deny it by hand, and `Stop` does not run on an interrupt. The hooks alone would leave an `input` row set by a prompt you dismissed red until the next event they see: your next message (`UserPromptSubmit`), a `/clear` (`SessionStart`) or an exit (`SessionEnd`).
+
+The screen check of section 4 covers the gap. Once the `input` entry is older than 10 s, the session's own sidebar reads its claude window on each 3 s poll. A dialog still on screen keeps `input`. Otherwise a running turn rewrites the file to `working` and the prompt box at rest rewrites it to `idle`, so the row clears within one poll. On a kitty that passes program status the record takes over after ten seconds instead, and the screen is never read. The dialogs the hooks never see get the same treatment. Those are the folder-trust dialog and a login prompt at startup, which come before any hook fires, and every dialog while the hooks are not installed. The screen check sees them and writes `input`.
 
 `StopFailure` writes `error`: the turn ended on an API error, a rate limit or an auth failure. Without it a failed turn sat at `working` until the title glyph caught up. The sidebar treats the value like `input`: fresh, it wins outright; stale, it stays until a later hook, and only a working title glyph outranks it. `ks list` prints `error` from the file whatever its age, unless the pane text shows Claude working.
 
@@ -184,15 +186,32 @@ Use the agent if you don't want to install the Claude Code hooks, or as a belt-a
 
 The sidebar reads the claude window's title from the `kitty @ ls` snapshot it already takes. Claude Code prefixes that title with a glyph: a spinner (`◐◓◑◒`, `✢✶✻✽`, or a braille pattern) while it works and `✳` at the prompt. `internal/claude.ParseTitle` turns that into `working` or `idle`; the rest of the title is the row's second line. How the sidebar combines it with the state file is in [Sidebar guide](tui.md#states).
 
-`ks list` instead reads the Claude pane via `kitty @ get-text` and runs a classifier (`internal/claude.DetectState`). It looks at the last 50 non-empty lines bottom-up:
+### The screen classifier
 
-- If the very last line is `>`, the state is `idle`.
-- If any line contains `(y/n)`, `do you want to`, or `allow`/`approve` plus `yes`/`no`, the state is `input`.
-- If any line mentions the Claude Code welcome screen, the state is `waiting`.
-- If any line contains a "working" signal (verbs like `reading`, `editing`, `running`, `compiling`, or a spinner character from `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`), the state is `working`.
-- Otherwise the state is `waiting`.
+`internal/claude.ParseScreen` reads the bottom of the claude window's text and reports three flags. The dialog rules look at the last 24 non-empty lines, the running-turn rules at the last 12:
 
-This is necessarily fuzzy. Claude's UI changes and a substring match can get tricked. If you care about accuracy, install the hooks.
+- **A dialog is on screen** (a blocker). The rules are ported from herdr's Claude manifest (Apache 2.0), plus one of ks's own for the folder-trust dialog. Any of these matches: `esc to cancel` together with `enter to confirm`, or `enter to select` plus an arrow-key hint (the words, or `↑/↓`); `do you want to proceed?` with a numbered option line in the `❯ 1. Yes` style; `MCP server "…" requests your input` with Accept/Decline and `esc to cancel`; `review your answers` (the AskUserQuestion review); `skip interview and plan immediately` (the plan interview); `waiting for permission`; `do you want to allow this connection?`; and `trust the files` with `enter to confirm` (the trust dialog).
+- **The prompt box is at rest**: a `❯` line between the last two horizontal rules, with no dialog footer inside the box.
+- **A turn is running**: an `esc to interrupt` line, or a spinner-glyph line ending in `…`.
+
+The transcript viewer and the model picker match none of these, so opening either never changes a state. A Claude UI change that no rule matches fails safe the same way: the flags stay off and the callers below keep today's behaviour.
+
+Both callers read the window with `kitty @ get-text --extent all`. The default extent returns what the viewport shows. Once you have scrolled up that is a slice of the scrollback, not the live screen (probed on kitty 0.48.2, 2026-10-16). `--extent all` always ends at the live bottom. Before classifying, both cut that text to the window's own row count, the `lines` field of `kitty @ ls`. So rows left in the scrollback above a short screen, after a `/clear` say, cannot pose as a running turn or a dialog.
+
+### `ks list`
+
+`ks list` runs `internal/claude.DetectState`, built on the three flags: a dialog is `input`, a running turn `working`, the prompt box at rest `idle`, the Claude Code welcome screen `waiting`, and anything else `waiting`.
+
+### The sidebar's screen check
+
+The session's own sidebar, and only it, re-reads its own claude window after the rules above, in two cases. Neither runs while the window carries a program status record (section 1).
+
+1. The clear, on every 3 s poll. The row is `input` and the state file is older than 10 s. A dialog still on screen keeps `input`, whatever else the screen shows. Otherwise a running turn rewrites the file to `working`, and the prompt box at rest rewrites it to `idle`. The row then reads `idle`, or `done` on an inactive tab, since the file's `idle` is newer than `viewed_at`. A window that cannot be read leaves the file alone.
+2. The raise, reading at most once every 10 s. The row has no state file at all, or a stale `waiting`: a dialog at startup. The hooks miss it because the folder-trust dialog comes before any hook runs, and a login prompt reports nothing. While the hooks are not installed, any dialog at any time qualifies; that mode is what makes ks usable without `ks hooks install` at all. A visible dialog writes `input`.
+
+Before it writes, the sidebar re-reads the state file and skips the correction when a hook wrote in the meantime. Because the session's own sidebar writes the shared state file, every other sidebar and `ks list` follow without reading the screen themselves. `error` is never touched by the screen check.
+
+This is still text matching. Claude's UI changes, and a rule can stop matching. If you care about accuracy, install the hooks.
 
 ## Choosing between hooks and the agent
 
@@ -214,7 +233,7 @@ cat ~/.config/ks/state/<name>.json
 kitty @ --to unix:$HOME/.config/ks/kitty.sock ls   # program_status under each window
 ```
 
-`ks list` prints the current state alongside the name, the agent kind and the directory. Both go through `launcher.ReportedState`, so with a record and no fresh state file they agree. Without one the sidebar's dot is computed separately (it adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it), so the two can differ. A stale `error` is the exception: both keep it until Claude is seen working, in the pane text or the title, so a failed turn reads the same in both. For a pi session both then read the state file alone; for a shell both say `idle`.
+`ks list` prints the current state alongside the name, the agent kind and the directory. Both go through `launcher.ReportedState`, so with a record and no fresh state file they agree. Without one the sidebar's dot is computed separately, so the two can differ. It adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it or its own screen check clears it. A stale `error` is the exception: both keep it until Claude is seen working, in the pane text or the title, so a failed turn reads the same in both. For a pi session both then read the state file alone; for a shell both say `idle`.
 
 ## Cleaning state
 

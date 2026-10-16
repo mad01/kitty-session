@@ -1,9 +1,5 @@
 package claude
 
-import (
-	"strings"
-)
-
 // State represents the current state of a Claude Code session.
 type State int
 
@@ -56,77 +52,26 @@ func ParseState(s string) State {
 	}
 }
 
-// workingSignals are substrings that indicate Claude is actively processing.
-var workingSignals = []string{
-	"reading", "writing", "editing", "searching",
-	"running", "executing", "analyzing", "creating",
-	"updating", "installing", "building", "compiling",
-	"fetching", "downloading",
-	"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", // spinner characters
-}
-
-// DetectState scans terminal text and determines what Claude Code is doing.
-// It looks at the last ~50 non-empty lines from the bottom up.
+// DetectState classifies a window's terminal text for ks list, from the
+// bottom of the text as ParseScreen reads it. A dialog (Screen.Blocker) is
+// StateNeedsInput, a running turn (Screen.Working) StateWorking, the prompt
+// box at rest (Screen.PromptBox) StateIdle. Anything else is StateWaiting
+// rather than StateIdle: empty text while the session loads, the welcome
+// screen before the prompt box is drawn, the gap between two tool calls.
+// So a session is never advertised as finished on a screen that does not
+// show its prompt. The text must end with the live screen of the window
+// (kitty's get-text with --extent all, cut to the window's rows with
+// LiveScreen): the scrolled-back viewport of a window shows none of the
+// signals.
 func DetectState(text string) State {
-	lines := strings.Split(text, "\n")
-
-	// Collect last 50 non-empty lines (bottom-up)
-	var tail []string
-	for i := len(lines) - 1; i >= 0 && len(tail) < 50; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed != "" {
-			tail = append(tail, trimmed)
-		}
-	}
-
-	// Empty terminal — session is still loading
-	if len(tail) == 0 {
-		return StateWaiting
-	}
-
-	// Idle: last non-empty line is just ">" (Claude's input prompt)
-	if tail[0] == ">" {
+	s := ParseScreen(text)
+	switch {
+	case s.Blocker:
+		return StateNeedsInput
+	case s.Working:
+		return StateWorking
+	case s.PromptBox:
 		return StateIdle
 	}
-
-	// Check bottom-up for signals
-	for _, line := range tail {
-		lower := strings.ToLower(line)
-
-		// NeedsInput: permission prompts, y/n questions
-		if strings.Contains(lower, "(y/n)") {
-			return StateNeedsInput
-		}
-		if (strings.Contains(lower, "allow") || strings.Contains(lower, "approve")) &&
-			(strings.Contains(lower, "yes") || strings.Contains(lower, "no")) {
-			return StateNeedsInput
-		}
-		if strings.Contains(lower, "do you want to") {
-			return StateNeedsInput
-		}
-	}
-
-	// Welcome/startup screen — Claude hasn't been given a task yet
-	for _, line := range tail {
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "welcome to claude") ||
-			strings.Contains(lower, "/help for help") {
-			return StateWaiting
-		}
-	}
-
-	// Look for active work signals
-	for _, line := range tail {
-		lower := strings.ToLower(line)
-		for _, signal := range workingSignals {
-			if strings.Contains(lower, signal) {
-				return StateWorking
-			}
-		}
-	}
-
-	// No clear signal — could be between tool calls or just finished.
-	// Return Waiting ("unknown") rather than Idle ("done") to avoid
-	// falsely advertising completion during inter-tool gaps.
 	return StateWaiting
 }

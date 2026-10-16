@@ -28,7 +28,7 @@ The footer has two labels, `new` and `menu`, and the line above it shows the res
 
 | Dot | State | Meaning |
 |---|---|---|
-| `●` pulsing red | `input` | The agent is waiting on you: a permission prompt or a question. It stays until you answer; after a minute the title line leads with how long (`waiting 12m`) |
+| `●` pulsing red | `input` | The agent is waiting on you: a permission prompt, a question, the folder-trust dialog or a login prompt at startup. It stays until you answer; after a minute the title line leads with how long (`waiting 12m`) |
 | `✗` in the error colour | `error` | The agent reported a failure and stopped. A program status record says so, or the `StopFailure` hook saw a turn die on an API error, a rate limit or an auth failure |
 | `●` | `done` | The agent finished a turn and you have not looked at the tab since |
 | `●` pulsing amber | `working` | Claude is processing |
@@ -47,12 +47,21 @@ Without a record, or with a fresh state file, the rules depend on the agent kind
 5. State file says `error` and is less than 10 s old: `error`.
 6. State file says `working` and is less than 10 s old: `working`. A fresh working file outranks the `✳` title below, because `✳` is also one of Claude's spinner frames, so a snapshot mid-turn can catch it.
 7. Claude's title starts with a spinner glyph: `working`.
-8. State file says `input`, however old: `input`. The hooks write `input` when a prompt appears. Nothing replaces it until the next event: your next message, a tool call, a finished tool, the end of the turn, the session ending. So an unanswered prompt keeps its row red for hours. The spinner title of rule 7 is the one thing that outranks it. It means you have answered and Claude is mid-turn, which the hooks do not report until the tool you approved finishes or the next one starts.
+8. State file says `input`, however old: `input`. The hooks write `input` when a prompt appears. No hook replaces it until the next event: your next message, a tool call, a finished tool, the end of the turn, the session ending. So an unanswered prompt keeps its row red for hours. The spinner title of rule 7 is the one thing that outranks it here. It means you have answered and Claude is mid-turn, which the hooks do not report until the tool you approved finishes or the next one starts. A prompt you dismissed is caught by the screen check below instead, which rewrites the stale file once the dialog is gone.
 9. State file says `error`, however old: `error`. The `StopFailure` hook writes it when a turn dies on an API error, a rate limit or an auth failure. It is sticky like `input`: the next hook or the spinner title of rule 7 clears it.
 10. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
 11. No glyph: the state file's `working` as is; `idle`, `waiting`, or no file at all: `idle`.
 
-`viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. A `done` record needs none of that, with one catch: kitty drops it on the next focus-in or keypress in the window, not on focus-out. The sidebar reads it as `idle` while its tab is active, but a result you looked at without pressing a key shows as `done` again once you switch to another tab, until the next visit. Without the hooks there is no state file. On a kitty that passes program status, `input`, `done` and `error` still come from the record. The `waiting 12m` age on an `input` row does not: it is read from the state file, so it stays at zero. On an older kitty only the title glyph is left, which gives `working` and `idle`.
+`viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. A `done` record needs none of that, with one catch: kitty drops it on the next focus-in or keypress in the window, not on focus-out. The sidebar reads it as `idle` while its tab is active, but a result you looked at without pressing a key shows as `done` again once you switch to another tab, until the next visit. Without the hooks the only state file is the one the screen check below writes. On a kitty that passes program status, `input`, `done` and `error` still come from the record. The `waiting 12m` age on an `input` row does not: it is read from the state file, so it stays at zero. On an older kitty only the title glyph is left, which gives `working` and `idle`.
+
+### The screen check
+
+Rules 4 to 11 never read the window's text. The session's own sidebar adds one step after them, for its own row only. It reads its claude window with `kitty @ get-text --extent all`, cut to the window's own rows, and runs the screen classifier of [Hooks and state detection](hooks-and-state.md#4-title-glyph-and-terminal-text-always-on), in two cases. Neither runs while the window carries a program status record.
+
+- The row is `input` and the state file is older than 10 s, checked on every 3 s refresh. A dialog still on screen keeps `input`. Otherwise a running turn rewrites the file to `working`, and the prompt box at rest rewrites it to `idle`. The row then reads `idle`, or `done` on a tab you are not looking at, since the file's `idle` is newer than `viewed_at`. A window that cannot be read leaves the file alone.
+- The row has no state file, or a stale `waiting`, checked at most once every 10 s. A dialog on screen writes `input`. This is how the folder-trust dialog and a login prompt at startup get a red dot: no hook has run yet. While the hooks are not installed, any dialog at any time counts, so ks works without `ks hooks install` at all.
+
+Before it writes, the sidebar re-reads the state file and skips the correction when a hook wrote in the meantime. The file is shared, so the home sidebar, the other sessions' sidebars and `ks list` follow without reading the screen. `error` is never touched. A Claude UI change that matches no rule changes nothing: the row keeps the state the rules above gave it.
 
 ### Sort
 

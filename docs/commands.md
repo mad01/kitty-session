@@ -111,9 +111,9 @@ State detection:
 3. Otherwise, if that window carries a program status record (Operating System Command 7501, the Program Status Protocol; kitty master, not 0.49.2 or older) → its state, for every kind: `blocked` prints `input`; `working`, `error` and `idle` print as they are; `done` prints `done`, or `idle` when its tab is the active one.
 4. A `shell` session is `idle` from here on: nothing else reports its state. A `pi` session shows its state file's value whatever its age (the ks pi extension writes it) and `idle` without one.
 5. For a `claude` session, if a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file. An `error` file of any age also prints `error`, unless the classifier of step 6 finds Claude working.
-6. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
+6. Otherwise, read the claude window via `kitty @ get-text --extent all`, keep the window's own rows, and run the screen classifier. A dialog on screen → `input`, a running turn → `working`, the prompt box at rest → `idle`, the welcome screen → `waiting`, anything else → `waiting`.
 
-Steps 1 to 3 are shared with the sidebar. Past them the sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text, and keeps an `input` file until a later hook replaces it); see [Sidebar guide](tui.md#states).
+Steps 1 to 3 are shared with the sidebar. Past them the sidebar resolves state on its own; see [Sidebar guide](tui.md#states). It reads Claude's title glyph instead of the pane text, and keeps an `input` file until a later hook replaces it or its own screen check sees the prompt box back.
 
 When the instance is not running every active session prints `stopped` and a last line says `ks instance not running`. Prints `no sessions` if no session files are found.
 

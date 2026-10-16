@@ -174,7 +174,7 @@ SidebarBackend.List():
 
 `Window.Status` comes out of the same `ls` snapshot. kitty lists a window's Program Status Protocol (OSC 7501) records under `program_status`; the parser keeps the most urgent state (blocked, error, done, working, idle) and reads nothing else from a record. `launcher.ReportedState` gates it behind the state file's freshness and maps it; the sidebar and `ks list` share it. Only kitty master after 2026-10-13 fills it; see [Hooks and state detection](hooks-and-state.md#1-program-status-osc-7501-preferred).
 
-`ks list` has its own, older chain for the kind's own rules: `stopped` when the record is stopped or no tagged agent window is in the snapshot, `launcher.ReportedState` when it answers, a fresh state file's value if there is one, else `DetectState(kitty.GetText(...))` on the pane text. It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.
+`ks list` has its own, older chain for the kind's own rules: `stopped` when the record is stopped or no tagged agent window is in the snapshot, `launcher.ReportedState` when it answers, a fresh state file's value if there is one. Otherwise it runs `DetectState` on the window's text (`GetTextAll`, cut to the window's own rows). It pings the socket once first; when nothing answers every active session prints `stopped` and a trailing `ks instance not running` line. See [Hooks and state detection](hooks-and-state.md) for the textual rules inside `DetectState`.
 
 ## Kitty protocol usage
 
@@ -196,7 +196,7 @@ SidebarBackend.List():
 | `CloseTab(tab)` | `close-tab --match=id:<tab>` |
 | `CloseWindow(win)` | `close-window --match=id:<win>` |
 | `CloseAll()` | `close-window --match=all` |
-| `GetText(win)` | `get-text --match=id:<win>` |
+| `GetTextAll(win)` | `get-text --match=id:<win> --extent=all`; the scrollback and the screen as one text, so the last lines are the live bottom even when the window is scrolled back |
 
 The launcher only needs `Windows`, the three launches, `GotoLayout`, `ResizeWindow`, `SetTabTitleForWindow`, `FocusWindow` and `CloseTab`; that is its backend interface, and the test fake implements it with an in-memory window table.
 
