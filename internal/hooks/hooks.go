@@ -1,8 +1,10 @@
-// Package hooks edits the Claude Code hook registration ks relies on for state
-// detection: the matcher groups in ~/.claude/settings.json that run `ks _hook`
-// for the events in Events. Install and Uninstall rewrite the file and write
-// everything that is not a ks group back as they read it, fields ks does not
-// model included; Installed reads it.
+// Package hooks builds the Claude Code hook registration ks relies on for
+// state detection: the matcher groups that run `ks _hook` for the events in
+// Events. Settings renders them as the inline settings document the launcher
+// passes to every claude with --settings, so no file carries them. Older ks
+// versions wrote the same groups into ~/.claude/settings.json; Leftovers
+// finds those and Uninstall removes them, writing everything that is not a
+// ks group back as read, fields ks does not model included.
 package hooks
 
 import (
@@ -33,6 +35,10 @@ const hookSuffix = " _hook"
 // would hold the dialog for a hung handler.
 const handlerTimeout = 5
 
+// notifChannelDisabled is the preferredNotifChannel value that turns off
+// Claude Code's own desktop notification.
+const notifChannelDisabled = "notifications_disabled"
+
 // event is one hook event ks registers, with the matcher its ks group
 // carries.
 type event struct {
@@ -41,29 +47,21 @@ type event struct {
 }
 
 // events are the hook events ks registers, in reporting order: the one list
-// Install, Installed and Events derive from.
+// Settings and Leftovers derive from. The Elicitation matcher is the MCP
+// server name, so empty means every server.
 var events = []event{
 	{"UserPromptSubmit", ""},
 	{"PreToolUse", ".*"},
 	{"PostToolUse", ".*"},
 	{"PostToolUseFailure", ".*"},
 	{"PermissionRequest", ""},
+	{"Elicitation", ""},
+	{"ElicitationResult", ""},
 	{"Stop", ""},
 	{"StopFailure", ""},
 	{"Notification", "permission_prompt|elicitation_dialog"},
 	{"SessionStart", ""},
 	{"SessionEnd", ReasonPromptInputExit + "|" + ReasonLogout},
-}
-
-// Events are the names of the hook events ks registers, in reporting order.
-var Events = eventNames()
-
-func eventNames() []string {
-	names := make([]string, len(events))
-	for i, ev := range events {
-		names[i] = ev.Name
-	}
-	return names
 }
 
 // handler is one hook command in the Claude Code settings format.
@@ -81,6 +79,92 @@ type group struct {
 	Hooks   []handler `json:"hooks"`
 }
 
+// settings is the inline document Settings renders: the hooks object in the
+// Claude Code settings format, plus the notification channel when muted.
+type settings struct {
+	Hooks                 map[string][]group `json:"hooks,omitempty"`
+	PreferredNotifChannel string             `json:"preferredNotifChannel,omitempty"`
+}
+
+// Settings returns the settings document the launcher passes to claude as
+// --settings: one ks group per event in events, each running the hook
+// command for binary (hookCommand) with the handler timeout, and
+// preferredNotifChannel set to notifications_disabled when quiet. An empty
+// binary registers no hooks, so the document then carries only the quiet
+// key. The output is one line with no trailing newline, with keys in sorted
+// order, so two calls with the same input are byte-equal.
+func Settings(binary string, quiet bool) string {
+	var s settings
+	if binary != "" {
+		h := handler{Type: "command", Command: hookCommand(binary), Timeout: handlerTimeout}
+		s.Hooks = make(map[string][]group, len(events))
+		for _, ev := range events {
+			s.Hooks[ev.Name] = []group{{Matcher: ev.Matcher, Hooks: []handler{h}}}
+		}
+	}
+	if quiet {
+		s.PreferredNotifChannel = notifChannelDisabled
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		// Strings and ints only: a failure is a broken invariant, not input.
+		panic("hooks: cannot marshal settings: " + err.Error())
+	}
+	return string(data)
+}
+
+// hookCommand is the command the injected groups run for binary. Claude
+// Code hands it to sh -c, so a path with a space or a shell metacharacter
+// goes in single quotes (shellQuote), and stays absolute, since ~ does not
+// expand inside quotes. A plain path has $HOME shortened to ~, the form
+// older ks versions wrote to the settings file: an identical leftover there
+// is then the same command, which Claude Code runs once, instead of a
+// second handler racing the injected one on the state file.
+func hookCommand(binary string) string {
+	if needsQuoting(binary) {
+		return shellQuote(binary) + hookSuffix
+	}
+	return shortenHome(binary) + hookSuffix
+}
+
+// needsQuoting reports whether path has a character outside the set a
+// shell takes as a plain word: letters, digits, _ . / and -.
+func needsQuoting(path string) bool {
+	return strings.ContainsFunc(path, func(r rune) bool {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return false
+		case r == '_', r == '.', r == '/', r == '-':
+			return false
+		}
+		return true
+	})
+}
+
+// shellQuote wraps s in single quotes. An embedded quote closes the
+// quotes, is escaped with a backslash, then reopens them, so the shell
+// passes the whole string through as one word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shortenHome replaces the $HOME prefix of path with ~, at a path boundary
+// only; a path not under $HOME, or with no $HOME to be had, is returned as
+// is.
+func shortenHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+"/") {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
 // Path returns the Claude Code settings file, ~/.claude/settings.json.
 func Path() (string, error) {
 	home, err := os.UserHomeDir()
@@ -90,37 +174,12 @@ func Path() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// Install registers a ks group for every event in Events, replacing any ks
-// group already there (from this or an older binary path), and writes the
-// settings back. Only the ks events' arrays change; everything else in the
-// hooks object is kept as it was. A ks event whose value is not an array is
-// an error, since ks cannot add to it without dropping it.
-func Install(path, binary string) error {
-	settings, err := read(path)
-	if err != nil {
-		return err
-	}
-	hooks, err := hooksObject(settings, path)
-	if err != nil {
-		return err
-	}
-	cmds := commands(binary)
-	ks := handler{Type: "command", Command: cmds[0], Timeout: handlerTimeout}
-	for _, ev := range events {
-		gs, err := eventGroups(hooks, ev.Name, path)
-		if err != nil {
-			return err
-		}
-		hooks[ev.Name] = append(without(gs, cmds), group{Matcher: ev.Matcher, Hooks: []handler{ks}})
-	}
-	settings["hooks"] = hooks
-	return write(path, settings)
-}
-
-// Uninstall removes every ks group for binary (portable or absolute form).
+// Uninstall removes every ks group from the file: the entries an older ks
+// wrote to the file with ks hooks install, whichever ks binary they name:
+// with the hooks injected at launch, no ks group in the file is in use.
 // Events left without groups are dropped, and so is an empty hooks key. An
 // event whose value is not an array holds no ks group and is left alone.
-func Uninstall(path, binary string) error {
+func Uninstall(path string) error {
 	settings, err := read(path)
 	if err != nil {
 		return err
@@ -129,13 +188,12 @@ func Uninstall(path, binary string) error {
 	if err != nil {
 		return err
 	}
-	cmds := commands(binary)
 	for name, val := range hooks {
 		gs, ok := val.([]any)
 		if !ok {
 			continue
 		}
-		if kept := without(gs, cmds); len(kept) > 0 {
+		if kept := without(gs); len(kept) > 0 {
 			hooks[name] = kept
 		} else {
 			delete(hooks, name)
@@ -149,11 +207,12 @@ func Uninstall(path, binary string) error {
 	return write(path, settings)
 }
 
-// Installed returns the events in Events that have a ks hook registered, in
-// Events order. Any command ending in " _hook" counts, whichever ks binary it
-// names: the hook writes the same state file from every build. A missing
-// settings file means none.
-func Installed(path string) ([]string, error) {
+// Leftovers returns the events that still have a ks group in the file, in
+// reporting order: entries an older ks wrote, which the injected settings
+// make redundant. Any command ending in " _hook" counts, whichever ks
+// binary it names and however it is quoted. A missing settings file means
+// none.
+func Leftovers(path string) ([]string, error) {
 	settings, err := read(path)
 	if err != nil {
 		return nil, err
@@ -162,59 +221,73 @@ func Installed(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var installed []string
+	var left []string
 	for _, ev := range events {
 		gs, _ := hooks[ev.Name].([]any)
-		if slices.ContainsFunc(gs, func(item any) bool { return isKS(item, nil) }) {
-			installed = append(installed, ev.Name)
+		if slices.ContainsFunc(gs, isKS) {
+			left = append(left, ev.Name)
 		}
 	}
-	return installed, nil
+	return left, nil
 }
 
-// commands returns the hook command for binary in its portable form ($HOME
-// shortened to ~, the one Install writes) and, when different, its absolute
-// form, so entries written by either are recognized.
-func commands(binary string) []string {
-	short := shortenHome(binary) + hookSuffix
-	abs := binary + hookSuffix
-	if short == abs {
-		return []string{short}
-	}
-	return []string{short, abs}
+// Status is how the ks hooks reach a session (injected at launch, always)
+// and what an older ks left in the settings file: the file and the events
+// with a leftover ks group, from one Leftovers read (Inspect). Full and
+// Brief put it in words for the CLI and the sidebar.
+type Status struct {
+	Path      string
+	Leftovers []string
 }
 
-// shortenHome replaces the $HOME prefix with ~ for portability across machines.
-func shortenHome(path string) string {
-	home, err := os.UserHomeDir()
+// Inspect reads the settings file once and reports its leftovers.
+func Inspect(path string) (Status, error) {
+	left, err := Leftovers(path)
 	if err != nil {
-		return path
+		return Status{}, err
 	}
-	if strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
-	}
-	return path
+	return Status{Path: path, Leftovers: left}, nil
 }
 
-// isKS reports whether the raw group item runs one of cmds, or with nil cmds
-// any ks hook.
-func isKS(item any, cmds []string) bool {
-	for _, c := range commandsOf(item) {
-		if cmds == nil && strings.HasSuffix(c, hookSuffix) {
-			return true
-		}
-		if slices.Contains(cmds, c) {
-			return true
-		}
+// injectedLine is the status with nothing left over, in both forms.
+const injectedLine = "hooks injected at launch"
+
+// Full is the CLI's status line: with leftovers it names the events, the
+// file and the command that removes them.
+func (s Status) Full() string {
+	if len(s.Leftovers) == 0 {
+		return injectedLine
 	}
-	return false
+	return fmt.Sprintf(
+		"%s; leftover global entries for %s in %s (ks hooks uninstall removes them)",
+		injectedLine, strings.Join(s.Leftovers, ", "), s.Path,
+	)
 }
 
-// without returns gs minus the groups that run one of cmds.
-func without(gs []any, cmds []string) []any {
+// Brief is the sidebar's status line, short enough for its one status row:
+// with leftovers it gives their count and the command that removes them.
+func (s Status) Brief() string {
+	if len(s.Leftovers) == 0 {
+		return injectedLine
+	}
+	return fmt.Sprintf("%s; %d leftover global entries (ks hooks uninstall)",
+		injectedLine, len(s.Leftovers))
+}
+
+// isKS reports whether the raw group item runs a ks hook: any command ending
+// in hookSuffix, whichever binary path (portable with ~ or absolute) an
+// older ks wrote before it.
+func isKS(item any) bool {
+	return slices.ContainsFunc(commandsOf(item), func(c string) bool {
+		return strings.HasSuffix(c, hookSuffix)
+	})
+}
+
+// without returns gs minus the ks groups.
+func without(gs []any) []any {
 	var kept []any
 	for _, g := range gs {
-		if !isKS(g, cmds) {
+		if !isKS(g) {
 			kept = append(kept, g)
 		}
 	}
@@ -269,20 +342,6 @@ func hooksObject(settings map[string]any, path string) (map[string]any, error) {
 		return nil, fmt.Errorf("hooks in %s is not an object", path)
 	}
 	return hooks, nil
-}
-
-// eventGroups returns the groups registered for event in their raw form,
-// none when the key is absent, and an error when its value is not an array.
-func eventGroups(hooks map[string]any, event, path string) ([]any, error) {
-	raw, ok := hooks[event]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	gs, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("hooks.%s in %s is not an array", event, path)
-	}
-	return gs, nil
 }
 
 // commandsOf returns the commands the raw group item runs. The command is

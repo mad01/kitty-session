@@ -52,7 +52,7 @@ List of the state transitions that post a desktop notification: `input` when a r
 
 The notification goes through kitty's desktop notification protocol, Operating System Command (OSC) 99. It shows only while the session's tab is off screen or the kitty window is not the active one. Clicking it brings the tab to the front. The sidebar posts it for its own row and withdraws it when the row moves on. How it works is in [Sidebar guide](tui.md#notifications).
 
-Claude Code has a channel of its own: it posts a desktop notification in kitty when a permission prompt waits and you seem away (its `preferredNotifChannel: auto`). To avoid two banners for one prompt, `ks` starts claude with `--settings '{"preferredNotifChannel":"notifications_disabled"}'` whenever `input` is in the list. Without `input` (`[]` or `[done]`) Claude's own channel is left alone, by design: it is then the only signal for a waiting prompt.
+Claude Code has a channel of its own: it posts a desktop notification in kitty when a permission prompt waits and you seem away (its `preferredNotifChannel: auto`). To avoid two banners for one prompt, `ks` adds `"preferredNotifChannel":"notifications_disabled"` to the `--settings` JSON it starts claude with whenever `input` is in the list. That JSON also carries the Claude Code hooks; see [Hooks and state detection](hooks-and-state.md#2-claude-code-hooks). Without `input` (`[]` or `[done]`) Claude's own channel is left alone, by design: it is then the only signal for a waiting prompt.
 
 ### `kitty_overrides`
 

@@ -73,9 +73,9 @@ Claude Code (2.1.295 and later) and pi (1.1.0 and later) report their state to t
 
 ## State badge is always `waiting`
 
-Your kitty passes no program status (above), you haven't installed the Claude Code hooks and you aren't running the `--agent` monitor. The fallback terminal classifier is conservative. It only returns `working` when it sees one of the specific signal words or a spinner character, and only `idle` when the last line is exactly `>`. Anything else becomes `waiting`.
+Your kitty passes no program status (above), the hooks are not firing in that claude, and you aren't running the `--agent` monitor. The fallback terminal classifier is conservative. It only returns `working` when it sees one of the specific signal words or a spinner character, and only `idle` when the last line is exactly `>`. Anything else becomes `waiting`.
 
-Fix: `ks hooks install`. See [Hooks and state detection](hooks-and-state.md).
+Check `ks hooks status`, then close the tab (`c` in the sidebar) and reopen the session so a fresh claude starts with the injected settings. The checks under [Hooks not firing](#hooks-not-firing) cover the rest. See [Hooks and state detection](hooks-and-state.md).
 
 ## State badge stuck on `working`
 
@@ -83,21 +83,23 @@ On a kitty that passes program status the record the agent last wrote decides on
 
 A `working` state file is trusted for 10 seconds. After that `ks list` classifies the pane text and the sidebar follows the title glyph. A badge stuck on `working` past that means the pane still reads as busy, or a spinner glyph is still in the title.
 
-If Claude actually finished and the hooks were installed, the `Stop` hook should have overwritten the state file with `idle`. Check:
+If Claude actually finished, the `Stop` hook should have overwritten the state file with `idle`. Check:
 
 ```bash
 cat ~/.config/ks/state/<name>.json
 ```
 
-If the `state` field isn't `idle` and `updated_at` is older than the last Claude Code finish, the hooks probably aren't firing. Re-run `ks hooks install` and inspect `~/.claude/settings.json`.
+If the `state` field isn't `idle` and `updated_at` is older than the last Claude Code finish, the hooks aren't firing. Work through the next section.
 
-## `ks hooks install` then still nothing changes
+## Hooks not firing
 
-`ks hooks install` edits `~/.claude/settings.json`. Things to check:
+The hooks reach claude through one `--settings <inline JSON>` argument on its command line, not through `~/.claude/settings.json`. Things to check:
 
-- Claude Code reads this file at start. Running instances won't pick up new hooks; stop and restart `claude` (`ks open` after a `c` in the sidebar does that).
-- The installed command looks like `~/code/bin/ks _hook`. If your `ks` binary lives elsewhere, re-run install after moving it so the path is correct.
+- This version of `ks` started the claude. A claude started before `make install` keeps the settings it started with; close the tab (`c` in the sidebar) and reopen the session (`ks open <name>`, or `enter` on its row).
+- The argument is there. `kitty @ --to unix:$HOME/.config/ks/kitty.sock ls` shows the claude window's `cmdline`; it should contain `--settings` followed by JSON with a `hooks` key, and the command inside names the ks binary that made the session. `ps -o args= -p <pid>` shows the same.
+- The installed claude accepts inline JSON for `--settings`. Claude Code 2.1.x does; `claude --help` lists `--settings <file-or-json>`.
 - `KS_SESSION_NAME` must be set in the env. If you launched a claude some other way (not via `ks`), the hook exits silently.
+- Your own hooks in `~/.claude/settings.json` keep running beside the injected ones. `ks hooks status` reports leftover `ks _hook` entries an older version wrote there; `ks hooks uninstall` removes them. They cost a duplicate run, nothing more.
 
 ## Sidebar is too narrow or wraps
 

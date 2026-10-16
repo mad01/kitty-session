@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/procinfo"
@@ -20,6 +21,8 @@ import (
 // transcript_path. tool_name is set for PreToolUse, PostToolUse,
 // PostToolUseFailure and PermissionRequest, notification_type for
 // Notification and reason for SessionEnd; other events leave them empty.
+// Elicitation and ElicitationResult carry mcp_server_name instead of a tool
+// name; toolOf turns it into the prefix every tool of that server shares.
 type hookPayload struct {
 	HookEventName    string `json:"hook_event_name"`
 	SessionID        string `json:"session_id"`
@@ -27,6 +30,7 @@ type hookPayload struct {
 	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
 	Reason           string `json:"reason"`
+	MCPServerName    string `json:"mcp_server_name"`
 	// AgentID is set when an in-process subagent fired the event. What a
 	// subagent may write is allowWrite's call, and it never touches the
 	// record.
@@ -119,42 +123,74 @@ func writeState(stderr io.Writer, name string, p hookPayload, s string) {
 // (entryFor); only the asker's own completion clears it, so a tool finishing
 // elsewhere never takes a dialog off the badge while it is still on screen.
 //
-// A parent event (no agent_id) always writes, except a tool finishing
-// (PostToolUse, PostToolUseFailure), which leaves an input alone unless the
-// parent asked it, for that tool or for no tool in particular: in a parallel
-// batch Read finishing must not clear the dialog Bash waits on, and a
-// subagent's prompt is not the parent's to clear.
+// A parent event (no agent_id) always writes, except a completion (a tool
+// finishing in PostToolUse or PostToolUseFailure, an MCP dialog answered in
+// ElicitationResult), which leaves an input alone unless the parent asked
+// it, for that tool or for no tool in particular: in a parallel batch Read
+// finishing must not clear the dialog Bash waits on, and a subagent's
+// prompt is not the parent's to clear.
 //
 // A subagent event writes its own input always, stamped with its agent_id
-// and tool; its tool finishing clears only an input it asked itself, for
-// that tool or for none; anything else from a subagent is ignored, since its
+// and tool; its completion clears only an input it asked itself, for that
+// tool or for none; anything else from a subagent is ignored, since its
 // activity says nothing about the parent's turn, whose own Stop ends it.
 func allowWrite(cur state.Entry, p hookPayload, s string) bool {
-	toolDone := p.HookEventName == "PostToolUse" || p.HookEventName == "PostToolUseFailure"
+	done := isCompletion(p.HookEventName)
+	tool := toolOf(p)
 	if p.AgentID == "" {
-		return !toolDone || cur.State != "input" || ownsInput(cur, "", p.ToolName)
+		return !done || cur.State != "input" || ownsInput(cur, "", tool)
 	}
 	if s == "input" {
 		return true
 	}
-	return toolDone && cur.State == "input" && ownsInput(cur, p.AgentID, p.ToolName)
+	return done && cur.State == "input" && ownsInput(cur, p.AgentID, tool)
+}
+
+// isCompletion reports whether the event ends something an input entry may
+// be waiting on: a tool call, or an MCP server's dialog.
+func isCompletion(event string) bool {
+	switch event {
+	case "PostToolUse", "PostToolUseFailure", "ElicitationResult":
+		return true
+	}
+	return false
+}
+
+// toolOf is the tool the event concerns: tool_name, or for the MCP dialog
+// events the mcp__<server>__ prefix every tool of that server carries, so
+// the dialog's input is owned by whichever tool call of that server opened
+// it and by the dialog's own answer.
+func toolOf(p hookPayload) string {
+	switch p.HookEventName {
+	case "Elicitation", "ElicitationResult":
+		return "mcp__" + p.MCPServerName + "__"
+	}
+	return p.ToolName
 }
 
 // ownsInput reports whether the input entry cur was asked by agent ("" for
-// the parent) for tool; an entry with no tool, from a Notification, counts
-// for every tool.
+// the parent) for tool: the same tool, no tool (a Notification, which counts
+// for every tool), or a server prefix (mcp__<server>__, from an Elicitation)
+// that tool carries.
 func ownsInput(cur state.Entry, agent, tool string) bool {
-	return cur.AgentID == agent && (cur.Tool == "" || cur.Tool == tool)
+	if cur.AgentID != agent {
+		return false
+	}
+	if cur.Tool == "" || cur.Tool == tool {
+		return true
+	}
+	return strings.HasSuffix(cur.Tool, "__") && strings.HasPrefix(tool, cur.Tool)
 }
 
 // entryFor is the state file content for the event: an input entry names
-// its asker and the tool the prompt is for (none for a Notification), so a
-// later completion can tell whether it is theirs; every other state is bare.
+// its asker and the tool the prompt is for (none for a Notification, the
+// server prefix for an Elicitation), so a later completion can tell whether
+// it is theirs; every other state is bare.
 func entryFor(p hookPayload, s string) state.Entry {
 	if s != "input" {
 		return state.Entry{State: s}
 	}
-	return state.Entry{State: s, AgentID: p.AgentID, Tool: p.ToolName}
+	return state.Entry{State: s, AgentID: p.AgentID, Tool: toolOf(p)}
 }
 
 // readHookPayload decodes the JSON object a hook handler is given on stdin:
@@ -178,6 +214,8 @@ func readHookPayload[T any](r io.Reader) (T, error) {
 //	PreToolUse                                      → input for a tool in inputTools, else working
 //	PostToolUse, PostToolUseFailure                 → working: the turn goes on after the tool
 //	PermissionRequest                               → input: Claude is about to show the dialog
+//	Elicitation                                     → input: an MCP server's dialog is about to show
+//	ElicitationResult                               → working: the dialog was answered, the turn goes on (a completion: clears only the dialog's own input)
 //	Stop                                            → idle
 //	StopFailure                                     → error: the turn died on an API error
 //	Notification permission_prompt or elicitation_dialog → input
@@ -188,14 +226,14 @@ func readHookPayload[T any](r io.Reader) (T, error) {
 // handles it.
 func stateForEvent(p hookPayload) string {
 	switch p.HookEventName {
-	case "UserPromptSubmit", "PostToolUse", "PostToolUseFailure":
+	case "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "ElicitationResult":
 		return "working"
 	case "PreToolUse":
 		if slices.Contains(inputTools, p.ToolName) {
 			return "input"
 		}
 		return "working"
-	case "PermissionRequest":
+	case "PermissionRequest", "Elicitation":
 		return "input"
 	case "Stop":
 		return "idle"

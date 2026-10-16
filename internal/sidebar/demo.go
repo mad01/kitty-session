@@ -213,7 +213,7 @@ func (d *DemoBackend) ShellSplit() error { return nil }
 
 // HooksStatus reports a canned answer.
 func (d *DemoBackend) HooksStatus() (string, error) {
-	return "hooks installed (demo)", nil
+	return "hooks injected at launch (demo)", nil
 }
 
 // Quit succeeds so the demo program exits.

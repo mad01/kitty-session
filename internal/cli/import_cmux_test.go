@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,6 +59,12 @@ func TestImportToCmuxOpensResumingWorkspaces(t *testing.T) {
 	if beta.Name != "beta-work" || beta.Dir != betaDir ||
 		strings.Join(beta.Command, " ") != "claude" {
 		t.Errorf("beta workspace = %+v", beta)
+	}
+	// No ks sidebar watches a cmux workspace: no hooks, no muted notification.
+	for _, ws := range fake.opened {
+		if slices.Contains(ws.Command, "--settings") {
+			t.Errorf("%s runs claude with --settings: %q", ws.Name, ws.Command)
+		}
 	}
 	if !strings.Contains(out, "ks: 2 opened in cmux, 2 skipped") {
 		t.Errorf("summary missing in:\n%s", out)
