@@ -49,19 +49,21 @@ func TestListShowsTheKind(t *testing.T) {
 // window with a Program Status record prints the record's state whatever
 // the kind unless a fresh state file outranks it, and without one each kind
 // keeps its own rules. The state file comes from a fake reader, since
-// state.Dir pins one HOME per process. No case reaches the terminal text,
-// so the kitty client is nil.
+// state.Dir pins one HOME per process, and the terminal text from a fake
+// too, so the kitty client is nil.
 func TestListStateReadsTheProgramStatus(t *testing.T) {
-	var file string  // the fake state file's state, "" for none
+	var file string      // the fake state file's state, "" for none
 	var fileAt time.Time // its stamp
-	prev := readState
+	var text string      // the fake terminal text
+	prevRead, prevText := readState, paneText
 	readState = func(string) (string, time.Time, error) {
 		if file == "" {
 			return "", time.Time{}, errors.New("no state file")
 		}
 		return file, fileAt, nil
 	}
-	t.Cleanup(func() { readState = prev })
+	paneText = func(*kitty.Client, int) (string, error) { return text, nil }
+	t.Cleanup(func() { readState, paneText = prevRead, prevText })
 	fresh, stale := time.Now(), time.Now().Add(-time.Minute)
 	tests := []struct {
 		name   string
@@ -69,13 +71,29 @@ func TestListStateReadsTheProgramStatus(t *testing.T) {
 		status kitty.ProgramState
 		file   string // the state file's state, "" for none
 		fileAt time.Time
-		active bool // the window's tab is the one on screen
+		active bool   // the window's tab is the one on screen
+		text   string // the window's terminal text, for a claude row past its state file
 		want   string
 	}{
-		{name: "claude blocked", kind: session.AgentClaude, status: kitty.ProgramBlocked, want: "input"},
-		{name: "claude working", kind: session.AgentClaude, status: kitty.ProgramWorking, want: "working"},
+		{
+			name:   "claude blocked",
+			kind:   session.AgentClaude,
+			status: kitty.ProgramBlocked,
+			want:   "input",
+		},
+		{
+			name:   "claude working",
+			kind:   session.AgentClaude,
+			status: kitty.ProgramWorking,
+			want:   "working",
+		},
 		{name: "claude done", kind: session.AgentClaude, status: kitty.ProgramDone, want: "done"},
-		{name: "claude error", kind: session.AgentClaude, status: kitty.ProgramError, want: "error"},
+		{
+			name:   "claude error",
+			kind:   session.AgentClaude,
+			status: kitty.ProgramError,
+			want:   "error",
+		},
 		{name: "claude idle", kind: session.AgentClaude, status: kitty.ProgramIdle, want: "idle"},
 		{
 			name: "done on the active tab is idle", kind: session.AgentClaude,
@@ -97,7 +115,12 @@ func TestListStateReadsTheProgramStatus(t *testing.T) {
 			name: "pi: a fresh idle file outranks a blocked record", kind: session.AgentPi,
 			status: kitty.ProgramBlocked, file: "idle", fileAt: fresh, want: "idle",
 		},
-		{name: "shell working", kind: session.AgentShell, status: kitty.ProgramWorking, want: "working"},
+		{
+			name:   "shell working",
+			kind:   session.AgentShell,
+			status: kitty.ProgramWorking,
+			want:   "working",
+		},
 		{
 			name: "no record: shell is idle", kind: session.AgentShell,
 			file: "input", fileAt: fresh, want: "idle",
@@ -110,10 +133,22 @@ func TestListStateReadsTheProgramStatus(t *testing.T) {
 			name: "no record: claude reads a fresh state file", kind: session.AgentClaude,
 			file: "input", fileAt: fresh, want: "input",
 		},
+		{
+			name: "no record: claude reads a fresh error file", kind: session.AgentClaude,
+			file: "error", fileAt: fresh, want: "error",
+		},
+		{
+			name: "no record: a stale error file beats idle pane text", kind: session.AgentClaude,
+			file: "error", fileAt: stale, text: "API Error: 529 overloaded\n>", want: "error",
+		},
+		{
+			name: "no record: working pane text beats a stale error file", kind: session.AgentClaude,
+			file: "error", fileAt: stale, text: "⠋ Reading internal/cli/list.go", want: "working",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			file, fileAt = tt.file, tt.fileAt
+			file, fileAt, text = tt.file, tt.fileAt, tt.text
 			sess := session.New("ks-list", "/work", 1, 7)
 			sess.Agent = tt.kind
 			all := []kitty.Window{{

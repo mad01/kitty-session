@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/sidebar"
@@ -230,6 +231,47 @@ func TestResolveState(t *testing.T) {
 			sidebar.StateInput,
 		},
 		{
+			"fresh error beats a working title",
+			stateInput{
+				active:    true,
+				hasWindow: true,
+				title:     "◐ busy",
+				fileState: "error",
+				fileAt:    fresh,
+			},
+			sidebar.StateError,
+		},
+		{
+			"stale error stays error under the idle glyph",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				fileState: "error", fileAt: stale, viewedAt: viewed,
+			},
+			sidebar.StateError,
+		},
+		{
+			"stale error loses to a working title",
+			stateInput{
+				active:    true,
+				hasWindow: true,
+				title:     "◐ busy",
+				fileState: "error",
+				fileAt:    stale,
+			},
+			sidebar.StateWorking,
+		},
+		{
+			"stale error, no glyph",
+			stateInput{
+				active:    true,
+				hasWindow: true,
+				title:     "Claude Code",
+				fileState: "error",
+				fileAt:    stale,
+			},
+			sidebar.StateError,
+		},
+		{
 			"pi: stopped record",
 			stateInput{kind: session.AgentPi, hasWindow: true, fileState: "working", fileAt: fresh},
 			sidebar.StateStopped,
@@ -330,7 +372,12 @@ func TestResolveState(t *testing.T) {
 		},
 		{
 			"stopped record with an input file",
-			stateInput{hasWindow: true, title: "✳ Claude Code", fileState: "input", fileAt: hoursOld},
+			stateInput{
+				hasWindow: true,
+				title:     "✳ Claude Code",
+				fileState: "input",
+				fileAt:    hoursOld,
+			},
 			sidebar.StateStopped,
 		},
 		{
@@ -939,16 +986,17 @@ func TestSessionActions(t *testing.T) {
 }
 
 func TestHooksSummary(t *testing.T) {
-	all := []string{
-		"UserPromptSubmit", "PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd",
-	}
 	tests := []struct {
 		installed []string
 		want      string
 	}{
 		{nil, "hooks: none registered (ks hooks install)"},
-		{all, "hooks: all 6 events registered"},
-		{[]string{"PreToolUse", "Notification"}, "hooks: missing UserPromptSubmit, Stop, SessionStart, SessionEnd"},
+		{hooks.Events, "hooks: all 10 events registered"},
+		{
+			[]string{"PreToolUse", "Notification"},
+			"hooks: missing UserPromptSubmit, PostToolUse, PostToolUseFailure, " +
+				"PermissionRequest, Stop, StopFailure, SessionStart, SessionEnd",
+		},
 	}
 	for _, tt := range tests {
 		if got := hooksSummary(tt.installed); got != tt.want {

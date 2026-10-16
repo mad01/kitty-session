@@ -12,10 +12,15 @@ import (
 // freshness is the maximum age of a state file before it's considered stale.
 const freshness = 10 * time.Second
 
-// Entry represents the JSON content of a state file.
+// Entry is the JSON content of a state file. AgentID and Tool are set on an
+// input entry only: the in-process subagent that asked (empty for the
+// parent) and the tool the prompt is for (empty for a notification), so the
+// hook that wrote it can tell whose completion clears it.
 type Entry struct {
 	State     string    `json:"state"`
 	UpdatedAt time.Time `json:"updated_at"`
+	AgentID   string    `json:"agent_id,omitempty"`
+	Tool      string    `json:"tool,omitempty"`
 }
 
 var (
@@ -37,16 +42,13 @@ func Dir() string {
 	return dirPath
 }
 
-// Write persists state for the named session with the current timestamp.
-func Write(name, state string) error {
+// WriteEntry persists e for the named session, stamped with the current time.
+func WriteEntry(name string, e Entry) error {
 	dir := Dir()
 	if dir == "" {
 		return fmt.Errorf("cannot determine state directory")
 	}
-	e := Entry{
-		State:     state,
-		UpdatedAt: time.Now().UTC(),
-	}
+	e.UpdatedAt = time.Now().UTC()
 	data, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("cannot marshal state: %w", err)
@@ -54,19 +56,34 @@ func Write(name, state string) error {
 	return os.WriteFile(filepath.Join(dir, name+".json"), data, 0o644)
 }
 
-// Read returns the state string and timestamp for the named session.
-func Read(name string) (string, time.Time, error) {
+// Write persists a bare state for the named session: no asker, no tool.
+func Write(name, state string) error {
+	return WriteEntry(name, Entry{State: state})
+}
+
+// ReadEntry returns the named session's state file as written. A missing
+// file reports os.ErrNotExist.
+func ReadEntry(name string) (Entry, error) {
 	dir := Dir()
 	if dir == "" {
-		return "", time.Time{}, fmt.Errorf("cannot determine state directory")
+		return Entry{}, fmt.Errorf("cannot determine state directory")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, name+".json"))
 	if err != nil {
-		return "", time.Time{}, err
+		return Entry{}, err
 	}
 	var e Entry
 	if err := json.Unmarshal(data, &e); err != nil {
-		return "", time.Time{}, fmt.Errorf("cannot parse state file: %w", err)
+		return Entry{}, fmt.Errorf("cannot parse state file: %w", err)
+	}
+	return e, nil
+}
+
+// Read returns the state string and timestamp for the named session.
+func Read(name string) (string, time.Time, error) {
+	e, err := ReadEntry(name)
+	if err != nil {
+		return "", time.Time{}, err
 	}
 	return e.State, e.UpdatedAt, nil
 }

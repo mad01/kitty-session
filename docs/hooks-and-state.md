@@ -26,15 +26,17 @@ The last three write or read through the same interface: a state file at `~/.con
 }
 ```
 
-- `state` — one of `working`, `idle`, `input`, `waiting`.
-- `updated_at` — RFC 3339 UTC timestamp.
+- `state`: one of `working`, `idle`, `input`, `error`, `waiting`.
+- `updated_at`: RFC 3339 UTC timestamp.
+- `tool`: optional, present only on an `input` entry: the tool whose prompt is waiting (`Bash`, `AskUserQuestion`, and so on). `PostToolUse` and `PostToolUseFailure` clear the entry only when their tool matches it. An `input` the `Notification` hook wrote has no `tool`, and any completion clears it.
+- `agent_id`: optional, present only on an `input` entry a subagent's prompt produced: that subagent's id. Only its own `PostToolUse` or `PostToolUseFailure` for the same tool clears it.
 
 ### Freshness
 
 `internal/state/file.go` has one threshold: `freshness = 10 * time.Second`, behind `IsFresh`. A state file younger than that is **fresh**. A fresh file also outranks a program status record (section 1): the hooks saw an event the record may not reflect yet. Past the threshold the record, when kitty lists one, decides; the rules below apply without one.
 
-- `ks list` trusts a fresh file outright, whatever it says. An older file is ignored and the pane text is classified instead (section 4).
-- The sidebar lets a fresh `input` or `working` win over the title glyph. Past 10 s the glyph leads, with one exception: an `input` entry counts whatever its age, until a later hook replaces it, so an unanswered prompt stays visible. Its full order is in [Sidebar guide](tui.md#states).
+- `ks list` trusts a fresh file outright, whatever it says. An older file is ignored and the pane text is classified instead (section 4), with one exception. A stale `error` keeps printing `error` unless the pane text shows Claude working, so `ks list` and the sidebar agree on a failed turn.
+- The sidebar lets a fresh `input`, `error` or `working` win over the title glyph. Past 10 s the glyph leads, with one exception: an `input` or `error` entry counts whatever its age, until a later hook replaces it. That keeps an unanswered prompt or a failed turn visible. Only a working title glyph outranks a stale one. Its full order is in [Sidebar guide](tui.md#states).
 
 ## 1. Program status, OSC 7501 (preferred)
 
@@ -81,7 +83,7 @@ For pi, the records kitty passes take precedence over the file the ks pi extensi
 
 ## 2. Claude Code hooks
 
-Claude Code fires [hook events](https://docs.claude.com/en/docs/claude-code/hooks) at specific points in its lifecycle. `ks hooks install` wires six of them to a hidden `ks _hook` handler, which writes the state file and keeps the session record's lifecycle fields current. The state file is the badge's source wherever kitty passes no program status; the record fields are needed everywhere.
+Claude Code fires [hook events](https://docs.claude.com/en/docs/claude-code/hooks) at specific points in its lifecycle. `ks hooks install` wires ten of them to a hidden `ks _hook` handler, which writes the state file and keeps the session record's lifecycle fields current. The state file is the badge's source wherever kitty passes no program status; the record fields are needed everywhere.
 
 ### Install / uninstall
 
@@ -90,29 +92,39 @@ ks hooks install    # writes matcher groups to ~/.claude/settings.json
 ks hooks uninstall  # strips them
 ```
 
-Both commands are idempotent. Install re-runs remove any stale ks entries (for example, entries pointing at an old binary path) before writing the fresh set. Uninstall removes any matcher whose command matches `ks _hook`, whether written with `~/` or an absolute path.
+Both commands are idempotent. Install re-runs remove any stale ks entries (for example, entries pointing at an old binary path) before writing the fresh set. Uninstall removes any matcher whose command matches `ks _hook`, whether written with `~/` or an absolute path. Both keep every field of other tools' entries, including ones ks does not model such as `timeout` and `async`. An event whose value is not an array is left alone by uninstall; install refuses to add a ks group to it and stops with an error naming the event.
 
-An install made before an event was added to `ks` lacks that event. The sidebar's `hooks status` menu entry reports it as missing; rerun `ks hooks install` to add it.
+Every ks handler carries `"timeout": 5`, because `PermissionRequest` runs synchronously inside Claude's permission flow and the default hook timeout is 600 s.
+
+An install made before an event was added to `ks` lacks that event. The sidebar's `hooks status` menu entry reports it as missing; rerun `ks hooks install` to add it. An install from before `PostToolUse`, `PostToolUseFailure`, `PermissionRequest` and `StopFailure` joined the set lacks those four.
 
 ### Event → state map
 
 | Event | Matcher | State written | Extra effect |
 |---|---|---|---|
 | `UserPromptSubmit` | *(empty)* | `working` | Fires when you send a message, before any tool call, so a stale `input` clears on your next message even when you dismissed the prompt |
-| `PreToolUse` | `.*` | `working` | |
+| `PreToolUse` | `.*` | `working` | `input` instead when the tool is `AskUserQuestion` or `ExitPlanMode`. Both block on you, and under bypass-permissions mode neither fires `PermissionRequest` nor `Notification` |
+| `PostToolUse` | `.*` | `working` | Replaces an `input` only when the entry's `tool` is the one that finished, so in a parallel batch a Read finishing leaves the Bash prompt still on screen alone. An `input` from `Notification` names no tool, and any completion clears it |
+| `PostToolUseFailure` | `.*` | `working` | Same as `PostToolUse`, for a tool that failed |
+| `PermissionRequest` | *(empty)* | `input` | Fires the moment Claude is about to show a permission dialog, so the row turns `input` at once. The entry names the tool that asked in `tool`, and the subagent in `agent_id` when one asked. The handler prints nothing and exits 0, which leaves Claude's own dialog in place |
 | `Stop` | *(empty)* | `idle` | |
-| `Notification` | `permission_prompt\|elicitation_dialog` | `input` | — |
+| `StopFailure` | *(empty)* | `error` | The turn died on an API error, a rate limit or an auth failure |
+| `Notification` | `permission_prompt\|elicitation_dialog` | `input` | The fallback behind `PermissionRequest`: `permission_prompt` only fires once the dialog has waited about six seconds |
 | `SessionStart` | *(empty)* | `waiting` | Stores the payload's `session_id` and `transcript_path` on the record as `claude_session_id` / `claude_transcript_path` and sets `status` to `active` |
 | `SessionEnd` | `prompt_input_exit\|logout` | *(none)* | Sets `status` to `stopped` and removes the state file. The handler checks the reason again, so a `clear`, `resume` or `other` that slips through is still ignored |
 
 `Notification` is registered for `permission_prompt` and `elicitation_dialog` only. Claude Code also sends `idle_prompt` after about a minute at an empty prompt. Mapping it to `input` would turn every idle session into a false "waiting on you" and bury the real ones. `done` and `idle` already cover that case. Should another type ever belong here, it is one more alternative in the `Notification` matcher in `internal/hooks/hooks.go` and a case in `stateForEvent` in `internal/cli/hook.go`.
+
+Claude Code fires no hook when you dismiss a prompt with Escape or deny it by hand, and `Stop` does not run on an interrupt. An `input` row set by a prompt you dismissed stays `input` until the next event the hooks see: in practice your next message (`UserPromptSubmit`), a `/clear` (`SessionStart`) or an exit (`SessionEnd`). On a kitty that passes program status the record takes over after ten seconds.
+
+`StopFailure` writes `error`: the turn ended on an API error, a rate limit or an auth failure. Without it a failed turn sat at `working` until the title glyph caught up. The sidebar treats the value like `input`: fresh, it wins outright; stale, it stays until a later hook, and only a working title glyph outranks it. `ks list` prints `error` from the file whatever its age, unless the pane text shows Claude working.
 
 Every launch path (`ks new`, `ks open`, `ks tmp`, the sidebar) exports three variables into both of the session's windows: `KS_SESSION_NAME=<name>`, `KS_SESSION_ID=<id>` and `KS_EXE=<path of the ks binary>` (the pi extension runs `$KS_EXE _pi-hook`, so it reaches the build that made the session). The hook finds the record by `KS_SESSION_ID` first (the `id` field, stable across renames) and falls back to `KS_SESSION_NAME` for records written before ids existed. The state file is keyed by the record's *current* name, so a rename made in the sidebar does not strand later hook writes. If `KS_SESSION_NAME` is unset, the hook exits silently. It is safe to keep installed even in terminals that aren't `ks` sessions.
 
 Two more guards keep the record honest:
 
 - **Nested claudes are ignored.** A `claude` started from inside a session (say `claude -p ...` from the Bash tool) inherits `KS_SESSION_NAME`. The hook therefore checks the process tree: the Claude that fired it must be a direct child of the `kitty` process, which is how `kitty @ launch` starts it. Anything else exits 0 without writing. The lookup lives in `internal/procinfo` and only exists on macOS; elsewhere the hook trusts the environment as before.
-- **Subagents write state, not the record.** Events carrying an `agent_id` come from an in-process subagent. Their `PreToolUse`/`Stop` still update the state file, but `SessionStart`/`SessionEnd` from a subagent leave `claude_session_id` and `status` alone.
+- **Subagents write state, not the record.** Events carrying an `agent_id` come from an in-process subagent. They write only `input`: a subagent's permission prompt or question blocks you too. The entry carries the subagent's id and the tool that asked, and that subagent's own `PostToolUse` or `PostToolUseFailure` for the same tool clears it to `working`. Every other subagent event writes nothing, so a background subagent cannot overwrite the parent's `input` or `error` and cannot idle the parent when it finishes. `SessionStart`/`SessionEnd` from a subagent leave `claude_session_id` and `status` alone.
 
 ### Session ID and status
 
@@ -132,24 +144,28 @@ Simplified example after `ks hooks install`:
 ```json
 {
   "hooks": {
+    "UserPromptSubmit": [ /* ... */ ],
     "PreToolUse": [
       {
         "matcher": ".*",
         "hooks": [
-          {"type": "command", "command": "~/code/bin/ks _hook"}
+          {"type": "command", "command": "~/code/bin/ks _hook", "timeout": 5}
         ]
       }
     ],
-    "UserPromptSubmit": [ /* ... */ ],
-    "Stop":             [ /* ... */ ],
-    "Notification":     [ /* matcher "permission_prompt|elicitation_dialog" */ ],
-    "SessionStart":     [ /* ... */ ],
-    "SessionEnd":       [ /* matcher "prompt_input_exit|logout" */ ]
+    "PostToolUse":        [ /* matcher ".*" */ ],
+    "PostToolUseFailure": [ /* matcher ".*" */ ],
+    "PermissionRequest":  [ /* ... */ ],
+    "Stop":               [ /* ... */ ],
+    "StopFailure":        [ /* ... */ ],
+    "Notification":       [ /* matcher "permission_prompt|elicitation_dialog" */ ],
+    "SessionStart":       [ /* ... */ ],
+    "SessionEnd":         [ /* matcher "prompt_input_exit|logout" */ ]
   }
 }
 ```
 
-Existing non-ks hooks in the file are preserved.
+Every elided group has the same one-handler shape, `timeout` included. Install and uninstall keep every field of other tools' entries in the file.
 
 ## 3. Background Haiku agent (optional fallback)
 
@@ -198,7 +214,7 @@ cat ~/.config/ks/state/<name>.json
 kitty @ --to unix:$HOME/.config/ks/kitty.sock ls   # program_status under each window
 ```
 
-`ks list` prints the current state alongside the name, the agent kind and the directory. Both go through `launcher.ReportedState`, so with a record and no fresh state file they agree. Without one the sidebar's dot is computed separately (it adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it), so the two can differ. For a pi session both then read the state file alone; for a shell both say `idle`.
+`ks list` prints the current state alongside the name, the agent kind and the directory. Both go through `launcher.ReportedState`, so with a record and no fresh state file they agree. Without one the sidebar's dot is computed separately (it adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it), so the two can differ. A stale `error` is the exception: both keep it until Claude is seen working, in the pane text or the title, so a failed turn reads the same in both. For a pi session both then read the state file alone; for a shell both say `idle`.
 
 ## Cleaning state
 

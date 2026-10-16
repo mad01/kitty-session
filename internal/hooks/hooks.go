@@ -1,7 +1,8 @@
 // Package hooks edits the Claude Code hook registration ks relies on for state
 // detection: the matcher groups in ~/.claude/settings.json that run `ks _hook`
-// for the events in Events. Install and Uninstall rewrite the file, keeping
-// every entry that is not a ks hook; Installed reads it.
+// for the events in Events. Install and Uninstall rewrite the file and write
+// everything that is not a ks group back as they read it, fields ks does not
+// model included; Installed reads it.
 package hooks
 
 import (
@@ -11,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -25,28 +27,55 @@ const (
 // hookSuffix ends every ks hook command, whichever binary path precedes it.
 const hookSuffix = " _hook"
 
-// Events are the Claude Code hook events ks registers, in reporting order.
-var Events = []string{
-	"UserPromptSubmit", "PreToolUse", "Stop", "Notification", "SessionStart", "SessionEnd",
+// handlerTimeout is the seconds Claude Code gives a ks handler before it
+// kills it. The handler only writes a state file, and PermissionRequest sits
+// synchronously in Claude's permission flow, where the default of 600 s
+// would hold the dialog for a hung handler.
+const handlerTimeout = 5
+
+// event is one hook event ks registers, with the matcher its ks group
+// carries.
+type event struct {
+	Name    string
+	Matcher string
 }
 
-// matchers is the matcher each event's ks group carries.
-var matchers = map[string]string{
-	"UserPromptSubmit": "",
-	"PreToolUse":   ".*",
-	"Stop":         "",
-	"Notification": "permission_prompt|elicitation_dialog",
-	"SessionStart": "",
-	"SessionEnd":   ReasonPromptInputExit + "|" + ReasonLogout,
+// events are the hook events ks registers, in reporting order: the one list
+// Install, Installed and Events derive from.
+var events = []event{
+	{"UserPromptSubmit", ""},
+	{"PreToolUse", ".*"},
+	{"PostToolUse", ".*"},
+	{"PostToolUseFailure", ".*"},
+	{"PermissionRequest", ""},
+	{"Stop", ""},
+	{"StopFailure", ""},
+	{"Notification", "permission_prompt|elicitation_dialog"},
+	{"SessionStart", ""},
+	{"SessionEnd", ReasonPromptInputExit + "|" + ReasonLogout},
+}
+
+// Events are the names of the hook events ks registers, in reporting order.
+var Events = eventNames()
+
+func eventNames() []string {
+	names := make([]string, len(events))
+	for i, ev := range events {
+		names[i] = ev.Name
+	}
+	return names
 }
 
 // handler is one hook command in the Claude Code settings format.
 type handler struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
+	Timeout int    `json:"timeout,omitempty"`
 }
 
-// group is a matcher with the handlers it runs.
+// group is a matcher with the handlers it runs: the shape ks writes. Groups
+// read from the file stay in their raw JSON form so that rewriting the file
+// keeps whatever fields other tools set.
 type group struct {
 	Matcher string    `json:"matcher"`
 	Hooks   []handler `json:"hooks"`
@@ -63,37 +92,53 @@ func Path() (string, error) {
 
 // Install registers a ks group for every event in Events, replacing any ks
 // group already there (from this or an older binary path), and writes the
-// settings back. Entries of other tools are kept.
+// settings back. Only the ks events' arrays change; everything else in the
+// hooks object is kept as it was. A ks event whose value is not an array is
+// an error, since ks cannot add to it without dropping it.
 func Install(path, binary string) error {
 	settings, err := read(path)
 	if err != nil {
 		return err
 	}
-	hooks := groups(settings)
+	hooks, err := hooksObject(settings, path)
+	if err != nil {
+		return err
+	}
 	cmds := commands(binary)
-	ks := handler{Type: "command", Command: cmds[0]}
-	for _, event := range Events {
-		kept := without(hooks[event], cmds)
-		hooks[event] = append(kept, group{Matcher: matchers[event], Hooks: []handler{ks}})
+	ks := handler{Type: "command", Command: cmds[0], Timeout: handlerTimeout}
+	for _, ev := range events {
+		gs, err := eventGroups(hooks, ev.Name, path)
+		if err != nil {
+			return err
+		}
+		hooks[ev.Name] = append(without(gs, cmds), group{Matcher: ev.Matcher, Hooks: []handler{ks}})
 	}
 	settings["hooks"] = hooks
 	return write(path, settings)
 }
 
 // Uninstall removes every ks group for binary (portable or absolute form).
-// Events left without groups are dropped, and so is an empty hooks key.
+// Events left without groups are dropped, and so is an empty hooks key. An
+// event whose value is not an array holds no ks group and is left alone.
 func Uninstall(path, binary string) error {
 	settings, err := read(path)
 	if err != nil {
 		return err
 	}
-	hooks := groups(settings)
+	hooks, err := hooksObject(settings, path)
+	if err != nil {
+		return err
+	}
 	cmds := commands(binary)
-	for event, gs := range hooks {
+	for name, val := range hooks {
+		gs, ok := val.([]any)
+		if !ok {
+			continue
+		}
 		if kept := without(gs, cmds); len(kept) > 0 {
-			hooks[event] = kept
+			hooks[name] = kept
 		} else {
-			delete(hooks, event)
+			delete(hooks, name)
 		}
 	}
 	if len(hooks) > 0 {
@@ -113,14 +158,15 @@ func Installed(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	hooks := groups(settings)
+	hooks, err := hooksObject(settings, path)
+	if err != nil {
+		return nil, err
+	}
 	var installed []string
-	for _, event := range Events {
-		for _, g := range hooks[event] {
-			if isKS(g, nil) {
-				installed = append(installed, event)
-				break
-			}
+	for _, ev := range events {
+		gs, _ := hooks[ev.Name].([]any)
+		if slices.ContainsFunc(gs, func(item any) bool { return isKS(item, nil) }) {
+			installed = append(installed, ev.Name)
 		}
 	}
 	return installed, nil
@@ -150,24 +196,23 @@ func shortenHome(path string) string {
 	return path
 }
 
-// isKS reports whether g runs one of cmds, or with nil cmds any ks hook.
-func isKS(g group, cmds []string) bool {
-	for _, h := range g.Hooks {
-		if cmds == nil && strings.HasSuffix(h.Command, hookSuffix) {
+// isKS reports whether the raw group item runs one of cmds, or with nil cmds
+// any ks hook.
+func isKS(item any, cmds []string) bool {
+	for _, c := range commandsOf(item) {
+		if cmds == nil && strings.HasSuffix(c, hookSuffix) {
 			return true
 		}
-		for _, c := range cmds {
-			if h.Command == c {
-				return true
-			}
+		if slices.Contains(cmds, c) {
+			return true
 		}
 	}
 	return false
 }
 
 // without returns gs minus the groups that run one of cmds.
-func without(gs []group, cmds []string) []group {
-	var kept []group
+func without(gs []any, cmds []string) []any {
+	var kept []any
 	for _, g := range gs {
 		if !isKS(g, cmds) {
 			kept = append(kept, g)
@@ -211,52 +256,53 @@ func write(path string, settings map[string]any) error {
 	return nil
 }
 
-// groups extracts the hooks map from settings as typed groups, skipping
-// entries that do not have the expected shape.
-func groups(settings map[string]any) map[string][]group {
-	hooks := map[string][]group{}
-	raw, ok := settings["hooks"].(map[string]any)
+// hooksObject returns the hooks object of settings itself, so that whatever
+// it holds beyond the ks events goes back to the file as read; an empty one
+// when the key is absent. Any other value is an error.
+func hooksObject(settings map[string]any, path string) (map[string]any, error) {
+	raw, ok := settings["hooks"]
+	if !ok || raw == nil {
+		return map[string]any{}, nil
+	}
+	hooks, ok := raw.(map[string]any)
 	if !ok {
-		return hooks
+		return nil, fmt.Errorf("hooks in %s is not an object", path)
 	}
-	for event, val := range raw {
-		arr, ok := val.([]any)
-		if !ok {
-			continue
-		}
-		for _, item := range arr {
-			if g, ok := parseGroup(item); ok {
-				hooks[event] = append(hooks[event], g)
-			}
-		}
-	}
-	return hooks
+	return hooks, nil
 }
 
-// parseGroup reads one matcher group out of its generic JSON form.
-func parseGroup(item any) (group, bool) {
+// eventGroups returns the groups registered for event in their raw form,
+// none when the key is absent, and an error when its value is not an array.
+func eventGroups(hooks map[string]any, event, path string) ([]any, error) {
+	raw, ok := hooks[event]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	gs, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("hooks.%s in %s is not an array", event, path)
+	}
+	return gs, nil
+}
+
+// commandsOf returns the commands the raw group item runs. The command is
+// the only field ks reads from a group it did not write; a malformed item
+// has none, so it is never a ks group and goes back to the file untouched.
+func commandsOf(item any) []string {
 	obj, ok := item.(map[string]any)
 	if !ok {
-		return group{}, false
-	}
-	g := group{}
-	if m, ok := obj["matcher"].(string); ok {
-		g.Matcher = m
+		return nil
 	}
 	arr, _ := obj["hooks"].([]any)
+	var cmds []string
 	for _, h := range arr {
 		hObj, ok := h.(map[string]any)
 		if !ok {
 			continue
 		}
-		hh := handler{}
-		if t, ok := hObj["type"].(string); ok {
-			hh.Type = t
-		}
 		if c, ok := hObj["command"].(string); ok {
-			hh.Command = c
+			cmds = append(cmds, c)
 		}
-		g.Hooks = append(g.Hooks, hh)
 	}
-	return g, true
+	return cmds
 }

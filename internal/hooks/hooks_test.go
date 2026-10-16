@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +31,9 @@ func newSettings(t *testing.T, content string) string {
 	return path
 }
 
-func readGroups(t *testing.T, path string) map[string][]group {
+// readHooks reads the settings file's hooks object as decoded JSON; nil
+// without one.
+func readHooks(t *testing.T, path string) map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -39,10 +43,38 @@ func readGroups(t *testing.T, path string) map[string][]group {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		t.Fatal(err)
 	}
-	return groups(settings)
+	hooks, _ := settings["hooks"].(map[string]any)
+	return hooks
 }
 
-func countKS(gs []group) int {
+// readGroups is readHooks narrowed to the events whose value is an array,
+// each as the raw groups the file holds.
+func readGroups(t *testing.T, path string) map[string][]any {
+	t.Helper()
+	groups := map[string][]any{}
+	for name, val := range readHooks(t, path) {
+		if gs, ok := val.([]any); ok {
+			groups[name] = gs
+		}
+	}
+	return groups
+}
+
+// asGroup reads one raw group into the typed form for field assertions.
+func asGroup(t *testing.T, item any) group {
+	t.Helper()
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g group
+	if err := json.Unmarshal(data, &g); err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
+func countKS(gs []any) int {
 	n := 0
 	for _, g := range gs {
 		if isKS(g, nil) {
@@ -63,16 +95,20 @@ func TestInstallAndUninstall(t *testing.T) {
 		}
 	}
 	hooks := readGroups(t, path)
-	for _, event := range Events {
-		if n := countKS(hooks[event]); n != 1 {
-			t.Errorf("%s has %d ks groups after install, want 1", event, n)
+	for _, ev := range events {
+		gs := hooks[ev.Name]
+		if n := countKS(gs); n != 1 {
+			t.Errorf("%s has %d ks groups after install, want 1", ev.Name, n)
 		}
-		last := hooks[event][len(hooks[event])-1]
-		if last.Matcher != matchers[event] {
-			t.Errorf("%s matcher = %q, want %q", event, last.Matcher, matchers[event])
+		last := asGroup(t, gs[len(gs)-1])
+		if last.Matcher != ev.Matcher {
+			t.Errorf("%s matcher = %q, want %q", ev.Name, last.Matcher, ev.Matcher)
 		}
 		if want := "~/bin/ks _hook"; last.Hooks[0].Command != want {
-			t.Errorf("%s command = %q, want %q", event, last.Hooks[0].Command, want)
+			t.Errorf("%s command = %q, want %q", ev.Name, last.Hooks[0].Command, want)
+		}
+		if last.Hooks[0].Timeout != handlerTimeout {
+			t.Errorf("%s timeout = %d, want %d", ev.Name, last.Hooks[0].Timeout, handlerTimeout)
 		}
 	}
 	if len(hooks["Stop"])-countKS(hooks["Stop"]) != 1 {
@@ -90,15 +126,15 @@ func TestInstallAndUninstall(t *testing.T) {
 		t.Fatalf("Uninstall: %v", err)
 	}
 	hooks = readGroups(t, path)
-	for _, event := range Events {
-		if n := countKS(hooks[event]); n != 0 {
-			t.Errorf("%s has %d ks groups after uninstall, want 0", event, n)
+	for _, ev := range events {
+		if n := countKS(hooks[ev.Name]); n != 0 {
+			t.Errorf("%s has %d ks groups after uninstall, want 0", ev.Name, n)
 		}
 	}
 	if _, ok := hooks["SessionEnd"]; ok {
 		t.Error("SessionEnd key left behind after uninstall")
 	}
-	if len(hooks["Stop"]) != 1 || hooks["Stop"][0].Hooks[0].Command != "other-tool" {
+	if len(hooks["Stop"]) != 1 || asGroup(t, hooks["Stop"][0]).Hooks[0].Command != "other-tool" {
 		t.Errorf("foreign Stop hook lost on uninstall: %+v", hooks["Stop"])
 	}
 
@@ -112,6 +148,92 @@ func TestInstallAndUninstall(t *testing.T) {
 	}
 	if settings["theme"] != "dark" {
 		t.Errorf("theme = %v, want dark preserved", settings["theme"])
+	}
+}
+
+// A group of another tool keeps every field across Install and Uninstall,
+// the ones ks does not model included: timeout, async, statusMessage and
+// whatever a later Claude Code adds.
+func TestForeignGroupsSurviveUnchanged(t *testing.T) {
+	foreign := map[string]any{
+		"matcher": "Bash",
+		"hooks": []any{map[string]any{
+			"type":          "command",
+			"command":       "other-tool",
+			"timeout":       float64(10),
+			"async":         true,
+			"statusMessage": "other-tool running",
+		}},
+	}
+	content, err := json.Marshal(map[string]any{
+		"hooks": map[string]any{"PreToolUse": []any{foreign}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := newSettings(t, string(content))
+	binary := filepath.Join(os.Getenv("HOME"), "bin", "ks")
+	steps := []struct {
+		name string
+		run  func(path, binary string) error
+	}{{"Install", Install}, {"Uninstall", Uninstall}}
+	for _, step := range steps {
+		if err := step.run(path, binary); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		got := readGroups(t, path)["PreToolUse"]
+		if len(got) == 0 || !reflect.DeepEqual(got[0], foreign) {
+			t.Errorf("after %s the foreign group is %v, want %v", step.name, got, foreign)
+		}
+	}
+}
+
+// An event ks does not register keeps its value whatever its shape: a
+// hand-edited object under SubagentStop is not ks's to drop.
+func TestNonArrayForeignEventSurvives(t *testing.T) {
+	foreign := map[string]any{"bogus": true, "note": "hand edited"}
+	content, err := json.Marshal(map[string]any{
+		"hooks": map[string]any{"SubagentStop": foreign},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := newSettings(t, string(content))
+	binary := filepath.Join(os.Getenv("HOME"), "bin", "ks")
+	steps := []struct {
+		name string
+		run  func(path, binary string) error
+	}{{"Install", Install}, {"Uninstall", Uninstall}}
+	for _, step := range steps {
+		if err := step.run(path, binary); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		if got := readHooks(t, path)["SubagentStop"]; !reflect.DeepEqual(got, foreign) {
+			t.Errorf("after %s SubagentStop is %v, want %v", step.name, got, foreign)
+		}
+	}
+}
+
+// A ks event whose value is not an array cannot take a ks group without
+// being dropped, so Install refuses, names it, and leaves the file alone.
+func TestInstallRejectsNonArrayKSEvent(t *testing.T) {
+	content := `{"hooks":{"Stop":{"matcher":"","hooks":[]}}}`
+	path := newSettings(t, content)
+	binary := filepath.Join(os.Getenv("HOME"), "bin", "ks")
+	err := Install(path, binary)
+	if err == nil {
+		t.Fatal("Install accepted a Stop object")
+	}
+	want := "hooks.Stop in " + path + " is not an array"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("Install error = %q, want it to contain %q", err, want)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != content {
+		t.Errorf("settings rewritten on a refused install: %s", data)
 	}
 }
 
@@ -129,7 +251,7 @@ func TestUninstallRemovesTheAbsoluteForm(t *testing.T) {
 	if err := Uninstall(path, binary); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
-	if hooks := readGroups(t, path); len(hooks) != 0 {
+	if hooks := readHooks(t, path); len(hooks) != 0 {
 		t.Errorf("hooks left after uninstall: %+v", hooks)
 	}
 }
@@ -148,6 +270,11 @@ func TestInstalled(t *testing.T) {
 				`"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"~/bin/ks _hook"}]}],` +
 				`"Notification":[{"matcher":"","hooks":[{"type":"command","command":"other-tool"}]}]}}`,
 			[]string{"PreToolUse", "Stop"},
+		},
+		{
+			"a ks event that is not an array holds no ks group",
+			`{"hooks":{"Stop":{"hooks":[{"type":"command","command":"~/bin/ks _hook"}]}}}`,
+			nil,
 		},
 	}
 	for _, tt := range tests {

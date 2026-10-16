@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/procinfo"
@@ -16,19 +17,29 @@ import (
 
 // hookPayload is the subset of the JSON object Claude Code pipes to hook
 // commands on stdin. Every event carries hook_event_name, session_id and
-// transcript_path. notification_type is set for Notification and reason for
-// SessionEnd; other events leave them empty.
+// transcript_path. tool_name is set for PreToolUse, PostToolUse,
+// PostToolUseFailure and PermissionRequest, notification_type for
+// Notification and reason for SessionEnd; other events leave them empty.
 type hookPayload struct {
 	HookEventName    string `json:"hook_event_name"`
 	SessionID        string `json:"session_id"`
 	TranscriptPath   string `json:"transcript_path"`
+	ToolName         string `json:"tool_name"`
 	NotificationType string `json:"notification_type"`
 	Reason           string `json:"reason"`
-	// AgentID is set when an in-process subagent fired the event. Its
-	// activity still counts as state, but it must not touch the record.
+	// AgentID is set when an in-process subagent fired the event. What a
+	// subagent may write is allowWrite's call, and it never touches the
+	// record.
 	AgentID string `json:"agent_id"`
 }
 
+// inputTools are the tools that wait on the user without a permission
+// dialog, so under bypass-permissions mode neither PermissionRequest nor
+// Notification fires for them; PreToolUse is the one event that sees them.
+var inputTools = []string{"AskUserQuestion", "ExitPlanMode"}
+
+// hookCmd prints nothing on stdout: on PermissionRequest Claude reads a
+// decision there, and none means the usual dialog.
 var hookCmd = &cobra.Command{
 	Use:    "_hook",
 	Short:  "Handle Claude Code hook events",
@@ -80,16 +91,70 @@ func runHook(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	if err := state.Write(name, s); err != nil {
-		hookWarn(stderr, err)
-	}
-	if sess == nil {
-		return nil
-	}
-	if payload.HookEventName == "SessionStart" && payload.AgentID == "" {
+	writeState(stderr, name, payload, s)
+	if sess != nil && payload.HookEventName == "SessionStart" && payload.AgentID == "" {
 		recordClaudeSession(stderr, store, sess, payload)
 	}
 	return nil
+}
+
+// writeState replaces the session's state file with the event's state when
+// allowWrite lets it. The current entry is read first; one that cannot be
+// read counts as none and is reported.
+func writeState(stderr io.Writer, name string, p hookPayload, s string) {
+	cur, err := state.ReadEntry(name)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		hookWarn(stderr, err)
+	}
+	if !allowWrite(cur, p, s) {
+		return
+	}
+	if err := state.WriteEntry(name, entryFor(p, s)); err != nil {
+		hookWarn(stderr, err)
+	}
+}
+
+// allowWrite decides whether the event may replace the current state file
+// entry cur with state s. An input entry is sticky and remembers who asked
+// (entryFor); only the asker's own completion clears it, so a tool finishing
+// elsewhere never takes a dialog off the badge while it is still on screen.
+//
+// A parent event (no agent_id) always writes, except a tool finishing
+// (PostToolUse, PostToolUseFailure), which leaves an input alone unless the
+// parent asked it, for that tool or for no tool in particular: in a parallel
+// batch Read finishing must not clear the dialog Bash waits on, and a
+// subagent's prompt is not the parent's to clear.
+//
+// A subagent event writes its own input always, stamped with its agent_id
+// and tool; its tool finishing clears only an input it asked itself, for
+// that tool or for none; anything else from a subagent is ignored, since its
+// activity says nothing about the parent's turn, whose own Stop ends it.
+func allowWrite(cur state.Entry, p hookPayload, s string) bool {
+	toolDone := p.HookEventName == "PostToolUse" || p.HookEventName == "PostToolUseFailure"
+	if p.AgentID == "" {
+		return !toolDone || cur.State != "input" || ownsInput(cur, "", p.ToolName)
+	}
+	if s == "input" {
+		return true
+	}
+	return toolDone && cur.State == "input" && ownsInput(cur, p.AgentID, p.ToolName)
+}
+
+// ownsInput reports whether the input entry cur was asked by agent ("" for
+// the parent) for tool; an entry with no tool, from a Notification, counts
+// for every tool.
+func ownsInput(cur state.Entry, agent, tool string) bool {
+	return cur.AgentID == agent && (cur.Tool == "" || cur.Tool == tool)
+}
+
+// entryFor is the state file content for the event: an input entry names
+// its asker and the tool the prompt is for (none for a Notification), so a
+// later completion can tell whether it is theirs; every other state is bare.
+func entryFor(p hookPayload, s string) state.Entry {
+	if s != "input" {
+		return state.Entry{State: s}
+	}
+	return state.Entry{State: s, AgentID: p.AgentID, Tool: p.ToolName}
 }
 
 // readHookPayload decodes the JSON object a hook handler is given on stdin:
@@ -107,13 +172,35 @@ func readHookPayload[T any](r io.Reader) (T, error) {
 }
 
 // stateForEvent maps a hook event to the state ks records for it, or "" when
-// ks ignores the event.
+// ks ignores the event:
+//
+//	UserPromptSubmit                                → working
+//	PreToolUse                                      → input for a tool in inputTools, else working
+//	PostToolUse, PostToolUseFailure                 → working: the turn goes on after the tool
+//	PermissionRequest                               → input: Claude is about to show the dialog
+//	Stop                                            → idle
+//	StopFailure                                     → error: the turn died on an API error
+//	Notification permission_prompt or elicitation_dialog → input
+//	SessionStart                                    → waiting
+//
+// Whether the state reaches the file is allowWrite's call, which is where a
+// subagent's events are weighed. SessionEnd writes no state; runHook
+// handles it.
 func stateForEvent(p hookPayload) string {
 	switch p.HookEventName {
-	case "UserPromptSubmit", "PreToolUse":
+	case "UserPromptSubmit", "PostToolUse", "PostToolUseFailure":
 		return "working"
+	case "PreToolUse":
+		if slices.Contains(inputTools, p.ToolName) {
+			return "input"
+		}
+		return "working"
+	case "PermissionRequest":
+		return "input"
 	case "Stop":
 		return "idle"
+	case "StopFailure":
+		return "error"
 	case "Notification":
 		switch p.NotificationType {
 		case "permission_prompt", "elicitation_dialog":

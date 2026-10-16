@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/state"
@@ -20,12 +21,18 @@ type hookCase struct {
 	id      string // KS_SESSION_ID
 	nested  bool   // the fake process tree says a nested claude fired the hook
 	payload string
-	// wantState is the state expected under the resolved record's name; ""
-	// means no state file may be written.
-	wantState string
-	seedState string // state file written before the hook runs
-	seed      *session.Session
-	record    string
+	// wantState, wantAgent and wantTool are the entry expected under the
+	// resolved record's name; a "" wantState means no state file may exist
+	// afterwards: none written, or, with a seedFile, the seeded one removed.
+	wantState, wantAgent, wantTool string
+	// seedFile is the state file written before the hook runs; zero for none.
+	seedFile state.Entry
+	// quiet means the event must leave everything alone: the state file
+	// keeps its seeded content, the seeded record is untouched and nothing
+	// goes to stderr.
+	quiet  bool
+	seed   *session.Session
+	record string
 	wantStatus,
 	wantClaudeID,
 	wantTranscript string
@@ -68,9 +75,123 @@ func hookCases() []hookCase {
 			wantState: "working",
 		},
 		{
-			name:      "PreToolUse writes working",
+			name:      "PreToolUse Bash writes working",
 			session:   "ks-hook-test-pretool",
 			payload:   `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp","permission_mode":"default"}`,
+			wantState: "working",
+		},
+		{
+			name:      "PreToolUse AskUserQuestion writes input",
+			session:   "ks-hook-test-ask",
+			payload:   `{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]},"session_id":"s1","transcript_path":"/t","cwd":"/tmp","permission_mode":"bypassPermissions"}`,
+			wantState: "input",
+			wantTool:  "AskUserQuestion",
+		},
+		{
+			name:      "PreToolUse ExitPlanMode writes input",
+			session:   "ks-hook-test-plan",
+			payload:   `{"hook_event_name":"PreToolUse","tool_name":"ExitPlanMode","tool_input":{},"session_id":"s1","transcript_path":"/t","cwd":"/tmp","permission_mode":"plan"}`,
+			wantState: "input",
+			wantTool:  "ExitPlanMode",
+		},
+		{
+			name:      "PostToolUse writes working",
+			session:   "ks-hook-test-posttool",
+			payload:   `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"a"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "working",
+		},
+		{
+			name:      "PostToolUseFailure writes working",
+			session:   "ks-hook-test-posttool-fail",
+			payload:   `{"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":"false"},"error":"exit status 1","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "working",
+		},
+		{
+			name:      "PermissionRequest writes input for its tool",
+			session:   "ks-hook-test-permreq",
+			payload:   `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -r build"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp","permission_mode":"default"}`,
+			wantState: "input",
+			wantTool:  "Bash",
+		},
+		{
+			name:      "subagent PermissionRequest writes input with its agent and tool",
+			session:   "ks-hook-test-sub-permreq",
+			payload:   `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"make"},"agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "input",
+			wantAgent: "agent-7",
+			wantTool:  "Bash",
+		},
+		{
+			name:      "subagent PostToolUse for its own tool clears its input",
+			session:   "ks-hook-test-sub-clear",
+			payload:   `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"make"},"tool_response":{"stdout":"ok"},"agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", AgentID: "agent-7", Tool: "Bash"},
+			wantState: "working",
+		},
+		{
+			name:       "subagent PostToolUse for another tool leaves its input",
+			session:    "ks-hook-test-sub-other",
+			payload:    `{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"/f"},"tool_response":{},"agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "input", AgentID: "agent-7", Tool: "Bash"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:       "subagent PreToolUse Bash leaves a parent input alone",
+			session:    "ks-hook-test-sub-pretool",
+			payload:    `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "input", Tool: "Bash"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:       "subagent Stop writes nothing",
+			session:    "ks-hook-test-sub-stop",
+			payload:    `{"hook_event_name":"Stop","agent_id":"agent-7","last_assistant_message":"done","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "working"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:       "subagent StopFailure writes nothing",
+			session:    "ks-hook-test-sub-stopfail",
+			payload:    `{"hook_event_name":"StopFailure","agent_id":"agent-7","error":"API Error: 529 overloaded","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "working"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:       "parent PostToolUse Read leaves a Bash input alone",
+			session:    "ks-hook-test-batch",
+			payload:    `{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"/f"},"tool_response":{},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "input", Tool: "Bash"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:      "parent PostToolUse Bash clears its Bash input",
+			session:   "ks-hook-test-batch-clear",
+			payload:   `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"make"},"tool_response":{"stdout":"ok"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", Tool: "Bash"},
+			wantState: "working",
+		},
+		{
+			name:      "parent PostToolUse clears a tool-less input",
+			session:   "ks-hook-test-notify-clear",
+			payload:   `{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"/f"},"tool_response":{},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input"},
+			wantState: "working",
+		},
+		{
+			name:      "parent PreToolUse Bash overwrites a subagent input",
+			session:   "ks-hook-test-parent-over",
+			payload:   `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", AgentID: "agent-7", Tool: "Bash"},
 			wantState: "working",
 		},
 		{
@@ -78,6 +199,19 @@ func hookCases() []hookCase {
 			session:   "ks-hook-test-stop",
 			payload:   `{"hook_event_name":"Stop","last_assistant_message":"done","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
 			wantState: "idle",
+		},
+		{
+			name:      "parent Stop writes idle over anything",
+			session:   "ks-hook-test-stop-over",
+			payload:   `{"hook_event_name":"Stop","last_assistant_message":"done","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", AgentID: "agent-7", Tool: "Bash"},
+			wantState: "idle",
+		},
+		{
+			name:      "StopFailure writes error",
+			session:   "ks-hook-test-stopfail",
+			payload:   `{"hook_event_name":"StopFailure","error":"API Error: 529 overloaded","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "error",
 		},
 		{
 			name:      "Notification permission_prompt writes input",
@@ -117,10 +251,11 @@ func hookCases() []hookCase {
 			wantClaudeID: "keep",
 		},
 		{
-			name:         "SessionStart from a subagent writes state but not the record",
+			name:         "SessionStart from a subagent writes neither state nor record",
 			session:      "ks-hook-test-start-agent",
 			payload:      `{"hook_event_name":"SessionStart","source":"startup","agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
-			wantState:    "waiting",
+			seedFile:     state.Entry{State: "working"},
+			quiet:        true,
 			seed:         &session.Session{Status: session.StatusActive, ClaudeSessionID: "main-1"},
 			wantStatus:   session.StatusActive,
 			wantClaudeID: "main-1",
@@ -152,7 +287,7 @@ func hookCases() []hookCase {
 			name:         "SessionEnd prompt_input_exit marks stopped and drops the state file",
 			session:      "ks-hook-test-end-exit",
 			payload:      `{"hook_event_name":"SessionEnd","reason":"prompt_input_exit","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
-			seedState:    "idle",
+			seedFile:     state.Entry{State: "idle"},
 			seed:         &session.Session{Status: session.StatusActive, ClaudeSessionID: "id-1"},
 			wantStatus:   session.StatusStopped,
 			wantClaudeID: "id-1",
@@ -229,8 +364,8 @@ func runHookCase(t *testing.T, store *session.Store, tc hookCase) {
 			t.Fatal(err)
 		}
 	}
-	if tc.seedState != "" {
-		if err := state.Write(record, tc.seedState); err != nil {
+	if tc.seedFile.State != "" {
+		if err := state.WriteEntry(record, tc.seedFile); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -238,12 +373,14 @@ func runHookCase(t *testing.T, store *session.Store, tc hookCase) {
 	t.Setenv("KS_SESSION_ID", tc.id)
 	useFakeProcessTree(t, tc.nested)
 
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	rootCmd.SetIn(strings.NewReader(tc.payload))
+	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
 	rootCmd.SetArgs([]string{"_hook"})
 	t.Cleanup(func() {
 		rootCmd.SetIn(nil)
+		rootCmd.SetOut(nil)
 		rootCmd.SetErr(nil)
 		rootCmd.SetArgs(nil)
 	})
@@ -252,17 +389,27 @@ func runHookCase(t *testing.T, store *session.Store, tc hookCase) {
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
-	if tc.seedState != "" {
-		if _, _, err := state.Read(record); !errors.Is(err, os.ErrNotExist) {
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing: Claude reads a decision there", stdout.String())
+	}
+	want := state.Entry{State: tc.wantState, AgentID: tc.wantAgent, Tool: tc.wantTool}
+	if tc.quiet {
+		want = tc.seedFile
+	}
+	if tc.seedFile.State != "" && want.State == "" {
+		if _, err := state.ReadEntry(record); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("state file for %q still present (err %v), want removed", record, err)
 		}
-		return
+	} else {
+		checkState(t, record, want, before, stateFileCount(t))
 	}
-	checkState(t, record, tc.wantState, before, stateFileCount(t))
 	if tc.seed != nil {
 		checkRecord(t, store, record, tc)
 	}
-	if tc.seed == nil && tc.session != "" && !tc.nested && tc.wantState != "" {
+	if tc.quiet && stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing", stderr.String())
+	}
+	if tc.seed == nil && tc.session != "" && !tc.nested && want.State != "" {
 		// A missing record is reported, never swallowed.
 		if !strings.Contains(stderr.String(), "ks _hook:") {
 			t.Errorf("stderr = %q, want a ks _hook: line about the missing record", stderr.String())
@@ -289,28 +436,29 @@ func useFakeProcessTree(t *testing.T, nested bool) {
 	t.Cleanup(func() { hookProcess = prev })
 }
 
-// checkState asserts the state file for name holds want, or that no state
-// file was written when want is "".
-func checkState(t *testing.T, name, want string, before, after int) {
+// checkState asserts the state file for name holds want, stamp aside, or
+// that no state file was written when want.State is "".
+func checkState(t *testing.T, name string, want state.Entry, before, after int) {
 	t.Helper()
-	if want == "" {
+	if want.State == "" {
 		if after != before {
 			t.Fatalf("state dir grew from %d to %d files, want unchanged", before, after)
 		}
-		if _, _, err := state.Read(name); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("state.Read(%q) err = %v, want not-exist", name, err)
+		if _, err := state.ReadEntry(name); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("state.ReadEntry(%q) err = %v, want not-exist", name, err)
 		}
 		return
 	}
-	got, updatedAt, err := state.Read(name)
+	got, err := state.ReadEntry(name)
 	if err != nil {
-		t.Fatalf("state.Read(%q): %v", name, err)
+		t.Fatalf("state.ReadEntry(%q): %v", name, err)
 	}
+	if !state.IsFresh(got.UpdatedAt) {
+		t.Errorf("updated_at %v is not fresh", got.UpdatedAt)
+	}
+	got.UpdatedAt = time.Time{}
 	if got != want {
-		t.Errorf("state = %q, want %q", got, want)
-	}
-	if !state.IsFresh(updatedAt) {
-		t.Errorf("updated_at %v is not fresh", updatedAt)
+		t.Errorf("state entry = %+v, want %+v", got, want)
 	}
 }
 
@@ -338,4 +486,171 @@ func stateFileCount(t *testing.T) int {
 		t.Fatalf("read state dir: %v", err)
 	}
 	return len(entries)
+}
+
+// TestAllowWrite pins the policy that keeps an input on the badge until the
+// one who asked is done with it.
+func TestAllowWrite(t *testing.T) {
+	parentBash := state.Entry{State: "input", Tool: "Bash"}
+	subBash := state.Entry{State: "input", AgentID: "agent-7", Tool: "Bash"}
+	subNoTool := state.Entry{State: "input", AgentID: "agent-7"}
+	noTool := state.Entry{State: "input"}
+	working := state.Entry{State: "working"}
+	ev := func(event, tool, agent string) hookPayload {
+		return hookPayload{HookEventName: event, ToolName: tool, AgentID: agent}
+	}
+	tests := []struct {
+		name string
+		cur  state.Entry
+		p    hookPayload
+		s    string
+		want bool
+	}{
+		{
+			"parent prompt over a subagent input",
+			subBash,
+			ev("UserPromptSubmit", "", ""),
+			"working",
+			true,
+		},
+		{"parent Stop over a subagent input", subBash, ev("Stop", "", ""), "idle", true},
+		{
+			"parent StopFailure over its own input",
+			parentBash,
+			ev("StopFailure", "", ""),
+			"error",
+			true,
+		},
+		{
+			"parent PreToolUse over a subagent input",
+			subBash,
+			ev("PreToolUse", "Bash", ""),
+			"working",
+			true,
+		},
+		{
+			"parent PermissionRequest over its own input",
+			parentBash,
+			ev("PermissionRequest", "Read", ""),
+			"input",
+			true,
+		},
+		{"parent tool done, no input", working, ev("PostToolUse", "Read", ""), "working", true},
+		{
+			"parent tool done, own input for that tool",
+			parentBash,
+			ev("PostToolUse", "Bash", ""),
+			"working",
+			true,
+		},
+		{
+			"parent tool failed, own input for that tool",
+			parentBash,
+			ev("PostToolUseFailure", "Bash", ""),
+			"working",
+			true,
+		},
+		{
+			"parent tool done, own input for another tool",
+			parentBash,
+			ev("PostToolUse", "Read", ""),
+			"working",
+			false,
+		},
+		{
+			"parent tool done, tool-less input",
+			noTool,
+			ev("PostToolUse", "Read", ""),
+			"working",
+			true,
+		},
+		{
+			"parent tool done, subagent input",
+			subBash,
+			ev("PostToolUse", "Bash", ""),
+			"working",
+			false,
+		},
+		{
+			"subagent input over a parent input",
+			parentBash,
+			ev("PermissionRequest", "Read", "agent-7"),
+			"input",
+			true,
+		},
+		{
+			"subagent question over nothing",
+			state.Entry{},
+			ev("PreToolUse", "AskUserQuestion", "agent-7"),
+			"input",
+			true,
+		},
+		{
+			"subagent tool done, its input for that tool",
+			subBash,
+			ev("PostToolUse", "Bash", "agent-7"),
+			"working",
+			true,
+		},
+		{
+			"subagent tool failed, its input for that tool",
+			subBash,
+			ev("PostToolUseFailure", "Bash", "agent-7"),
+			"working",
+			true,
+		},
+		{
+			"subagent tool done, its input for another tool",
+			subBash,
+			ev("PostToolUse", "Read", "agent-7"),
+			"working",
+			false,
+		},
+		{
+			"subagent tool done, its tool-less input",
+			subNoTool,
+			ev("PostToolUse", "Bash", "agent-7"),
+			"working",
+			true,
+		},
+		{
+			"subagent tool done, another subagent's input",
+			subBash,
+			ev("PostToolUse", "Bash", "agent-8"),
+			"working",
+			false,
+		},
+		{
+			"subagent tool done, parent input",
+			parentBash,
+			ev("PostToolUse", "Bash", "agent-7"),
+			"working",
+			false,
+		},
+		{
+			"subagent tool done, no input",
+			working,
+			ev("PostToolUse", "Bash", "agent-7"),
+			"working",
+			false,
+		},
+		{
+			"subagent PreToolUse Bash",
+			parentBash,
+			ev("PreToolUse", "Bash", "agent-7"),
+			"working",
+			false,
+		},
+		{"subagent prompt", working, ev("UserPromptSubmit", "", "agent-7"), "working", false},
+		{"subagent Stop", working, ev("Stop", "", "agent-7"), "idle", false},
+		{"subagent StopFailure", working, ev("StopFailure", "", "agent-7"), "error", false},
+		{"subagent SessionStart", working, ev("SessionStart", "", "agent-7"), "waiting", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := allowWrite(tt.cur, tt.p, tt.s); got != tt.want {
+				t.Errorf("allowWrite(%+v, %+v, %q) = %v, want %v", tt.cur, tt.p, tt.s, got, tt.want)
+			}
+		})
+	}
 }
