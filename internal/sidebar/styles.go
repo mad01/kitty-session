@@ -10,7 +10,10 @@ var (
 	colorMuted   = lipgloss.AdaptiveColor{Light: "#A0A1A7", Dark: "#636363"} // gray
 	colorFocus   = lipgloss.AdaptiveColor{Light: "#7BC96F", Dark: "#A6E3A1"} // light green
 	colorDanger  = lipgloss.AdaptiveColor{Light: "#E45649", Dark: "#ED567A"} // red / coral
-	colorError   = lipgloss.AdaptiveColor{Light: "#A4161A", Dark: "#FF5555"} // deep red, the error dot
+	colorError   = lipgloss.AdaptiveColor{
+		Light: "#A4161A",
+		Dark:  "#FF5555",
+	} // deep red, the error dot
 	colorTextPri = lipgloss.AdaptiveColor{Light: "#383A42", Dark: "#FFFDF5"} // foreground
 	colorTextSec = lipgloss.AdaptiveColor{Light: "#696C77", Dark: "#C1C6B2"} // dimmed foreground
 	colorOwnBG   = lipgloss.AdaptiveColor{Light: "#ECECEE", Dark: "#262A33"} // this tab's row
@@ -41,12 +44,16 @@ var (
 	footerStyle     = lipgloss.NewStyle().Foreground(colorAccent)
 	footerHintStyle = lipgloss.NewStyle().Foreground(colorMuted)
 
-	nameStyle   = lipgloss.NewStyle().Foreground(colorTextPri).Bold(true)
-	kindStyle   = lipgloss.NewStyle().Foreground(colorTextSec) // the pi / sh badge after a name
-	titleStyle  = lipgloss.NewStyle().Foreground(colorMuted)
-	waitStyle   = lipgloss.NewStyle().Foreground(colorDanger) // "waiting 12m" on an input row
-	markerStyle = lipgloss.NewStyle().Foreground(colorAccent)
-	plainStyle  = lipgloss.NewStyle()
+	nameStyle = lipgloss.NewStyle().Foreground(colorTextPri).Bold(true)
+	// nameUnreadStyle is the name of a row that changed since its tab was last
+	// on screen: the accent, which the marker and footer already use, kept
+	// bold so it stays legible over the own and cursor row backgrounds.
+	nameUnreadStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	kindStyle       = lipgloss.NewStyle().Foreground(colorTextSec) // the pi / sh badge after a name
+	titleStyle      = lipgloss.NewStyle().Foreground(colorMuted)
+	waitStyle       = lipgloss.NewStyle().Foreground(colorDanger) // "waiting 12m" on an input row
+	markerStyle     = lipgloss.NewStyle().Foreground(colorAccent)
+	plainStyle      = lipgloss.NewStyle()
 
 	dotError   = lipgloss.NewStyle().Foreground(colorError) // steady, unlike the input pulse
 	dotDone    = lipgloss.NewStyle().Foreground(colorTeal)

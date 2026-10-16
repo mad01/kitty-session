@@ -159,15 +159,19 @@ func (m model) renderRow(a Agent, selected bool, inner int) []string {
 
 // nameWithBadge is the name on a row's first line, followed by the kind
 // badge when the row is not claude's; the name gives way to the badge when
-// both do not fit.
+// both do not fit. An unread row's name is in the accent colour.
 func (m model) nameWithBadge(a Agent, bg lipgloss.TerminalColor, textWidth int) string {
+	style := nameStyle
+	if a.Unread {
+		style = nameUnreadStyle
+	}
 	badge := kindBadge(a.Kind)
 	if badge == "" {
-		return seg(nameStyle, bg, truncate(a.Name, textWidth))
+		return seg(style, bg, truncate(a.Name, textWidth))
 	}
 	badge = " " + badge
 	name := truncate(a.Name, textWidth-ansi.StringWidth(badge))
-	return seg(nameStyle, bg, name) + seg(kindStyle, bg, badge)
+	return seg(style, bg, name) + seg(kindStyle, bg, badge)
 }
 
 // titleLine is a row's second line: Claude's title, or the session directory

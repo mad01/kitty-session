@@ -66,14 +66,15 @@ func TestListStateReadsTheProgramStatus(t *testing.T) {
 	t.Cleanup(func() { readState, paneText = prevRead, prevText })
 	fresh, stale := time.Now(), time.Now().Add(-time.Minute)
 	tests := []struct {
-		name   string
-		kind   string
-		status kitty.ProgramState
-		file   string // the state file's state, "" for none
-		fileAt time.Time
-		active bool   // the window's tab is the one on screen
-		text   string // the window's terminal text, for a claude row past its state file
-		want   string
+		name      string
+		kind      string
+		status    kitty.ProgramState
+		file      string // the state file's state, "" for none
+		fileAt    time.Time
+		active    bool   // the window's tab is the one on screen
+		unfocused bool   // the tab is on screen, but its OS window has lost keyboard focus
+		text      string // the window's terminal text, for a claude row past its state file
+		want      string
 	}{
 		{
 			name:   "claude blocked",
@@ -96,8 +97,12 @@ func TestListStateReadsTheProgramStatus(t *testing.T) {
 		},
 		{name: "claude idle", kind: session.AgentClaude, status: kitty.ProgramIdle, want: "idle"},
 		{
-			name: "done on the active tab is idle", kind: session.AgentClaude,
+			name: "done while the tab is visible is idle", kind: session.AgentClaude,
 			status: kitty.ProgramDone, active: true, want: "idle",
+		},
+		{
+			name: "done on the showing tab of an unfocused OS window stays done",
+			kind: session.AgentClaude, status: kitty.ProgramDone, unfocused: true, want: "done",
 		},
 		{
 			name: "a fresh working file outranks a blocked record", kind: session.AgentClaude,
@@ -152,7 +157,8 @@ func TestListStateReadsTheProgramStatus(t *testing.T) {
 			sess := session.New("ks-list", "/work", 1, 7)
 			sess.Agent = tt.kind
 			all := []kitty.Window{{
-				ID: 7, TabID: 1, TabActive: tt.active, SessionID: sess.ID, Status: tt.status,
+				ID: 7, TabID: 1, TabActive: tt.active || tt.unfocused, OSFocused: tt.active,
+				SessionID: sess.ID, Status: tt.status,
 			}}
 			if got := listState(nil, all, sess); got != tt.want {
 				t.Errorf("listState = %q, want %q", got, tt.want)

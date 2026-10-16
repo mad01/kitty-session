@@ -10,10 +10,11 @@ If the file is missing, `ks repo` and the sidebar's repo picker return an error 
 dirs:                     # parent directories to scan for repos
   - ~/code/src/github.com
   - ~/workspace
-tmpdir:                   # optional — base directory for scratch sessions
-kitty_socket: ~/.config/ks/kitty.sock   # optional — the instance's remote-control socket
-sidebar_width: 36         # optional — sidebar width in cells, minimum 20
-kitty_overrides:          # optional — extra kitty settings for the instance
+tmpdir:                   # optional: base directory for scratch sessions
+kitty_socket: ~/.config/ks/kitty.sock   # optional: the instance's remote-control socket
+sidebar_width: 36         # optional: sidebar width in cells, minimum 20
+notify: [input]           # optional: transitions that post a desktop notification
+kitty_overrides:          # optional: extra kitty settings for the instance
   - font_size=13
 ```
 
@@ -45,6 +46,14 @@ Changing it while an instance is running leaves that instance unreachable to `ks
 
 Width in cells of the sidebar window on the left of every session tab. Default 36. Values below 20 are raised to 20, the narrowest the sidebar can render. Applied when a tab is created or claude is relaunched into it; resizing the kitty window later keeps the split's proportions, not the cell count.
 
+### `notify`
+
+List of the state transitions that post a desktop notification: `input` when a row starts waiting on you, `done` when a turn finishes. Default `[input]`. `[input, done]` adds turn completions. `[]` turns notifications off. Any other entry is a config error naming it.
+
+The notification goes through kitty's desktop notification protocol, Operating System Command (OSC) 99. It shows only while the session's tab is off screen or the kitty window is not the active one. Clicking it brings the tab to the front. The sidebar posts it for its own row and withdraws it when the row moves on. How it works is in [Sidebar guide](tui.md#notifications).
+
+Claude Code has a channel of its own: it posts a desktop notification in kitty when a permission prompt waits and you seem away (its `preferredNotifChannel: auto`). To avoid two banners for one prompt, `ks` starts claude with `--settings '{"preferredNotifChannel":"notifications_disabled"}'` whenever `input` is in the list. Without `input` (`[]` or `[done]`) Claude's own channel is left alone, by design: it is then the only signal for a waiting prompt.
+
 ### `kitty_overrides`
 
 List of `key=value` kitty settings appended to the instance's command line as `-o key=value`, after the settings `ks` needs. Use it for appearance: `font_size`, `background_opacity`, a theme `include`. The instance also reads your `~/.config/kitty/kitty.conf`, so most of the time nothing is needed here.
@@ -65,6 +74,7 @@ dirs:
 tmpdir: ~/.config/ks/claude-session-workspaces
 
 sidebar_width: 40
+notify: [input, done]
 kitty_overrides:
   - font_size=12
 ```

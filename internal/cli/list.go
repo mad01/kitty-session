@@ -92,7 +92,7 @@ func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) strin
 	if err != nil { // no state file
 		file, fileAt = "", time.Time{}
 	}
-	if st, ok := launcher.ReportedState(w.Status, fileAt, w.TabActive); ok {
+	if st, ok := launcher.ReportedState(w.Status, fileAt, w.TabActive && w.OSFocused); ok {
 		return st.String()
 	}
 	return kindState(c, w, sess, file, fileAt).String()

@@ -17,12 +17,12 @@ import (
 // decide this here. ok is false when the caller should fall back to the
 // kind's own rules.
 func ReportedState(
-	report kitty.ProgramState, fileAt time.Time, tabActive bool,
+	report kitty.ProgramState, fileAt time.Time, visible bool,
 ) (sidebar.State, bool) {
 	if report == "" || state.IsFresh(fileAt) {
 		return sidebar.StateIdle, false
 	}
-	return ProgramState(report, tabActive)
+	return ProgramState(report, visible)
 }
 
 // ProgramState maps a Program Status Protocol state onto the sidebar's:
@@ -34,14 +34,14 @@ func ReportedState(
 // session's kind. ok is false without a record or with a state ks does not
 // map, and the caller falls back to its own rules; the kitty package
 // already drops states it does not know, so that fallthrough is defensive.
-func ProgramState(st kitty.ProgramState, tabActive bool) (sidebar.State, bool) {
+func ProgramState(st kitty.ProgramState, visible bool) (sidebar.State, bool) {
 	switch st {
 	case kitty.ProgramBlocked:
 		return sidebar.StateInput, true
 	case kitty.ProgramWorking:
 		return sidebar.StateWorking, true
 	case kitty.ProgramDone:
-		if tabActive {
+		if visible {
 			return sidebar.StateIdle, true
 		}
 		return sidebar.StateDone, true

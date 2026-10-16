@@ -430,3 +430,24 @@ func TestProgramStatus(t *testing.T) {
 		})
 	}
 }
+
+// TestParseWindowsOSFocus checks that every window carries whether its OS
+// window has keyboard focus, which together with its tab's is_active says
+// the window is on the screen the user is looking at.
+func TestParseWindowsOSFocus(t *testing.T) {
+	ls := `[{"id":1,"is_focused":false,"tabs":[{"id":1,"is_active":true,"windows":[{"id":1}]}]},` +
+		`{"id":2,"is_focused":true,"tabs":[{"id":2,"is_active":true,"windows":[{"id":2}]},` +
+		`{"id":3,"is_active":false,"windows":[{"id":3}]}]}]`
+	windows, err := parseWindows([]byte(ls))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Window{
+		{ID: 1, TabID: 1, TabActive: true},
+		{ID: 2, TabID: 2, TabActive: true, OSFocused: true},
+		{ID: 3, TabID: 3, OSFocused: true},
+	}
+	if !slices.Equal(windows, want) {
+		t.Errorf("parseWindows =\n%+v\nwant\n%+v", windows, want)
+	}
+}

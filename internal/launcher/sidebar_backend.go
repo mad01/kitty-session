@@ -60,8 +60,19 @@ type SidebarBackend struct {
 	// Claude Code, for backstop's raise gate; tests substitute a fake.
 	hooksInstalled func() bool
 
+	// withdraw takes down the own session's desktop notification. It runs
+	// before the sidebar closes its own tab (reapIfGone), since the sidebar
+	// window, which posted the notification, goes with the tab. Nil when
+	// there is none to take down.
+	withdraw func()
+
 	mu         sync.Mutex // guards the fields below; List runs off the UI loop
 	lastViewed time.Time
+	// ownVisible is whether the own session's tab was visible (live.visible)
+	// at the previous poll, so the polls that find it newly visible, or no
+	// longer so, can stamp ViewedAt at once instead of waiting out
+	// viewedDebounce.
+	ownVisible bool
 	lastRaise  time.Time // when backstop last read the text for a dialog
 	hooksAt    time.Time // when hooksOK was last read, zero before the first
 	hooksOK    bool
@@ -70,12 +81,15 @@ type SidebarBackend struct {
 
 // NewSidebarBackend returns the backend for the instance behind client.
 // cfg may be nil; ownID is the id of the session whose tab this sidebar sits
-// in (empty in the home tab).
+// in (empty in the home tab); withdraw, which may be nil, takes down the
+// session's desktop notification and runs before the sidebar closes its own
+// tab.
 func NewSidebarBackend(
 	store *session.Store,
 	client *kitty.Client,
 	cfg *config.Config,
 	ownID string,
+	withdraw func(),
 ) (*SidebarBackend, error) {
 	l, err := New(store, client, cfg)
 	if err != nil {
@@ -84,6 +98,7 @@ func NewSidebarBackend(
 	b := newSidebarBackend(l, cfg, ownID)
 	b.quit = func() error { return instance.Shutdown(client) }
 	b.readText = client.GetTextAll
+	b.withdraw = withdraw
 	return b, nil
 }
 
@@ -121,10 +136,10 @@ func ksHooksInstalled() bool {
 
 // List returns one agent per session record from one store listing and one
 // instance snapshot. Windows are matched to records by their session tag.
-// When the own session's tab is the active one, its record is stamped as
-// viewed (at most once per viewedDebounce) before its state is resolved.
-// Once the own session's claude window is gone, its tab is closed from the
-// same snapshot (reapIfGone).
+// The own session's record is stamped as viewed before its state is
+// resolved while its tab is visible, in front of a focused OS window
+// (markViewed). Once the own session's claude window is gone, its tab is
+// closed from the same snapshot (reapIfGone).
 func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	sessions, err := b.l.store.List()
 	if err != nil {
@@ -139,8 +154,8 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	for _, sess := range sessions {
 		lv := findLive(all, sess)
 		own := b.ownID != "" && sess.ID == b.ownID
-		if own && lv.tabActive() {
-			if sess, err = b.markViewed(sess); err != nil {
+		if own {
+			if sess, err = b.markViewed(sess, lv.visible()); err != nil {
 				return nil, err
 			}
 		}
@@ -152,14 +167,26 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 	return agents, nil
 }
 
-// markViewed stamps ViewedAt on a fresh copy of the record, so a hook update
-// made in the meantime is kept, unless the last stamp is younger than
-// viewedDebounce. It returns the record to resolve state from.
-func (b *SidebarBackend) markViewed(sess *session.Session) (*session.Session, error) {
+// markViewed records whether the own tab is visible and stamps ViewedAt on
+// a fresh copy of the record, so a hook update made in the meantime is
+// kept, at three moments: the poll that finds the tab newly visible (the
+// user has just looked), every viewedDebounce while it stays visible, and
+// the poll that finds it no longer visible (the user watched until the
+// switch). A tab that ks move shows for a moment while it reorders can
+// land in a poll and be stamped as viewed; that race is accepted. It
+// returns the record to resolve state from.
+func (b *SidebarBackend) markViewed(
+	sess *session.Session, visible bool,
+) (*session.Session, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	was := b.ownVisible
+	b.ownVisible = visible
 	now := b.l.now()
-	if now.Sub(b.lastViewed) < viewedDebounce {
+	switch {
+	case !visible && !was:
+		return sess, nil
+	case visible && was && now.Sub(b.lastViewed) < viewedDebounce:
 		return sess, nil
 	}
 	fresh, err := b.l.store.Load(sess.Name)
@@ -180,7 +207,7 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 	w := lv.claude
 	in := stateInput{
 		kind: sess.Kind(), active: sess.IsActive(), viewedAt: sess.ViewedAt,
-		tabActive: lv.tabActive(),
+		visible: lv.visible(),
 	}
 	if w != nil {
 		in.hasWindow, in.title, in.report = true, w.Title, w.Status
@@ -201,7 +228,26 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 		Waiting: b.waiting(st, in.fileState, in.fileAt),
 		Tab:     tab,
 		Own:     own,
+		Unread:  unread(in, st),
 	}
+}
+
+// unread reports whether the session changed since the user last looked at
+// it: its state file, which the hooks, the screen backstop and the pi
+// extension all write, is newer than the record's ViewedAt, and the tab is
+// not visible (in front of a focused OS window). Any state counts, a
+// running turn included, the way kitty's own tab activity marker does,
+// except waiting: the SessionStart hook writes it at launch, and a launch
+// is not activity. A stopped row, or one without a state file, is never
+// unread.
+func unread(in stateInput, st sidebar.State) bool {
+	if st == sidebar.StateStopped || in.fileAt.IsZero() || in.visible {
+		return false
+	}
+	if claude.ParseState(in.fileState) == claude.StateWaiting {
+		return false
+	}
+	return in.fileAt.After(in.viewedAt)
 }
 
 // waiting is how long an input row has been waiting on the user: the age of
@@ -230,7 +276,7 @@ type stateInput struct {
 	fileState string // the state file's state, "" without a file
 	fileAt    time.Time
 	viewedAt  time.Time
-	tabActive bool // the session's tab is the one its OS window shows
+	visible   bool // the user is looking at the session's tab: live.visible
 	// report is the state of the agent window's Program Status record, ""
 	// without one.
 	report kitty.ProgramState
@@ -241,7 +287,7 @@ type stateInput struct {
 // apply whatever the kind, in this order:
 //
 //	state file fresh (state.IsFresh)                → the kind's own rules below: the hooks saw the event
-//	agent window has a Program Status record        → blocked is input; working, done, error and idle are themselves, except done on the active tab, which is idle
+//	agent window has a Program Status record        → blocked is input; working, done, error and idle are themselves, except done while the tab is visible, which is idle
 //
 // The record (OSC 7501, mapped by ProgramState and gated by ReportedState)
 // is the program's own word, so a shell running a program that speaks the
@@ -295,7 +341,7 @@ func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
 	}
-	if st, ok := ReportedState(in.report, in.fileAt, in.tabActive); ok {
+	if st, ok := ReportedState(in.report, in.fileAt, in.visible); ok {
 		return st
 	}
 	switch in.kind {
@@ -464,15 +510,13 @@ func fileOnlyState(in stateInput) sidebar.State {
 }
 
 // title is the claude window's title minus its state glyph, or the session
-// directory with $HOME shortened to ~ when there is no window or no title.
+// directory with $HOME shortened to ~ (sidebar.ShortenHome) when there is
+// no window or no title.
 func (b *SidebarBackend) title(in stateInput, dir string) string {
 	if _, stripped, _ := claude.ParseTitle(in.title); stripped != "" {
 		return stripped
 	}
-	if b.home != "" && strings.HasPrefix(dir, b.home) {
-		return "~" + dir[len(b.home):]
-	}
-	return dir
+	return sidebar.ShortenHome(dir, b.home)
 }
 
 // Focus brings the session's tab to the front, recreating it when gone.

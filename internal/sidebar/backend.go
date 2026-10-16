@@ -65,6 +65,11 @@ type Agent struct {
 	// Own marks the session this sidebar belongs to. The model also treats
 	// an agent whose Name equals Options.Session as own.
 	Own bool
+	// Unread marks a session whose state changed since the user last had its
+	// tab on screen, whatever the change: a running turn counts, the way
+	// kitty's own tab activity marker does. Done is the narrower mark of a
+	// finished turn not yet looked at. Never set on a stopped row.
+	Unread bool
 }
 
 // Repo is one entry of the repo picker.

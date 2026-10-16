@@ -20,10 +20,15 @@ var sidebarDemoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		backend := sidebar.NewDemoBackend()
 		backend.SetOwn(sidebarDemoSession)
+		// Both notifications are on, so a kitty user can preview the
+		// banner: --session names a row at input or done, and the first
+		// refresh raises it.
 		return sidebar.Run(sidebar.Options{
-			Session: sidebarDemoSession,
-			Width:   sidebarDemoWidth,
-			Backend: backend,
+			Session:   sidebarDemoSession,
+			SessionID: "demo",
+			Width:     sidebarDemoWidth,
+			Backend:   backend,
+			Notify:    []string{sidebar.StateInput.String(), sidebar.StateDone.String()},
 		})
 	},
 }

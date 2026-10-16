@@ -37,7 +37,7 @@ dirs:
 
 `dirs` is a list of parent directories. `ks` recursively scans them for git repositories and stops descending at each `.git` it finds. Add as many roots as you want.
 
-Tildes are expanded. See [Configuration](configuration.md) for `tmpdir`, `kitty_socket`, `sidebar_width` and `kitty_overrides`.
+Tildes are expanded. See [Configuration](configuration.md) for `tmpdir`, `kitty_socket`, `sidebar_width`, `notify` and `kitty_overrides`.
 
 ## Create your first session
 
@@ -91,6 +91,6 @@ See [Hooks and state detection](hooks-and-state.md) for what each event maps to 
 
 ## Next reads
 
-- [Configuration](configuration.md): scratch tmp dirs, the instance socket, sidebar width, kitty overrides.
+- [Configuration](configuration.md): scratch tmp dirs, the instance socket, sidebar width, desktop notifications, kitty overrides.
 - [Sidebar guide](tui.md): rows, states, every key.
 - [Command reference](commands.md): scripting with `ks new`, `ks list`, `ks quit`, `ks repo`.

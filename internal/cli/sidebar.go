@@ -71,15 +71,42 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 	if vars := homeVars(home, agentRunning); len(vars) > 0 {
 		markHome(cmd, c, vars)
 	}
-	b, err := launcher.NewSidebarBackend(store, c, cfg, ownID)
+	out := sidebar.NewSyncOutput(os.Stdout)
+	notify := cfg.Notifications()
+	notifier, withdraw := sidebarNotifier(out, notify, ownID)
+	b, err := launcher.NewSidebarBackend(store, c, cfg, ownID, withdraw)
 	if err != nil {
 		return err
 	}
 	return sidebar.Run(sidebar.Options{
-		Session: ownName,
-		Width:   cfg.EffectiveSidebarWidth(),
-		Backend: b,
+		Session:   ownName,
+		SessionID: ownID,
+		Width:     cfg.EffectiveSidebarWidth(),
+		Backend:   b,
+		Notify:    notify,
+		Notifier:  notifier,
+		Output:    out,
 	})
+}
+
+// sidebarNotifier builds the notifier the sidebar raises desktop
+// notifications through, and the hook the backend runs before it closes
+// the own tab, so the sidebar window takes no notification down with it.
+// Both are nil when no state is configured to notify; the hook is also nil
+// in the home tab, which has no own session. A failed take-down in the
+// hook is dropped: the tab goes either way, and the window with it.
+func sidebarNotifier(
+	out *sidebar.SyncOutput, notify []string, ownID string,
+) (sidebar.Notifier, func()) {
+	if len(notify) == 0 {
+		return nil, nil
+	}
+	n := sidebar.NewOSCNotifier(out)
+	if ownID == "" {
+		return n, nil
+	}
+	id := sidebar.NotifyID(ownID)
+	return n, func() { _ = n.Close(id) }
 }
 
 // sidebarIdentity resolves which session's tab this sidebar sits in. The

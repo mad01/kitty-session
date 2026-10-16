@@ -10,6 +10,7 @@ import (
 
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
+	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 )
 
@@ -83,12 +84,73 @@ func TestAgentCmdClaude(t *testing.T) {
 			if tc.sess.Dir == "" {
 				tc.sess.Dir = "/work/demo" // its project dir holds derived-id.jsonl
 			}
-			cmd := AgentCmd(&tc.sess, tc.mode)
+			cmd := AgentCmd(&tc.sess, tc.mode, AgentOptions{})
 			if cmd[0] != "claude" {
 				t.Fatalf("cmd %q: want it to start claude", cmd)
 			}
 			if tail := cmd[1:]; !slices.Equal(tail, tc.wantTail) {
 				t.Errorf("claude args = %q, want %q", tail, tc.wantTail)
+			}
+		})
+	}
+}
+
+// TestAgentCmdClaudeNotifyInput checks that ks raising the input notification
+// mutes claude's own, whatever way the conversation is picked up.
+func TestAgentCmdClaudeNotifyInput(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	derived, err := claude.TranscriptPath("/work/demo", "kept-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	touch(t, derived)
+	quiet := []string{"--settings", `{"preferredNotifChannel":"notifications_disabled"}`}
+
+	tests := []struct {
+		name     string
+		mode     ResumeMode
+		sess     session.Session
+		wantTail []string
+	}{
+		{"fresh", ResumeNone, session.Session{Dir: "/work/demo"}, quiet},
+		{
+			"resume", ResumeStored,
+			session.Session{Dir: "/work/demo", ClaudeSessionID: "kept-id"},
+			append([]string{"--resume", "kept-id"}, quiet...),
+		},
+		{
+			"continue", ResumeStored,
+			session.Session{Dir: "/work/demo", ClaudeSessionID: "gone"},
+			append([]string{"--continue"}, quiet...),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := AgentCmd(&tc.sess, tc.mode, AgentOptions{NotifyInput: true})
+			if cmd[0] != "claude" || !slices.Equal(cmd[1:], tc.wantTail) {
+				t.Errorf("AgentCmd = %q, want claude %q", cmd, tc.wantTail)
+			}
+		})
+	}
+}
+
+func TestAgentOptionsFromConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		want bool
+	}{
+		{"nil config notifies on input", nil, true},
+		{"absent key notifies on input", &config.Config{}, true},
+		{"notify off", &config.Config{Notify: []string{}}, false},
+		{"done alone", &config.Config{Notify: []string{config.NotifyDone}}, false},
+		{"both", &config.Config{Notify: []string{config.NotifyInput, config.NotifyDone}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentOptions(tc.cfg); got.NotifyInput != tc.want {
+				t.Errorf("agentOptions = %+v, want NotifyInput %v", got, tc.want)
 			}
 		})
 	}
@@ -143,7 +205,9 @@ func TestAgentCmdPiAndShell(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.sess.Dir = "/work/demo"
-			if got := AgentCmd(&tc.sess, tc.mode); !slices.Equal(got, tc.want) {
+			// The notification option is claude's alone; pi and shell ignore it.
+			opts := AgentOptions{NotifyInput: true}
+			if got := AgentCmd(&tc.sess, tc.mode, opts); !slices.Equal(got, tc.want) {
 				t.Errorf("AgentCmd = %q, want %q", got, tc.want)
 			}
 		})
@@ -560,7 +624,8 @@ func TestOpenStoredSession(t *testing.T) {
 				t.Fatal("reopened record has no ID")
 			}
 			for _, launch := range f.launches {
-				if !hasEnv(launch, "KS_SESSION_ID="+got.ID) || varValue(launch.Vars, kitty.SessionVar) != got.ID {
+				if !hasEnv(launch, "KS_SESSION_ID="+got.ID) ||
+					varValue(launch.Vars, kitty.SessionVar) != got.ID {
 					t.Errorf("launch %q not tagged with id %q: env %q vars %q",
 						launch.Command, got.ID, launch.Env, launch.Vars)
 				}
@@ -657,5 +722,48 @@ func TestOpenBuildsTheTabHidden(t *testing.T) {
 		if strings.HasPrefix(c, "FocusWindow(") {
 			t.Errorf("background open switched focus: %v", f.calls)
 		}
+	}
+}
+
+// TestOpenCleansTheStateFileBeforeLaunch checks that every launch of the
+// agent window starts from no state file, so an input the session held
+// before ks quit cannot read as input or unread on attach. A stored
+// session whose window is still alive is focused, not launched, and keeps
+// its file.
+func TestOpenCleansTheStateFileBeforeLaunch(t *testing.T) {
+	l, f, store := newTestLauncher(t)
+	var cleaned []string
+	l.cleanState = func(name string) {
+		cleaned = append(cleaned, name+"@"+itoa(len(f.launches)))
+	}
+	if _, err := l.Open(Request{Name: "demo", Dir: "/work/demo"}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if want := []string{"demo@0"}; !slices.Equal(cleaned, want) {
+		t.Errorf("new session cleaned %q, want %q (before any launch)", cleaned, want)
+	}
+
+	cleaned = nil
+	if _, err := l.Open(Request{Name: "demo", Resume: ResumeStored}); err != nil {
+		t.Fatalf("Open live: %v", err)
+	}
+	if cleaned != nil {
+		t.Errorf("focusing a live session cleaned %q", cleaned)
+	}
+
+	sess, err := store.Load("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.windows = slices.DeleteFunc(f.windows, func(w kitty.Window) bool {
+		return w.ID == sess.KittyWindowID
+	})
+	cleaned = nil
+	before := len(f.launches)
+	if _, err := l.Open(Request{Name: "demo", Resume: ResumeStored}); err != nil {
+		t.Fatalf("Open relaunch: %v", err)
+	}
+	if want := []string{"demo@" + itoa(before)}; !slices.Equal(cleaned, want) {
+		t.Errorf("relaunch cleaned %q, want %q (before the relaunch)", cleaned, want)
 	}
 }
