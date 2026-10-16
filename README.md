@@ -6,32 +6,42 @@ A session's right-hand window does not have to be claude. Each session record ca
 
 The state next to each session comes from the agent itself where it can. Claude Code and pi report what they are doing through the Program Status Protocol (Operating System Command 7501), and kitty hands those reports to `ks` with the window list it already polls. That needs a kitty newer than 0.49.2. On older releases, and for what the protocol does not carry (the session id a reopen resumes with), `ks` relies on Claude Code hooks, the window title and the pane text.
 
-## Screenshots
+## Demo
 
-### Session list
+A session tab: the `ks` sidebar on the left, Claude Code on the right, recorded from a throwaway instance with the author's kitty theme and font. Claude's folder-trust dialog puts the row in `input` (red). Accepting it and sending a prompt turns the dot amber while Claude works. The `brain` session in the background turns red when its question opens, and `1` in the sidebar jumps to it. The `scratch` row is a plain shell. `make demo-split` re-records it from `demo/split.sh`.
 
-The sidebar lists every agent with its state and Claude's current tab title. (Screenshots predate the sidebar; run `ks _sidebar-demo` for a live preview on fake data.)
+![A ks tab: sidebar and claude](images/split.webp)
 
-![Session list](images/default.png)
+## Sidebar
 
-### Create a session
+The sidebar on fake agents, recorded from `ks _sidebar-demo` with [vhs](https://github.com/charmbracelet/vhs): the agent list, the menu, a new agent from the repo picker, and the keys popup. `make demo` re-renders the recording and the stills below from `demo/sidebar.tape`.
 
-Press `n` to open the repository picker. Browse everything `ks` has scanned or type to fuzzy-filter.
+![Sidebar demo](images/sidebar.gif)
 
-![Repository picker](images/repos.png)
-![Filtering repos](images/repos-filter.png)
+### Agent list
 
-### Inside a session
+One row per session: a dot for the state (`input`, `done`, `working`, `idle`, `error`, `stopped`), then the name. A `pi` or `sh` badge follows the name when the agent is not claude. Under it sits Claude's tab title, or the session directory. The marked row is the tab the sidebar sits in. An `input` row says how long it has waited.
 
-Each session tab pairs the sidebar with Claude Code. (Screenshots predate the sidebar layout.)
-
-![Running session](images/session.png)
+![Agent list](images/sidebar.png)
 
 ### Menu
 
-Press `m` for every action, from new agent to quit.
+`m` lists every action: new agent, rename, close, delete, restore, shell split, hooks status, keys, quit.
 
-![Help overlay](images/help.png)
+![Menu](images/sidebar-menu.png)
+
+### New agent
+
+`n` opens the repo picker. Type to fuzzy-filter, `enter` picks, then choose the kind: claude, pi or shell.
+
+![Repo picker](images/sidebar-picker.png)
+![Kind](images/sidebar-kind.png)
+
+### Keys
+
+`?` shows them.
+
+![Keys](images/sidebar-keys.png)
 
 ## Install
 

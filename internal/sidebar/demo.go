@@ -76,6 +76,7 @@ func NewDemoBackend() *DemoBackend {
 			{Name: "mad01/code-search-local", Path: filepath.Join(src, "code-search-local")},
 			{Name: "mad01/dotfiles", Path: filepath.Join(src, "dotfiles")},
 			{Name: "mad01/brain", Path: filepath.Join(src, "brain")},
+			{Name: "mad01/ralph", Path: filepath.Join(src, "ralph")},
 		},
 	}
 }
