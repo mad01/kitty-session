@@ -77,17 +77,11 @@ Bare `ks` attaches. It starts the instance if it is not running and brings back 
 
 If your Claude sessions live in [herdr](https://github.com/herdrdev/herdr), move them over with `ks import`. It reads herdr's default session file (`~/.config/herdr/session.json`), writes an active ks record for every claude pane, keyed by its Claude session id, and skips shells and other agents. Run `ks import --dry-run` first to see the names it would pick. Stop herdr before letting ks open the sessions, since a conversation can only have one claude attached. While herdr's daemon is still up, `ks import` writes the records but opens nothing and tells you to run `herdr session stop default` first. Details in the [command reference](commands.md#ks-import).
 
-## Install Claude Code hooks (optional, recommended)
+## Claude Code hooks
 
-The sidebar shows a live state for each session: `input`, `error`, `done`, `working`, `idle` or `stopped`. On a kitty newer than 0.49.2 Claude Code reports that state itself (see [Hooks and state detection](hooks-and-state.md)). Everywhere else the most accurate source is Claude Code's own hook events, written by a hidden `ks _hook` handler. The hooks also carry the session id a reopen resumes with, so wire them up either way:
+The sidebar shows a live state for each session: `input`, `error`, `done`, `working`, `idle` or `stopped`. On a kitty newer than 0.49.2 Claude Code reports that state itself (see [Hooks and state detection](hooks-and-state.md)). Everywhere else the most accurate source is Claude Code's own hook events, written by a hidden `ks _hook` handler, which also carries the session id a reopen resumes with. There is nothing to install: `ks` starts every claude with a `--settings` argument that carries the hooks, beside whatever your `~/.claude/settings.json` holds. `ks hooks status` confirms it. If you upgraded from a version that wrote the hooks into that file, `ks hooks uninstall` removes the leftovers so they do not fire twice.
 
-```bash
-ks hooks install
-```
-
-This edits `~/.claude/settings.json` to register `ks _hook` for `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Stop`, `StopFailure`, `Notification`, `SessionStart` and `SessionEnd`. Remove them with `ks hooks uninstall`. An install from an older ks lacks the newer events (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `StopFailure`); the sidebar's `hooks status` menu entry lists them as missing, and rerunning `ks hooks install` adds them.
-
-See [Hooks and state detection](hooks-and-state.md) for what each event maps to and the fallback chain when hooks aren't installed.
+See [Hooks and state detection](hooks-and-state.md) for what each event maps to and the fallback chain behind it.
 
 ## Next reads
 

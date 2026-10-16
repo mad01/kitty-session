@@ -114,6 +114,69 @@ func hookCases() []hookCase {
 			wantTool:  "Bash",
 		},
 		{
+			name:      "Elicitation writes input for the server's tools",
+			session:   "ks-hook-test-elicitation",
+			payload:   `{"hook_event_name":"Elicitation","mcp_server_name":"linear","message":"Pick a team","mode":"form","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "input",
+			wantTool:  "mcp__linear__",
+		},
+		{
+			name:      "ElicitationResult clears the dialog's input",
+			session:   "ks-hook-test-elicitation-result",
+			payload:   `{"hook_event_name":"ElicitationResult","mcp_server_name":"linear","action":"accept","content":{"team":"core"},"mode":"form","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", Tool: "mcp__linear__"},
+			wantState: "working",
+		},
+		{
+			name:       "ElicitationResult leaves a Bash input alone",
+			session:    "ks-hook-test-elicitation-other",
+			payload:    `{"hook_event_name":"ElicitationResult","mcp_server_name":"linear","action":"accept","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "input", Tool: "Bash"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:      "parent PostToolUse of the server's tool clears the dialog's input",
+			session:   "ks-hook-test-elicitation-tool",
+			payload:   `{"hook_event_name":"PostToolUse","tool_name":"mcp__linear__create_issue","tool_input":{},"tool_response":{},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", Tool: "mcp__linear__"},
+			wantState: "working",
+		},
+		{
+			name:       "parent PostToolUse Bash leaves the dialog's input alone",
+			session:    "ks-hook-test-elicitation-batch",
+			payload:    `{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"a"},"session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "input", Tool: "mcp__linear__"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
+			name:      "subagent Elicitation writes input with its agent and server",
+			session:   "ks-hook-test-sub-elicitation",
+			payload:   `{"hook_event_name":"Elicitation","mcp_server_name":"linear","message":"Pick a team","agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			wantState: "input",
+			wantAgent: "agent-7",
+			wantTool:  "mcp__linear__",
+		},
+		{
+			name:      "subagent ElicitationResult clears its own dialog's input",
+			session:   "ks-hook-test-sub-elicitation-result",
+			payload:   `{"hook_event_name":"ElicitationResult","mcp_server_name":"linear","action":"accept","agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:  state.Entry{State: "input", AgentID: "agent-7", Tool: "mcp__linear__"},
+			wantState: "working",
+		},
+		{
+			name:       "subagent ElicitationResult leaves the parent's dialog input",
+			session:    "ks-hook-test-sub-elicitation-parent",
+			payload:    `{"hook_event_name":"ElicitationResult","mcp_server_name":"linear","action":"accept","agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
+			seedFile:   state.Entry{State: "input", Tool: "mcp__linear__"},
+			quiet:      true,
+			seed:       &session.Session{Status: session.StatusActive},
+			wantStatus: session.StatusActive,
+		},
+		{
 			name:      "subagent PermissionRequest writes input with its agent and tool",
 			session:   "ks-hook-test-sub-permreq",
 			payload:   `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"make"},"agent_id":"agent-7","session_id":"sub-1","transcript_path":"/t","cwd":"/tmp"}`,
@@ -495,9 +558,14 @@ func TestAllowWrite(t *testing.T) {
 	subBash := state.Entry{State: "input", AgentID: "agent-7", Tool: "Bash"}
 	subNoTool := state.Entry{State: "input", AgentID: "agent-7"}
 	noTool := state.Entry{State: "input"}
+	parentDialog := state.Entry{State: "input", Tool: "mcp__linear__"}
+	subDialog := state.Entry{State: "input", AgentID: "agent-7", Tool: "mcp__linear__"}
 	working := state.Entry{State: "working"}
 	ev := func(event, tool, agent string) hookPayload {
 		return hookPayload{HookEventName: event, ToolName: tool, AgentID: agent}
+	}
+	mcp := func(event, server, agent string) hookPayload {
+		return hookPayload{HookEventName: event, MCPServerName: server, AgentID: agent}
 	}
 	tests := []struct {
 		name string
@@ -642,6 +710,90 @@ func TestAllowWrite(t *testing.T) {
 			false,
 		},
 		{"subagent prompt", working, ev("UserPromptSubmit", "", "agent-7"), "working", false},
+		{
+			"parent dialog answered, its dialog's input",
+			parentDialog,
+			mcp("ElicitationResult", "linear", ""),
+			"working",
+			true,
+		},
+		{
+			"parent dialog answered, a Bash input",
+			parentBash,
+			mcp("ElicitationResult", "linear", ""),
+			"working",
+			false,
+		},
+		{
+			"parent dialog answered, another server's dialog input",
+			parentDialog,
+			mcp("ElicitationResult", "github", ""),
+			"working",
+			false,
+		},
+		{
+			"parent dialog answered, a subagent's dialog input",
+			subDialog,
+			mcp("ElicitationResult", "linear", ""),
+			"working",
+			false,
+		},
+		{
+			"parent dialog answered, tool-less input",
+			noTool,
+			mcp("ElicitationResult", "linear", ""),
+			"working",
+			true,
+		},
+		{
+			"parent tool done, the server's tool over its dialog input",
+			parentDialog,
+			ev("PostToolUse", "mcp__linear__create_issue", ""),
+			"working",
+			true,
+		},
+		{
+			"parent tool done, another tool over its dialog input",
+			parentDialog,
+			ev("PostToolUse", "Bash", ""),
+			"working",
+			false,
+		},
+		{
+			"parent tool done, another server's tool over its dialog input",
+			parentDialog,
+			ev("PostToolUse", "mcp__github__create_issue", ""),
+			"working",
+			false,
+		},
+		{
+			"subagent dialog over a parent input",
+			parentBash,
+			mcp("Elicitation", "linear", "agent-7"),
+			"input",
+			true,
+		},
+		{
+			"subagent dialog answered, its dialog's input",
+			subDialog,
+			mcp("ElicitationResult", "linear", "agent-7"),
+			"working",
+			true,
+		},
+		{
+			"subagent dialog answered, the parent's dialog input",
+			parentDialog,
+			mcp("ElicitationResult", "linear", "agent-7"),
+			"working",
+			false,
+		},
+		{
+			"subagent tool done, the server's tool over its dialog input",
+			subDialog,
+			ev("PostToolUse", "mcp__linear__create_issue", "agent-7"),
+			"working",
+			true,
+		},
 		{"subagent Stop", working, ev("Stop", "", "agent-7"), "idle", false},
 		{"subagent StopFailure", working, ev("StopFailure", "", "agent-7"), "error", false},
 		{"subagent SessionStart", working, ev("SessionStart", "", "agent-7"), "waiting", false},

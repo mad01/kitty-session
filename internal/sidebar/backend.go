@@ -105,7 +105,8 @@ type Backend interface {
 	FocusAgentWindow() error
 	// ShellSplit opens a shell split in this sidebar's own tab.
 	ShellSplit() error
-	// HooksStatus reports whether the Claude Code hooks are installed.
+	// HooksStatus reports how the Claude Code hooks reach the session and any
+	// leftover global entries.
 	HooksStatus() (string, error)
 	// Quit tears ks down. The sidebar exits only after Quit returns nil.
 	Quit() error

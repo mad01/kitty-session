@@ -50,7 +50,7 @@ Behavior:
 2. Starts the instance if needed. A fresh instance first brings every active session back, in sidebar order (the order `ks move` left behind, then creation order) and out of sight, so the new session becomes the last tab, the same order bare `ks` produces.
 3. Writes `~/.config/ks/sessions/<name>.json` with `status: active`.
 4. Creates a tab in the instance running `ks sidebar --session-id <id>`, switches it to the `splits` layout and titles it `<name>`.
-5. Splits the agent in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells: `claude`, `pi`, or no command at all for `shell`. Both windows get `PATH`, `KS_SESSION_NAME`, `KS_SESSION_ID` and `KS_EXE` (the path of the ks binary that made the session, for the pi extension) in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
+5. Splits the agent in beside the sidebar, still out of sight, and resizes the sidebar to `sidebar_width` cells: `claude`, `pi`, or no command at all for `shell`. Claude gets one `--settings` argument carrying the ks hooks (see [Hooks and state detection](hooks-and-state.md#2-claude-code-hooks)). Both windows get `PATH`, `KS_SESSION_NAME`, `KS_SESSION_ID` and `KS_EXE` (the path of the ks binary that made the session, for the pi extension) in their environment and the kitty user variable `KS_SESSION_ID`; the Claude Code agent-session markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, `CLAUDE_CODE_ENTRYPOINT`) are unset in both.
 6. Shows the tab by focusing the claude window.
 7. Writes the kitty IDs and `focused_at` back to the session file.
 
@@ -279,11 +279,7 @@ Prints the version string. `make build` sets this to the short git commit SHA vi
 Usage: ks hooks install
 ```
 
-Register `ks _hook` with Claude Code by editing `~/.claude/settings.json`. Creates the file (and directory) if missing. Writes back pretty-printed JSON with a trailing newline.
-
-For each of `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Stop`, `StopFailure`, `Notification`, `SessionStart` and `SessionEnd`, `ks` installs a matcher group that invokes `<ks-binary> _hook` with a `timeout` of 5 seconds (`PermissionRequest` runs synchronously in Claude's permission flow, and the default would be 600). The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
-
-Re-running `install` is idempotent: existing `ks` matcher groups are removed before new ones are written, so stale entries from an older binary path get cleaned up. Every field of a non-`ks` hook entry survives, `timeout` and `async` included. An event whose value is not an array gets no `ks` group: `install` stops with an error naming the event, and `uninstall` leaves it alone.
+Retired. The hooks reach claude through the `--settings` argument every ks session starts it with, so there is nothing to install; the command prints `ks hooks are injected at launch; nothing to install`. An older version may have written `ks _hook` groups into `~/.claude/settings.json`. The command removes those leftovers, printing `removed leftover ks hooks from <path>` only when it removed any: they would fire a second time beside the injected ones, harmless but wasteful. See [Hooks and state detection](hooks-and-state.md#2-claude-code-hooks).
 
 ## `ks hooks uninstall`
 
@@ -291,13 +287,21 @@ Re-running `install` is idempotent: existing `ks` matcher groups are removed bef
 Usage: ks hooks uninstall
 ```
 
-Reverse of `install`: strip every matcher group whose command resolves to `ks _hook` (either `~/...` or the absolute form) from `~/.claude/settings.json`. Events with no remaining groups are removed entirely. If that leaves `hooks` empty, the key is dropped.
+Strip every matcher group whose command resolves to `ks _hook` (either `~/...` or the absolute form) from `~/.claude/settings.json`. Those are leftovers from a version that wrote the hooks there; the injected hooks live on the claude command line and are untouched. Events with no remaining groups are removed entirely. If that leaves `hooks` empty, the key is dropped. Every field of a non-`ks` hook entry survives, `timeout` and `async` included; an event whose value is not an array is left alone. With nothing to remove it prints `no leftover ks hooks in <path>` and leaves the file untouched.
+
+## `ks hooks status`
+
+```
+Usage: ks hooks status
+```
+
+Prints `hooks injected at launch`. When `~/.claude/settings.json` still holds leftover `ks _hook` groups, the line continues with `; leftover global entries for <events> in <path> (ks hooks uninstall removes them)`. The sidebar's `hooks status` menu entry shows a brief form instead: `hooks injected at launch; N leftover global entries (ks hooks uninstall)`.
 
 ## `ks _hook` (hidden)
 
-Invoked by Claude Code hooks, not by humans. Reads a JSON payload from stdin, maps the `event` (and for `Notification` the `type`, for `PreToolUse` the tool name) to one of `working` / `idle` / `input` / `error` / `waiting`, and writes `~/.config/ks/state/<name>.json`.
+Invoked by the Claude Code hooks `ks` injects at launch, not by humans. Twelve events reach it: `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Elicitation`, `ElicitationResult`, `Stop`, `StopFailure`, `Notification`, `SessionStart` and `SessionEnd`. It reads a JSON payload from stdin, maps `hook_event_name` (with `notification_type` for `Notification` and `tool_name` for the tool events) to one of `working` / `idle` / `input` / `error` / `waiting`, and writes `~/.config/ks/state/<name>.json`.
 
-If `KS_SESSION_NAME` is not set, the command exits silently; it's safe to have the hook installed globally even in terminals that aren't `ks` sessions.
+If `KS_SESSION_NAME` is not set, the command exits silently, so a leftover global entry from an older version does no harm beyond the duplicate run.
 
 See [Hooks and state detection](hooks-and-state.md) for the full event-to-state table.
 

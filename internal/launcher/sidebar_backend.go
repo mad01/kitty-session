@@ -4,9 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,12 +27,9 @@ const (
 	// shellSplitBias is the share of claude's height a shell split takes.
 	shellSplitBias = 30
 	// raiseDebounce is the least time between two reads of the own window's
-	// text that look for a dialog (backstop's raise), which can go on for a
-	// whole session when the hooks are not installed.
+	// text that look for a dialog (backstop's raise), which goes on for as
+	// long as no hook has written a state file, as at a login prompt.
 	raiseDebounce = 10 * time.Second
-	// hooksRecheck is how long backstop trusts its last look at whether the
-	// ks hooks are installed.
-	hooksRecheck = time.Minute
 )
 
 // SidebarBackend is the sidebar.Backend over one ks instance: every action
@@ -49,16 +44,13 @@ type SidebarBackend struct {
 	home  string // for shortening directories in titles
 	quit  func() error
 	// readState reads a session's state file; tests substitute a fake.
-	readState func(name string) (string, time.Time, error)
+	readState func(name string) (state.Entry, error)
 	// writeState writes a session's state file, for backstop; tests
 	// substitute a fake.
-	writeState func(name, st string) error
+	writeState func(name string, e state.Entry) error
 	// readText reads the live bottom of a window's terminal text, for
 	// backstop; tests substitute a fake.
 	readText func(windowID int) (string, error)
-	// hooksInstalled reports whether the ks hooks are registered with
-	// Claude Code, for backstop's raise gate; tests substitute a fake.
-	hooksInstalled func() bool
 
 	// withdraw takes down the own session's desktop notification. It runs
 	// before the sidebar closes its own tab (reapIfGone), since the sidebar
@@ -74,9 +66,7 @@ type SidebarBackend struct {
 	// viewedDebounce.
 	ownVisible bool
 	lastRaise  time.Time // when backstop last read the text for a dialog
-	hooksAt    time.Time // when hooksOK was last read, zero before the first
-	hooksOK    bool
-	reap       reaper // closes the own tab once its claude is gone; see reapIfGone
+	reap       reaper    // closes the own tab once its claude is gone; see reapIfGone
 }
 
 // NewSidebarBackend returns the backend for the instance behind client.
@@ -113,25 +103,12 @@ func newSidebarBackend(l *Launcher, cfg *config.Config, ownID string) *SidebarBa
 		ownID:      ownID,
 		home:       home,
 		quit:       func() error { return errors.New("launcher: quit is not wired") },
-		readState:  state.Read,
-		writeState: state.Write,
+		readState:  state.ReadEntry,
+		writeState: state.WriteEntry,
 		readText: func(int) (string, error) {
 			return "", errors.New("launcher: text reader is not wired")
 		},
-		hooksInstalled: ksHooksInstalled,
 	}
-}
-
-// ksHooksInstalled reports whether any ks hook event is registered in
-// Claude Code's settings. Settings that cannot be read count as none: Claude
-// Code would not run the hooks from them either.
-func ksHooksInstalled() bool {
-	path, err := hooks.Path()
-	if err != nil {
-		return false
-	}
-	installed, err := hooks.Installed(path)
-	return err == nil && len(installed) > 0
 }
 
 // List returns one agent per session record from one store listing and one
@@ -212,8 +189,8 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 	if w != nil {
 		in.hasWindow, in.title, in.report = true, w.Title, w.Status
 	}
-	if s, at, err := b.readState(sess.Name); err == nil {
-		in.fileState, in.fileAt = s, at
+	if e, err := b.readState(sess.Name); err == nil {
+		in.fileState, in.fileAt, in.fileSource = e.State, e.UpdatedAt, e.Source
 	}
 	st := resolveState(in)
 	if own {
@@ -275,8 +252,11 @@ type stateInput struct {
 	title     string // the agent window's title
 	fileState string // the state file's state, "" without a file
 	fileAt    time.Time
-	viewedAt  time.Time
-	visible   bool // the user is looking at the session's tab: live.visible
+	// fileSource is the state file's writer: state.SourceScreen for the
+	// backstop's own correction, "" for a hook or the pi extension.
+	fileSource string
+	viewedAt   time.Time
+	visible    bool // the user is looking at the session's tab: live.visible
 	// report is the state of the agent window's Program Status record, ""
 	// without one.
 	report kitty.ProgramState
@@ -332,7 +312,7 @@ type stateInput struct {
 //
 // The own session's sidebar runs one check more on its claude row after
 // these rules, backstop: when the hooks left a stale input, or no state at
-// all, or are not installed, and no record speaks, it reads the window's
+// all, or a stale waiting, and no record speaks, it reads the window's
 // text and corrects the state from what is on screen, writing the
 // correction to the state file. It is the single writer of that
 // correction, so every other sidebar, which never reads the text, and ks
@@ -399,10 +379,15 @@ func claudeState(in stateInput) sidebar.State {
 // outranks a drawn prompt box, since Claude Code keeps the box on screen
 // mid-turn. An input is raised when the window shows a dialog and the
 // raise gate is open (raiseDue): no state file or a stale waiting, as at
-// startup, where the folder-trust dialog comes before any hook fires, or
-// the ks hooks not installed, where nothing else would ever report a
-// prompt. A clear reads the text on every poll, since that wait is the
-// user's; a raise reads at most once per raiseDebounce. The text is cut to
+// startup, where the folder-trust dialog and a login prompt come before
+// any hook fires, or a file the screen check itself wrote last (its
+// Source). Every claude ks launches carries the hooks (they are injected
+// with --settings), so the first hook write hands the raise to the hooks;
+// a claude whose injected hooks never fire (disableAllHooks, a build that
+// ignores them) never makes that write, and the screen check keeps the
+// gate for the whole session. A clear reads the text on every poll, since
+// that wait is the user's; a raise reads at most once per raiseDebounce.
+// The text is cut to
 // the window's rows (claude.LiveScreen) so that what Ink left in the
 // scrollback above a short screen does not count. A read error leaves the
 // row alone. The corrected state is written to the state file (see
@@ -438,15 +423,15 @@ func (b *SidebarBackend) backstop(
 
 // raiseDue reports whether backstop may look for a dialog on this poll: the
 // row is not at input, the gate is open (no state file, a stale waiting, or
-// the ks hooks not installed), and raiseDebounce has passed since the last
-// such read, which it then stamps.
+// a file whose last writer was the screen check), and raiseDebounce has
+// passed since the last such read, which it then stamps.
 func (b *SidebarBackend) raiseDue(in stateInput, st sidebar.State) bool {
 	if st == sidebar.StateInput {
 		return false
 	}
 	staleWaiting := claude.ParseState(in.fileState) == claude.StateWaiting &&
 		!state.IsFresh(in.fileAt)
-	open := in.fileState == "" || staleWaiting || !b.hooksOn()
+	open := in.fileState == "" || staleWaiting || in.fileSource == state.SourceScreen
 	if !open {
 		return false
 	}
@@ -460,34 +445,24 @@ func (b *SidebarBackend) raiseDue(in stateInput, st sidebar.State) bool {
 	return true
 }
 
-// hooksOn reports whether the ks hooks are installed, re-reading the
-// settings at most once per hooksRecheck.
-func (b *SidebarBackend) hooksOn() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	now := b.l.now()
-	if b.hooksAt.IsZero() || now.Sub(b.hooksAt) >= hooksRecheck {
-		b.hooksOK, b.hooksAt = b.hooksInstalled(), now
-	}
-	return b.hooksOK
-}
-
-// correct writes st to the session's state file and returns it for the row,
-// unless the file changed since the poll read it (in.fileAt): the text read
-// takes a subprocess, and a hook can write in the meantime. Then the hook's
-// word stands, nothing is written, and the row keeps prev. A failed write
-// is dropped, as every launcher warning in the sidebar is.
+// correct writes st to the session's state file, marked as the screen
+// check's own (state.SourceScreen, which keeps the raise gate open), and
+// returns it for the row, unless the file changed since the poll read it
+// (in.fileAt): the text read takes a subprocess, and a hook can write in
+// the meantime. Then the hook's word stands, nothing is written, and the
+// row keeps prev. A failed write is dropped, as every launcher warning in
+// the sidebar is.
 func (b *SidebarBackend) correct(
 	name string, in stateInput, prev, st sidebar.State,
 ) sidebar.State {
-	_, at, err := b.readState(name)
+	e, err := b.readState(name)
 	if err != nil {
-		at = time.Time{}
+		e.UpdatedAt = time.Time{}
 	}
-	if !at.Equal(in.fileAt) {
+	if !e.UpdatedAt.Equal(in.fileAt) {
 		return prev
 	}
-	_ = b.writeState(name, st.String())
+	_ = b.writeState(name, state.Entry{State: st.String(), Source: state.SourceScreen})
 	return st
 }
 
@@ -637,35 +612,20 @@ func (b *SidebarBackend) ownWindows() (*session.Session, live, error) {
 	return sess, lv, nil
 }
 
-// HooksStatus says which of the ks hook events are registered with Claude Code.
+// HooksStatus says how the ks hooks reach the session (injected at launch)
+// and counts any leftover entries an older ks wrote to the Claude Code
+// settings file, in the short form that fits the sidebar's status row
+// (hooks.Status.Brief).
 func (b *SidebarBackend) HooksStatus() (string, error) {
 	path, err := hooks.Path()
 	if err != nil {
 		return "", err
 	}
-	installed, err := hooks.Installed(path)
+	st, err := hooks.Inspect(path)
 	if err != nil {
 		return "", err
 	}
-	return hooksSummary(installed), nil
-}
-
-// hooksSummary fits the hook status on one sidebar line: all, none, or the
-// events that are missing.
-func hooksSummary(installed []string) string {
-	switch len(installed) {
-	case 0:
-		return "hooks: none registered (ks hooks install)"
-	case len(hooks.Events):
-		return fmt.Sprintf("hooks: all %d events registered", len(hooks.Events))
-	}
-	var missing []string
-	for _, e := range hooks.Events {
-		if !slices.Contains(installed, e) {
-			missing = append(missing, e)
-		}
-	}
-	return "hooks: missing " + strings.Join(missing, ", ")
+	return st.Brief(), nil
 }
 
 // Quit ends the ks instance; records stay active for the next attach.

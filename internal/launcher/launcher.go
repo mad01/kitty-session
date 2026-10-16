@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/mad01/kitty-session/internal/claude"
+	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
@@ -90,8 +91,13 @@ type Launcher struct {
 }
 
 // AgentOptions is what the agent's command line depends on beyond the
-// session record.
+// session record. Only claude reads them; pi and a shell ignore them.
 type AgentOptions struct {
+	// HookExe is the ks binary whose _hook the Claude Code hook groups
+	// injected at launch run (hooks.Settings), so state detection needs no
+	// entry in the user's settings file. Empty injects no hooks, which is
+	// what a claude outside ks gets (ks import --to cmux).
+	HookExe string
 	// NotifyInput is whether the session's sidebar raises a desktop
 	// notification when the session needs input (config notify). Claude
 	// then starts with its own notification turned off, so one prompt does
@@ -100,19 +106,22 @@ type AgentOptions struct {
 }
 
 // New returns a launcher for the instance behind client. cfg may be nil.
+// Every claude it launches gets the ks hooks of the running binary.
 func New(store *session.Store, client *kitty.Client, cfg *config.Config) (*Launcher, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("cannot locate the ks binary: %w", err)
 	}
 	l := newLauncher(store, client, cfg.EffectiveSidebarWidth(), exe)
-	l.agent = agentOptions(cfg)
+	l.agent = agentOptions(cfg, exe)
 	return l, nil
 }
 
-// agentOptions derives the agent command's options from cfg, which may be nil.
-func agentOptions(cfg *config.Config) AgentOptions {
+// agentOptions derives the agent command's options from cfg, which may be
+// nil, for sessions whose hooks run exe.
+func agentOptions(cfg *config.Config, exe string) AgentOptions {
 	return AgentOptions{
+		HookExe:     exe,
 		NotifyInput: slices.Contains(cfg.Notifications(), config.NotifyInput),
 	}
 }
@@ -337,21 +346,19 @@ func piCmd(sess *session.Session, mode ResumeMode) []string {
 	return append(cmd, "--session", sess.PiSessionPath)
 }
 
-// claudeQuietSettings is the inline settings override that turns off Claude
-// Code's own desktop notification, passed with --settings when ks raises the
-// input notification itself.
-const claudeQuietSettings = `{"preferredNotifChannel":"notifications_disabled"}`
-
 // claudeCmd starts claude: --resume <id> when the record's own transcript
 // still exists, --continue when the directory has any transcript to
 // continue, and a fresh claude otherwise. --continue with nothing to
-// continue makes claude exit at once. With opts.NotifyInput the command
-// ends with the settings override that mutes claude's own notification.
+// continue makes claude exit at once. With opts.HookExe or opts.NotifyInput
+// the command ends with one --settings carrying the inline settings
+// (hooks.Settings): the ks hook groups for HookExe, and with NotifyInput the
+// override that mutes claude's own notification. Claude Code loads it
+// beside the user's settings file, so no file needs a ks entry.
 func claudeCmd(sess *session.Session, mode ResumeMode, opts AgentOptions) []string {
 	cmd := []string{"claude"}
 	cmd = append(cmd, claudeResumeArgs(sess, mode)...)
-	if opts.NotifyInput {
-		cmd = append(cmd, "--settings", claudeQuietSettings)
+	if opts.HookExe != "" || opts.NotifyInput {
+		cmd = append(cmd, "--settings", hooks.Settings(opts.HookExe, opts.NotifyInput))
 	}
 	return cmd
 }

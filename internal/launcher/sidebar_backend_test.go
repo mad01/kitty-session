@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/sidebar"
+	"github.com/mad01/kitty-session/internal/state"
 )
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -26,18 +26,19 @@ func countCalls(f *fakeKitty, name string) int {
 	return n
 }
 
-// fakeStates stands in for the state directory: one entry per session name.
+// fakeStates stands in for the state directory: one entry per session name,
+// every one written by a hook (no source).
 type fakeStates map[string]struct {
 	state string
 	at    time.Time
 }
 
-func (f fakeStates) read(name string) (string, time.Time, error) {
+func (f fakeStates) read(name string) (state.Entry, error) {
 	e, ok := f[name]
 	if !ok {
-		return "", time.Time{}, errors.New("no state file")
+		return state.Entry{}, errors.New("no state file")
 	}
-	return e.state, e.at, nil
+	return state.Entry{State: e.state, UpdatedAt: e.at}, nil
 }
 
 // newTestBackend wires a home-tab backend (no own session) over the fake
@@ -51,7 +52,6 @@ func newTestBackend(t *testing.T) (*SidebarBackend, *fakeKitty, *time.Time) {
 	l.now = func() time.Time { return clock }
 	b := newSidebarBackend(l, nil, "")
 	b.readState = fakeStates{}.read
-	b.hooksInstalled = func() bool { return true }
 	return b, f, &clock
 }
 
@@ -1241,23 +1241,17 @@ func TestSessionActions(t *testing.T) {
 	_ = f
 }
 
-func TestHooksSummary(t *testing.T) {
-	tests := []struct {
-		installed []string
-		want      string
-	}{
-		{nil, "hooks: none registered (ks hooks install)"},
-		{hooks.Events, "hooks: all 10 events registered"},
-		{
-			[]string{"PreToolUse", "Notification"},
-			"hooks: missing UserPromptSubmit, PostToolUse, PostToolUseFailure, " +
-				"PermissionRequest, Stop, StopFailure, SessionStart, SessionEnd",
-		},
+// TestHooksStatus checks the menu's hook line against the fake HOME, which
+// has no Claude Code settings file: the hooks are injected, nothing is left
+// over.
+func TestHooksStatus(t *testing.T) {
+	b, _, _ := newTestBackend(t)
+	got, err := b.HooksStatus()
+	if err != nil {
+		t.Fatalf("HooksStatus: %v", err)
 	}
-	for _, tt := range tests {
-		if got := hooksSummary(tt.installed); got != tt.want {
-			t.Errorf("hooksSummary(%v) = %q, want %q", tt.installed, got, tt.want)
-		}
+	if want := "hooks injected at launch"; got != want {
+		t.Errorf("HooksStatus = %q, want %q", got, want)
 	}
 }
 
@@ -1393,14 +1387,14 @@ const (
 )
 
 // backstopFixture is the own claude session of a backstop test: its state
-// file, its screen and the hooks, with the state and the writes expected.
+// file and its screen, with the state and the writes expected.
 type backstopFixture struct {
 	kind    string
 	status  kitty.ProgramState
 	file    string        // the state file's state, "" for none
 	fileAge time.Duration // the file's age against the backend's clock
+	source  string        // the file's writer: "" for a hook, state.SourceScreen for backstop
 	foreign bool          // the row belongs to another session
-	noHooks bool          // the ks hooks are not installed
 	lines   int           // the window's rows, zero for uncut text
 	text    string
 	readErr error
@@ -1416,10 +1410,10 @@ type backstopFixture struct {
 // TestListScreenBackstop checks the own sidebar's screen check on its
 // claude row: a stale input is cleared by the prompt box or a running turn
 // and the correction written to the state file, a dialog on screen keeps
-// it, an input is raised from a dialog when no hook has spoken or none is
-// installed, a hook write in the meantime wins, and nothing is read for a
-// fresh file, a Program Status record, another session's row or another
-// kind.
+// it, an input is raised from a dialog when no hook has spoken yet or the
+// file is backstop's own, a hook write in the meantime wins, and nothing is
+// read for a fresh file, a state file the hooks own, a Program Status
+// record, another session's row or another kind.
 func TestListScreenBackstop(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1482,12 +1476,23 @@ func TestListScreenBackstop(t *testing.T) {
 		{"fresh waiting is not read", backstopFixture{
 			file: "waiting", fileAge: time.Second, text: trustScreen, want: sidebar.StateIdle,
 		}},
-		{"hooks installed, stale idle is not read", backstopFixture{
+		{"hook-written stale idle is not read", backstopFixture{
 			file: "idle", fileAge: time.Hour, text: trustScreen, want: sidebar.StateIdle,
 		}},
-		{"hooks not installed, stale idle, dialog raises input", backstopFixture{
-			noHooks: true, file: "idle", fileAge: time.Hour, text: trustScreen,
+		{"hook-written stale working is not read", backstopFixture{
+			file: "working", fileAge: time.Hour, text: trustScreen, want: sidebar.StateWorking,
+		}},
+		{"screen-written idle, dialog raises input", backstopFixture{
+			file: "idle", fileAge: time.Hour, source: state.SourceScreen, text: trustScreen,
 			want: sidebar.StateInput, wantReads: 1, wantWrite: "input",
+		}},
+		{"screen-written fresh idle, dialog raises input", backstopFixture{
+			file: "idle", fileAge: time.Second, source: state.SourceScreen, text: trustScreen,
+			want: sidebar.StateInput, wantReads: 1, wantWrite: "input",
+		}},
+		{"screen-written working, running turn writes nothing", backstopFixture{
+			file: "working", fileAge: time.Hour, source: state.SourceScreen, text: workingScreen,
+			want: sidebar.StateWorking, wantReads: 1,
 		}},
 		{"a shell row is not read", backstopFixture{
 			kind: session.AgentShell, text: trustScreen, want: sidebar.StateIdle,
@@ -1507,7 +1512,7 @@ func TestListScreenBackstop(t *testing.T) {
 // text reads and the state writes against it.
 func runBackstop(t *testing.T, fx backstopFixture) {
 	t.Helper()
-	type write struct{ name, state string }
+	type write struct{ name, state, source string }
 	b, f, clock := newTestBackend(t)
 	*clock = time.Now() // freshness is wall-clock; waiting is the backend's
 	own := session.New("own", "/work/own", 0, 0)
@@ -1521,21 +1526,18 @@ func runBackstop(t *testing.T, fx backstopFixture) {
 	if !fx.foreign {
 		b.ownID = own.ID
 	}
-	b.hooksInstalled = func() bool { return !fx.noHooks }
-	states := fakeStates{}
-	if fx.file != "" {
-		states["own"] = struct {
-			state string
-			at    time.Time
-		}{fx.file, clock.Add(-fx.fileAge)}
-	}
 	stateReads := 0
-	b.readState = func(name string) (string, time.Time, error) {
+	b.readState = func(name string) (state.Entry, error) {
 		stateReads++
 		if fx.hookWrites && stateReads > 1 {
-			return "working", clock.Add(-time.Millisecond), nil
+			return state.Entry{State: "working", UpdatedAt: clock.Add(-time.Millisecond)}, nil
 		}
-		return states.read(name)
+		if name != "own" || fx.file == "" {
+			return state.Entry{}, errors.New("no state file")
+		}
+		return state.Entry{
+			State: fx.file, UpdatedAt: clock.Add(-fx.fileAge), Source: fx.source,
+		}, nil
 	}
 	reads := 0
 	b.readText = func(id int) (string, error) {
@@ -1546,8 +1548,8 @@ func runBackstop(t *testing.T, fx backstopFixture) {
 		return fx.text, fx.readErr
 	}
 	var writes []write
-	b.writeState = func(name, st string) error {
-		writes = append(writes, write{name, st})
+	b.writeState = func(name string, e state.Entry) error {
+		writes = append(writes, write{name, e.State, e.Source})
 		return nil
 	}
 
@@ -1567,16 +1569,17 @@ func runBackstop(t *testing.T, fx backstopFixture) {
 	}
 	var wantWrites []write
 	if fx.wantWrite != "" {
-		wantWrites = []write{{"own", fx.wantWrite}}
+		// Every correction is marked as the screen check's own.
+		wantWrites = []write{{"own", fx.wantWrite, state.SourceScreen}}
 	}
 	if !slices.Equal(writes, wantWrites) {
 		t.Errorf("writes = %v, want %v", writes, wantWrites)
 	}
 }
 
-// TestListScreenBackstopDebouncesRaiseReads checks that with the hooks not
-// installed the own row's text is read for a dialog at most once per
-// raiseDebounce, and the hooks check itself at most once per hooksRecheck.
+// TestListScreenBackstopDebouncesRaiseReads checks that while no hook has
+// written a state file the own row's text is read for a dialog at most once
+// per raiseDebounce.
 func TestListScreenBackstopDebouncesRaiseReads(t *testing.T) {
 	b, f, clock := newTestBackend(t)
 	own := session.New("own", "/work/own", 0, 0)
@@ -1586,13 +1589,10 @@ func TestListScreenBackstopDebouncesRaiseReads(t *testing.T) {
 	if err := b.l.store.Save(own); err != nil {
 		t.Fatal(err)
 	}
-	states := fakeStates{"own": {"idle", clock.Add(-time.Hour)}}
-	b.readState = states.read
-	reads, checks := 0, 0
+	reads := 0
 	b.readText = func(int) (string, error) { reads++; return welcomeScreen, nil }
-	b.hooksInstalled = func() bool { checks++; return false }
-	b.writeState = func(name, st string) error {
-		t.Errorf("wrote %s for %s on a welcome screen", st, name)
+	b.writeState = func(name string, e state.Entry) error {
+		t.Errorf("wrote %s for %s on a welcome screen", e.State, name)
 		return nil
 	}
 	list := func() {
@@ -1602,22 +1602,87 @@ func TestListScreenBackstopDebouncesRaiseReads(t *testing.T) {
 		}
 	}
 	steps := []struct {
-		advance    time.Duration
-		wantReads  int
-		wantChecks int
+		advance   time.Duration
+		wantReads int
 	}{
-		{0, 1, 1},
-		{0, 1, 1},
-		{raiseDebounce - time.Second, 1, 1},
-		{time.Second, 2, 1},
-		{hooksRecheck - raiseDebounce, 3, 2},
+		{0, 1},
+		{0, 1},
+		{raiseDebounce - time.Second, 1},
+		{time.Second, 2},
+		{raiseDebounce, 3},
 	}
 	for i, st := range steps {
 		*clock = clock.Add(st.advance)
 		list()
-		if reads != st.wantReads || checks != st.wantChecks {
-			t.Errorf("step %d: %d reads, %d hook checks, want %d and %d",
-				i, reads, checks, st.wantReads, st.wantChecks)
+		if reads != st.wantReads {
+			t.Errorf("step %d: %d reads, want %d", i, reads, st.wantReads)
+		}
+	}
+}
+
+// TestListScreenBackstopRaiseGateFollowsTheWriter checks the raise gate
+// against the state file's last writer: open with no file, open while the
+// file is backstop's own (so a claude whose hooks never fire keeps the
+// screen check), shut by a hook's write, and open again for a hook's stale
+// waiting but not a fresh one. The debounce is waited out between steps.
+func TestListScreenBackstopRaiseGateFollowsTheWriter(t *testing.T) {
+	b, f, clock := newTestBackend(t)
+	*clock = time.Now() // freshness is wall-clock
+	own := session.New("own", "/work/own", 0, 0)
+	b.ownID = own.ID
+	f.addTab(own, true)
+	f.find(own.KittyWindowID).Title = "Claude Code"
+	if err := b.l.store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		file    *state.Entry // nil for no file
+		reads   int
+		noReads = 0
+	)
+	b.readState = func(string) (state.Entry, error) {
+		if file == nil {
+			return state.Entry{}, errors.New("no state file")
+		}
+		return *file, nil
+	}
+	b.readText = func(int) (string, error) { reads++; return welcomeScreen, nil }
+	b.writeState = func(name string, e state.Entry) error {
+		t.Errorf("wrote %s for %s on a welcome screen", e.State, name)
+		return nil
+	}
+	steps := []struct {
+		name  string
+		file  *state.Entry
+		reads int // reads this step adds
+	}{
+		{"no file", nil, 1},
+		{"backstop's own idle", &state.Entry{
+			State: "idle", UpdatedAt: clock.Add(-time.Hour), Source: state.SourceScreen,
+		}, 1},
+		{"backstop's own fresh working", &state.Entry{
+			State: "working", UpdatedAt: clock.Add(-time.Second), Source: state.SourceScreen,
+		}, 1},
+		{"a hook's idle", &state.Entry{State: "idle", UpdatedAt: clock.Add(-time.Hour)}, noReads},
+		{"a hook's fresh working", &state.Entry{
+			State: "working", UpdatedAt: clock.Add(-time.Second),
+		}, noReads},
+		{"a hook's stale waiting", &state.Entry{
+			State: "waiting", UpdatedAt: clock.Add(-time.Hour),
+		}, 1},
+		{"a hook's fresh waiting", &state.Entry{
+			State: "waiting", UpdatedAt: clock.Add(-time.Second),
+		}, noReads},
+	}
+	for _, st := range steps {
+		file = st.file
+		*clock = clock.Add(raiseDebounce)
+		before := reads
+		if _, err := b.List(); err != nil {
+			t.Fatalf("%s: List: %v", st.name, err)
+		}
+		if got := reads - before; got != st.reads {
+			t.Errorf("%s: %d reads, want %d", st.name, got, st.reads)
 		}
 	}
 }

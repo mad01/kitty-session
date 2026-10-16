@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mad01/kitty-session/internal/claude"
+	"github.com/mad01/kitty-session/internal/hooks"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
@@ -96,7 +97,8 @@ func TestAgentCmdClaude(t *testing.T) {
 }
 
 // TestAgentCmdClaudeNotifyInput checks that ks raising the input notification
-// mutes claude's own, whatever way the conversation is picked up.
+// mutes claude's own, whatever way the conversation is picked up: without a
+// hook binary the settings carry the quiet key alone.
 func TestAgentCmdClaudeNotifyInput(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -135,6 +137,60 @@ func TestAgentCmdClaudeNotifyInput(t *testing.T) {
 	}
 }
 
+// TestAgentCmdClaudeHooks checks that a ks session's claude gets the ks
+// hooks injected: exactly one --settings, last on the command whatever way
+// the conversation is picked up, carrying hooks.Settings for the ks binary
+// and the notify choice. What that document holds is hooks' own test.
+func TestAgentCmdClaudeHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	derived, err := claude.TranscriptPath("/work/demo", "kept-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	touch(t, derived)
+
+	tests := []struct {
+		name   string
+		mode   ResumeMode
+		sess   session.Session
+		notify bool
+		want   []string // between claude and --settings
+	}{
+		{"fresh", ResumeNone, session.Session{Dir: "/work/demo"}, false, nil},
+		{"fresh, notify", ResumeNone, session.Session{Dir: "/work/demo"}, true, nil},
+		{
+			"resume", ResumeStored,
+			session.Session{Dir: "/work/demo", ClaudeSessionID: "kept-id"},
+			true, []string{"--resume", "kept-id"},
+		},
+		{
+			"continue", ResumeStored,
+			session.Session{Dir: "/work/demo", ClaudeSessionID: "gone"},
+			false, []string{"--continue"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := AgentOptions{HookExe: "/bin/ks", NotifyInput: tc.notify}
+			cmd := AgentCmd(&tc.sess, tc.mode, opts)
+			n := len(cmd)
+			if n < 3 || cmd[0] != "claude" || cmd[n-2] != "--settings" {
+				t.Fatalf("AgentCmd = %q, want claude ... --settings <json>", cmd)
+			}
+			if got := cmd[1 : n-2]; !slices.Equal(got, tc.want) {
+				t.Errorf("args before --settings = %q, want %q", got, tc.want)
+			}
+			if c := slices.Index(cmd[:n-2], "--settings"); c >= 0 {
+				t.Errorf("a second --settings at %d: %q", c, cmd)
+			}
+			if want := hooks.Settings("/bin/ks", tc.notify); cmd[n-1] != want {
+				t.Errorf("settings = %s, want %s", cmd[n-1], want)
+			}
+		})
+	}
+}
+
 func TestAgentOptionsFromConfig(t *testing.T) {
 	tests := []struct {
 		name string
@@ -149,10 +205,32 @@ func TestAgentOptionsFromConfig(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := agentOptions(tc.cfg); got.NotifyInput != tc.want {
-				t.Errorf("agentOptions = %+v, want NotifyInput %v", got, tc.want)
+			got := agentOptions(tc.cfg, "/bin/ks")
+			if got.NotifyInput != tc.want || got.HookExe != "/bin/ks" {
+				t.Errorf("agentOptions = %+v, want NotifyInput %v and HookExe /bin/ks",
+					got, tc.want)
 			}
 		})
+	}
+}
+
+// TestNewInjectsOwnHooks checks that the production constructor makes every
+// claude it launches run the hooks of the ks binary that launched it.
+func TestNewInjectsOwnHooks(t *testing.T) {
+	store := newTestStore(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := New(store, kitty.New("unix:/nonexistent/ks.sock"), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if l.agent.HookExe != exe || !l.agent.NotifyInput {
+		t.Errorf("agent options = %+v, want HookExe %s and NotifyInput", l.agent, exe)
+	}
+	if l.exe != exe {
+		t.Errorf("exe = %s, want %s", l.exe, exe)
 	}
 }
 
@@ -205,8 +283,8 @@ func TestAgentCmdPiAndShell(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.sess.Dir = "/work/demo"
-			// The notification option is claude's alone; pi and shell ignore it.
-			opts := AgentOptions{NotifyInput: true}
+			// The options are claude's alone; pi and shell ignore them.
+			opts := AgentOptions{HookExe: "/bin/ks", NotifyInput: true}
 			if got := AgentCmd(&tc.sess, tc.mode, opts); !slices.Equal(got, tc.want) {
 				t.Errorf("AgentCmd = %q, want %q", got, tc.want)
 			}
