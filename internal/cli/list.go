@@ -27,6 +27,9 @@ func init() {
 // readState reads a session's state file; tests substitute a fake.
 var readState = state.Read
 
+// paneText reads a window's terminal text; tests substitute a fake.
+var paneText = (*kitty.Client).GetText
+
 // stoppedLabel is what the state column prints for a session without a live
 // agent window, in the vocabulary the sidebar shares.
 var stoppedLabel = sidebar.StateStopped.String()
@@ -54,7 +57,14 @@ func runList(cmd *cobra.Command, args []string) error {
 		if !down {
 			st = listState(w.kitty, all, sess)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-7s %-10s %s\n", sess.Name, sess.Kind(), st, sess.Dir)
+		fmt.Fprintf(
+			cmd.OutOrStdout(),
+			"%-20s %-7s %-10s %s\n",
+			sess.Name,
+			sess.Kind(),
+			st,
+			sess.Dir,
+		)
 	}
 	if down {
 		fmt.Fprintln(cmd.OutOrStdout(), "ks instance not running")
@@ -91,7 +101,9 @@ func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) strin
 // state and stamp, empty and zero without one. A shell is idle, since
 // nothing else reports its state. A pi session reads its state file,
 // whatever its age, and is idle without one. A claude session reads a fresh
-// state file, then the terminal text of its window.
+// state file, then the terminal text of its window, where an error file of
+// any age still wins unless the text says working: a failed turn stays
+// visible until the user retries, as it does in the sidebar.
 func kindState(
 	c *kitty.Client, w kitty.Window, sess *session.Session, file string, fileAt time.Time,
 ) claude.State {
@@ -107,9 +119,13 @@ func kindState(
 	if state.IsFresh(fileAt) {
 		return claude.ParseState(file)
 	}
-	text, err := c.GetText(w.ID)
+	text, err := paneText(c, w.ID)
 	if err != nil {
 		return claude.StateWorking
 	}
-	return claude.DetectState(text)
+	st := claude.DetectState(text)
+	if st != claude.StateWorking && claude.ParseState(file) == claude.StateError {
+		return claude.StateError
+	}
+	return st
 }

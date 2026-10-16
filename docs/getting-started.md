@@ -85,7 +85,7 @@ The sidebar shows a live state for each session: `input`, `error`, `done`, `work
 ks hooks install
 ```
 
-This edits `~/.claude/settings.json` to register `ks _hook` for `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`. Remove them with `ks hooks uninstall`.
+This edits `~/.claude/settings.json` to register `ks _hook` for `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Stop`, `StopFailure`, `Notification`, `SessionStart` and `SessionEnd`. Remove them with `ks hooks uninstall`. An install from an older ks lacks the newer events (`PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `StopFailure`); the sidebar's `hooks status` menu entry lists them as missing, and rerunning `ks hooks install` adds them.
 
 See [Hooks and state detection](hooks-and-state.md) for what each event maps to and the fallback chain when hooks aren't installed.
 

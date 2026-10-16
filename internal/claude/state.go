@@ -14,6 +14,7 @@ const (
 	StateNeedsInput       // Claude needs user input (permission, question)
 	StateIdle             // at prompt, ready for new task
 	StateWaiting          // session starting up or Claude finished, ready for next task
+	StateError            // the turn died on an error (the StopFailure hook)
 )
 
 // String returns a human-readable label for the state.
@@ -29,13 +30,15 @@ func (s State) String() string {
 		return "idle"
 	case StateWaiting:
 		return "waiting"
+	case StateError:
+		return "error"
 	default:
 		return "unknown"
 	}
 }
 
 // ParseState converts a state-file string ("working", "idle", "input",
-// "waiting") back to a State; anything else is StateUnknown.
+// "waiting", "error") back to a State; anything else is StateUnknown.
 func ParseState(s string) State {
 	switch s {
 	case "working":
@@ -46,6 +49,8 @@ func ParseState(s string) State {
 		return StateNeedsInput
 	case "waiting":
 		return StateWaiting
+	case "error":
+		return StateError
 	default:
 		return StateUnknown
 	}

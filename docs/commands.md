@@ -110,7 +110,7 @@ State detection:
 2. If the session's state file is less than 10 seconds old → the kind's own rules below, for every kind. The hooks saw an event the record may not reflect yet.
 3. Otherwise, if that window carries a program status record (Operating System Command 7501, the Program Status Protocol; kitty master, not 0.49.2 or older) → its state, for every kind: `blocked` prints `input`; `working`, `error` and `idle` print as they are; `done` prints `done`, or `idle` when its tab is the active one.
 4. A `shell` session is `idle` from here on: nothing else reports its state. A `pi` session shows its state file's value whatever its age (the ks pi extension writes it) and `idle` without one.
-5. For a `claude` session, if a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file.
+5. For a `claude` session, if a fresh state file exists (written within the last 10 seconds by Claude Code hooks) → the value from the file. An `error` file of any age also prints `error`, unless the classifier of step 6 finds Claude working.
 6. Otherwise, read the claude window via `kitty @ get-text` and run the terminal-text classifier.
 
 Steps 1 to 3 are shared with the sidebar. Past them the sidebar resolves state on its own (it reads Claude's title glyph instead of the pane text, and keeps an `input` file until a later hook replaces it); see [Sidebar guide](tui.md#states).
@@ -281,9 +281,9 @@ Usage: ks hooks install
 
 Register `ks _hook` with Claude Code by editing `~/.claude/settings.json`. Creates the file (and directory) if missing. Writes back pretty-printed JSON with a trailing newline.
 
-For each of `UserPromptSubmit`, `PreToolUse`, `Stop`, `Notification`, `SessionStart` and `SessionEnd`, `ks` installs a matcher group that invokes `<ks-binary> _hook`. The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
+For each of `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Stop`, `StopFailure`, `Notification`, `SessionStart` and `SessionEnd`, `ks` installs a matcher group that invokes `<ks-binary> _hook` with a `timeout` of 5 seconds (`PermissionRequest` runs synchronously in Claude's permission flow, and the default would be 600). The binary path is recorded with `$HOME` shortened to `~` for portability across machines.
 
-Re-running `install` is idempotent: existing `ks` matcher groups are removed before new ones are written, so stale entries from an older binary path get cleaned up. Any non-`ks` hook entries are preserved.
+Re-running `install` is idempotent: existing `ks` matcher groups are removed before new ones are written, so stale entries from an older binary path get cleaned up. Every field of a non-`ks` hook entry survives, `timeout` and `async` included. An event whose value is not an array gets no `ks` group: `install` stops with an error naming the event, and `uninstall` leaves it alone.
 
 ## `ks hooks uninstall`
 
@@ -295,7 +295,7 @@ Reverse of `install`: strip every matcher group whose command resolves to `ks _h
 
 ## `ks _hook` (hidden)
 
-Invoked by Claude Code hooks, not by humans. Reads a JSON payload from stdin, maps the `event` (and for `Notification`, the `type`) to one of `working` / `idle` / `input` / `waiting`, and writes `~/.config/ks/state/<name>.json`.
+Invoked by Claude Code hooks, not by humans. Reads a JSON payload from stdin, maps the `event` (and for `Notification` the `type`, for `PreToolUse` the tool name) to one of `working` / `idle` / `input` / `error` / `waiting`, and writes `~/.config/ks/state/<name>.json`.
 
 If `KS_SESSION_NAME` is not set, the command exits silently; it's safe to have the hook installed globally even in terminals that aren't `ks` sessions.
 

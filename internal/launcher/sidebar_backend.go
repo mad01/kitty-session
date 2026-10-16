@@ -211,8 +211,10 @@ type stateInput struct {
 //
 //	state file fresh and input                      → input
 //	state file fresh and working                    → working
+//	state file fresh and error                      → error
 //	title glyph working                             → working
 //	state file input, whatever its age              → input
+//	state file error, whatever its age              → error
 //	title glyph idle (✳)                            → done if the state file says idle later than viewed_at, else idle
 //	no glyph: state file working                    → working
 //	anything else (idle, waiting, no state file)    → idle
@@ -229,14 +231,18 @@ type stateInput struct {
 // of Claude Code's spinner frames, so a mid-turn snapshot can catch it while
 // the hooks already know the turn is still running.
 //
-// An input state file is sticky. The hooks write it when Claude shows a
-// permission prompt or a question, and nothing replaces it until the next
-// event: UserPromptSubmit or PreToolUse (working), Stop (idle) or SessionEnd
-// (file removed). So a prompt left unanswered keeps its row at input however
-// old the file is. The one signal that outranks a stale input is a working
-// title glyph: the user has answered and Claude is mid-turn, which no hook
-// reports before its next tool call. A fresh input still beats that glyph,
-// since the title can lag the hooks when the prompt appears.
+// An input state file is sticky. The hooks write it when Claude is about to
+// show a permission prompt or a question, and nothing replaces it until the
+// next event they report: a prompt or tool call (working), Stop (idle),
+// StopFailure (error) or SessionEnd (file removed). So a prompt left
+// unanswered keeps its row at input however old the file is. The one signal
+// that outranks a stale input is a working title glyph: the user has
+// answered and Claude is mid-turn, which no hook reports before its next
+// tool call. A fresh input still beats that glyph, since the title can lag
+// the hooks when the prompt appears. An error state file, written by the
+// StopFailure hook when a turn dies on an API error, is sticky the same way
+// and ranks right under input: the failure needs the user as much as a
+// prompt does, and only a retry (working) or a later event clears it.
 func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
@@ -258,19 +264,25 @@ func resolveState(in stateInput) sidebar.State {
 // glyph arbitrated as the doc comment's table says.
 func claudeState(in stateInput) sidebar.State {
 	fileState := claude.ParseState(in.fileState)
-	fresh := state.IsFresh(in.fileAt)
-	if fresh && fileState == claude.StateNeedsInput {
-		return sidebar.StateInput
-	}
-	if fresh && fileState == claude.StateWorking {
-		return sidebar.StateWorking
+	if state.IsFresh(in.fileAt) {
+		switch fileState {
+		case claude.StateNeedsInput:
+			return sidebar.StateInput
+		case claude.StateWorking:
+			return sidebar.StateWorking
+		case claude.StateError:
+			return sidebar.StateError
+		}
 	}
 	titleState, _, hasGlyph := claude.ParseTitle(in.title)
 	if hasGlyph && titleState == claude.StateWorking {
 		return sidebar.StateWorking
 	}
-	if fileState == claude.StateNeedsInput {
+	switch fileState {
+	case claude.StateNeedsInput:
 		return sidebar.StateInput
+	case claude.StateError:
+		return sidebar.StateError
 	}
 	if hasGlyph { // the idle glyph ✳
 		if fileState == claude.StateIdle && in.fileAt.After(in.viewedAt) {

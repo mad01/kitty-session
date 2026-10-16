@@ -12,7 +12,8 @@ type State int
 const (
 	// StateInput means Claude is waiting on the user: a permission prompt or a question.
 	StateInput State = iota
-	// StateError means the agent reported a failure and stopped.
+	// StateError means the agent reported a failure and stopped: a Program
+	// Status error record, or the state file the StopFailure hook writes.
 	StateError
 	// StateDone means Claude finished and the user has not looked at the result yet.
 	StateDone

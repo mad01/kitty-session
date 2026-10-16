@@ -79,43 +79,61 @@ func piHookCases() []piHookCase {
 			wantState: "waiting",
 		},
 		{
-			name:       "pi session_start records id and file and reactivates",
-			session:    "ks-pihook-test-session-record",
-			payload:    `{"event":"session_start","reason":"resume","session_id":"abc-123","session_file":"/home/u/.pi/agent/sessions/--tmp--/x_abc-123.jsonl"}`,
-			wantState:  "waiting",
-			seed:       &session.Session{Agent: session.AgentPi, Status: session.StatusStopped, PiSessionID: "old"},
+			name:      "pi session_start records id and file and reactivates",
+			session:   "ks-pihook-test-session-record",
+			payload:   `{"event":"session_start","reason":"resume","session_id":"abc-123","session_file":"/home/u/.pi/agent/sessions/--tmp--/x_abc-123.jsonl"}`,
+			wantState: "waiting",
+			seed: &session.Session{
+				Agent:       session.AgentPi,
+				Status:      session.StatusStopped,
+				PiSessionID: "old",
+			},
 			wantStatus: session.StatusActive,
 			wantPiID:   "abc-123",
 			wantPiPath: "/home/u/.pi/agent/sessions/--tmp--/x_abc-123.jsonl",
 		},
 		{
-			name:       "pi session_start with empty session id leaves the record alone",
-			session:    "ks-pihook-test-session-empty",
-			payload:    `{"event":"session_start","reason":"startup","session_id":"","session_file":""}`,
-			wantState:  "waiting",
-			seed:       &session.Session{Agent: session.AgentPi, Status: session.StatusStopped, PiSessionID: "keep", PiSessionPath: "/keep"},
+			name:      "pi session_start with empty session id leaves the record alone",
+			session:   "ks-pihook-test-session-empty",
+			payload:   `{"event":"session_start","reason":"startup","session_id":"","session_file":""}`,
+			wantState: "waiting",
+			seed: &session.Session{
+				Agent:         session.AgentPi,
+				Status:        session.StatusStopped,
+				PiSessionID:   "keep",
+				PiSessionPath: "/keep",
+			},
 			wantStatus: session.StatusStopped,
 			wantPiID:   "keep",
 			wantPiPath: "/keep",
 		},
 		{
-			name:       "pi KS_SESSION_ID finds a renamed record and keys state by its new name",
-			session:    "ks-pihook-test-old-name",
-			id:         "pi-id-renamed",
-			payload:    `{"event":"session_start","reason":"startup","session_id":"new-1","session_file":"/n.jsonl"}`,
-			wantState:  "waiting",
-			seed:       &session.Session{ID: "pi-id-renamed", Agent: session.AgentPi, Status: session.StatusStopped},
+			name:      "pi KS_SESSION_ID finds a renamed record and keys state by its new name",
+			session:   "ks-pihook-test-old-name",
+			id:        "pi-id-renamed",
+			payload:   `{"event":"session_start","reason":"startup","session_id":"new-1","session_file":"/n.jsonl"}`,
+			wantState: "waiting",
+			seed: &session.Session{
+				ID:     "pi-id-renamed",
+				Agent:  session.AgentPi,
+				Status: session.StatusStopped,
+			},
 			record:     "ks-pihook-test-new-name",
 			wantStatus: session.StatusActive,
 			wantPiID:   "new-1",
 			wantPiPath: "/n.jsonl",
 		},
 		{
-			name:       "pi session_shutdown quit drops the state file and keeps the record active",
-			session:    "ks-pihook-test-quit",
-			payload:    `{"event":"session_shutdown","reason":"quit","session_id":"p1","session_file":"/s.jsonl"}`,
-			seedState:  "idle",
-			seed:       &session.Session{Agent: session.AgentPi, Status: session.StatusActive, PiSessionID: "p1", PiSessionPath: "/s.jsonl"},
+			name:      "pi session_shutdown quit drops the state file and keeps the record active",
+			session:   "ks-pihook-test-quit",
+			payload:   `{"event":"session_shutdown","reason":"quit","session_id":"p1","session_file":"/s.jsonl"}`,
+			seedState: "idle",
+			seed: &session.Session{
+				Agent:         session.AgentPi,
+				Status:        session.StatusActive,
+				PiSessionID:   "p1",
+				PiSessionPath: "/s.jsonl",
+			},
 			wantStatus: session.StatusActive,
 			wantPiID:   "p1",
 			wantPiPath: "/s.jsonl",
@@ -194,7 +212,7 @@ func runPiHookCase(t *testing.T, store *session.Store, tc piHookCase) {
 			t.Fatalf("state file for %q still present (err %v), want removed", record, err)
 		}
 	} else {
-		checkState(t, record, tc.wantState, before, stateFileCount(t))
+		checkState(t, record, state.Entry{State: tc.wantState}, before, stateFileCount(t))
 	}
 	if tc.seed != nil {
 		checkPiRecord(t, store, record, tc)
@@ -220,6 +238,10 @@ func checkPiRecord(t *testing.T, store *session.Store, name string, tc piHookCas
 		t.Errorf("PiSessionPath = %q, want %q", got.PiSessionPath, tc.wantPiPath)
 	}
 	if got.Kind() != session.AgentPi {
-		t.Errorf("Kind() = %q, want %q: the hook must not touch the agent kind", got.Kind(), session.AgentPi)
+		t.Errorf(
+			"Kind() = %q, want %q: the hook must not touch the agent kind",
+			got.Kind(),
+			session.AgentPi,
+		)
 	}
 }

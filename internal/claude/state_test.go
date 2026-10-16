@@ -91,7 +91,8 @@ func TestDetectState(t *testing.T) {
 }
 
 func TestParseState(t *testing.T) {
-	for _, st := range []State{StateWorking, StateIdle, StateNeedsInput, StateWaiting} {
+	states := []State{StateWorking, StateIdle, StateNeedsInput, StateWaiting, StateError}
+	for _, st := range states {
 		if got := ParseState(st.String()); got != st {
 			t.Errorf("ParseState(%q) = %v, want %v", st.String(), got, st)
 		}
