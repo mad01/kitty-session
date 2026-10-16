@@ -76,6 +76,15 @@ func runPiHook(cmd *cobra.Command, args []string) error {
 		// goes. reload, new, resume and fork are followed by a session_start
 		// that writes it again.
 		state.Clean(name)
+		if sess != nil && payload.Reason == "quit" {
+			// The process is ending, by /quit or by the SIGHUP of ks quit
+			// alike: the sidebar is poked to look for the window now, and
+			// settles the record from the agent's run (reapRecord). At ks
+			// quit the sidebar is already gone and the poke fails harmlessly.
+			if err := hookPoke(sess); err != nil {
+				piHookWarn(stderr, err)
+			}
+		}
 		return nil
 	}
 	if err := state.Write(name, s); err != nil {
