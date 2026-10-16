@@ -16,32 +16,32 @@ A session tab: the `ks` sidebar on the left, Claude Code on the right, recorded 
 
 The sidebar on fake agents, recorded from `ks _sidebar-demo` with [vhs](https://github.com/charmbracelet/vhs): the agent list, the menu, a new agent from the repo picker, and the keys popup. `make demo` re-renders the recording and the stills below from `demo/sidebar.tape`.
 
-![Sidebar demo](images/sidebar.gif)
+<img src="images/sidebar.gif" alt="Sidebar demo" width="220">
 
 ### Agent list
 
 One row per session: a dot for the state (`input`, `done`, `working`, `idle`, `error`, `stopped`), then the name. A `pi` or `sh` badge follows the name when the agent is not claude. Under it sits Claude's tab title, or the session directory. The marked row is the tab the sidebar sits in. An `input` row says how long it has waited.
 
-![Agent list](images/sidebar.png)
+<img src="images/sidebar.png" alt="Agent list" width="220">
 
 ### Menu
 
 `m` lists every action: new agent, rename, close, delete, restore, shell split, hooks status, keys, quit.
 
-![Menu](images/sidebar-menu.png)
+<img src="images/sidebar-menu.png" alt="Menu" width="220">
 
 ### New agent
 
 `n` opens the repo picker. Type to fuzzy-filter, `enter` picks, then choose the kind: claude, pi or shell.
 
-![Repo picker](images/sidebar-picker.png)
-![Kind](images/sidebar-kind.png)
+<img src="images/sidebar-picker.png" alt="Repo picker" width="220">
+<img src="images/sidebar-kind.png" alt="Kind" width="220">
 
 ### Keys
 
 `?` shows them.
 
-![Keys](images/sidebar-keys.png)
+<img src="images/sidebar-keys.png" alt="Keys" width="220">
 
 ## Install
 
