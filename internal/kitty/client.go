@@ -543,6 +543,15 @@ func (c *Client) SignalChild(windowID int, signal string) error {
 	return err
 }
 
+// SignalTagged sends a signal to the process in the window with id only
+// while that window carries the session tag: ids restart with every
+// instance, so a stored id alone could name another session's window, and
+// the signal would land on its process.
+func (c *Client) SignalTagged(windowID int, sessionID, signal string) error {
+	_, err := c.at("signal-child", matchTagged(windowID, sessionID), signal)
+	return err
+}
+
 // GetTextAll reads the scrollback and the screen of the window as one text,
 // whose last Window.Lines lines are the live screen even when the window is
 // scrolled back. kitty's default extent is the viewport as shown, which for
@@ -560,6 +569,11 @@ func (c *Client) GetTextAll(windowID int) (string, error) {
 // by its id, for tab-scoped commands.
 func matchID(id int) string {
 	return "--match=id:" + strconv.Itoa(id)
+}
+
+// matchTagged selects the window with id while it carries the session tag.
+func matchTagged(id int, sessionID string) string {
+	return "--match=id:" + strconv.Itoa(id) + " and var:" + SessionVar + "=" + sessionID
 }
 
 // matchWindowID selects the tab that holds the given window, for tab-scoped

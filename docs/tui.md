@@ -107,7 +107,7 @@ Claude Code has a channel of its own: it posts a desktop notification in kitty w
 | `m` | Open the menu |
 | `?` | Show the keys popup; `esc`, `?` or `q` closes it |
 
-`ctrl+c` does nothing: the sidebar never exits on its own. Its tab closes once its claude is gone, see [When claude exits](#when-claude-exits). To end ks use the menu's `quit ks` or `ks quit`.
+`ctrl+c` does nothing: the sidebar never exits on its own. Its tab closes once its agent is gone, see [When the agent exits](#when-the-agent-exits). To end ks use the menu's `quit ks` or `ks quit`.
 
 ### Between the sidebar and claude
 
@@ -133,11 +133,11 @@ The cursor row turns into an input pre-filled with the current name. `enter` sav
 
 Both pop a confirmation with the agent's name. `y` or `enter` confirms, `n` or `esc` cancels. Close removes the tab and marks the record `stopped`; `enter` on the row later brings it back. Delete also moves the record to `~/.config/ks/sessions/trash/`.
 
-## When claude exits
+## When the agent exits
 
-A session tab closes on its own once its claude window is gone, whether claude ended with `/exit`, crashed, or was killed. The tab's sidebar checks its claude window on every refresh. Once it has seen the window and then finds it missing, it closes its own tab the way `c` does. The home tab is recreated first when it was the last session tab. A claude that never shows up within 30 seconds of the sidebar's first refresh (bad flags, a missing binary) closes the tab as well. Another window of the session still in the tab, a shell split for one, holds the tab open until it exits too.
+A session tab closes on its own once its agent window is gone: claude ended with `/exit`, pi with `/quit`, a shell with `exit`, or the agent crashed or was killed. The tab's sidebar checks its agent window on every refresh, and claude's `/exit` and pi's `/quit` tell it to check at once, so those tabs go within a moment. A crash or a kill waits for the next refresh, up to three seconds. Once it has seen the window and then finds it missing, it closes its own tab. The home tab is recreated first when it was the last session tab. An agent that never shows up within 30 seconds of the sidebar's first refresh (bad flags, a missing binary) closes the tab as well. Another window of the session still in the tab, a shell split for one, holds the tab open until it exits too.
 
-The record is not touched. `/exit` is marked `stopped` by the SessionEnd hook, and the row sits at the bottom until `enter` reopens it. A crash leaves the record `active`, so the next `ks` brings the session back. The home tab's sidebar never closes anything.
+What becomes of the record depends on the kind and on how long the agent ran. A claude or pi agent takes its record along, to `~/.config/ks/sessions/trash/`, the way `d` does. That happens when you told claude to exit (`/exit`, which its hook records), or when the agent had been in the tab for ten seconds before it went: pi's `/quit`, a crash, a kill. The row disappears, the next `ks` leaves it alone, and `u` brings it back when you want the conversation again. The restored row is stopped, and `enter` reopens it; a claude that died mid-task is one `u` away. A shell keeps its record, so the next `ks` opens a fresh shell in that directory; `d` on its row deletes it. An agent gone within ten seconds of coming up, or one that never came up, keeps its record whatever the kind. So a launch that fails on attach (an expired login, a purged transcript, a broken install) is not thrown away (see [Troubleshooting](troubleshooting.md#claude-exits-right-after-ks-or-ks-open)). The home tab's sidebar never closes anything.
 
 ## Trash and restore (`u`)
 

@@ -106,6 +106,11 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 			[]string{"signal-child", "--match=id:2", "SIGUSR1"},
 		},
 		{
+			"SignalTagged requires the session tag",
+			func(c *Client) error { return c.SignalTagged(2, "abc", "SIGUSR2") },
+			[]string{"signal-child", "--match=id:2 and var:KS_SESSION_ID=abc", "SIGUSR2"},
+		},
+		{
 			"UnsetUserVars passes bare names",
 			func(c *Client) error { return c.UnsetUserVars(7, MovingVar) },
 			[]string{"set-user-vars", "--match=id:7", "KS_MOVING"},
