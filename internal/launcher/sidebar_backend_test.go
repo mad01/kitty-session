@@ -414,7 +414,7 @@ func TestResolveState(t *testing.T) {
 			"record: done on the active tab is idle",
 			stateInput{
 				active: true, hasWindow: true, title: "✳ Claude Code",
-				report: done, tabActive: true,
+				report: done, visible: true,
 			},
 			sidebar.StateIdle,
 		},
@@ -778,6 +778,261 @@ func TestListStampsViewedAtAndDropsDoneToIdle(t *testing.T) {
 	}
 	if !sess.ViewedAt.IsZero() {
 		t.Error("other session stamped by own's sidebar")
+	}
+}
+
+func TestUnread(t *testing.T) {
+	viewed := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	after, before := viewed.Add(time.Second), viewed.Add(-time.Second)
+	tests := []struct {
+		name string
+		in   stateInput
+		st   sidebar.State
+		want bool
+	}{
+		{
+			"file newer than the view on a background tab",
+			stateInput{fileAt: after, viewedAt: viewed},
+			sidebar.StateWorking, true,
+		},
+		{"never viewed", stateInput{fileAt: viewed}, sidebar.StateIdle, true},
+		{
+			"while the tab is visible",
+			stateInput{fileAt: after, viewedAt: viewed, visible: true},
+			sidebar.StateWorking,
+			false,
+		},
+		{
+			"a waiting file is a launch, not activity",
+			stateInput{fileState: "waiting", fileAt: after, viewedAt: viewed},
+			sidebar.StateIdle,
+			false,
+		},
+		{
+			"file older than the view",
+			stateInput{fileAt: before, viewedAt: viewed},
+			sidebar.StateIdle, false,
+		},
+		{"no state file", stateInput{viewedAt: viewed}, sidebar.StateIdle, false},
+		{"no state file and never viewed", stateInput{}, sidebar.StateIdle, false},
+		{
+			"stopped", stateInput{fileAt: after, viewedAt: viewed}, sidebar.StateStopped, false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unread(tc.in, tc.st); got != tc.want {
+				t.Errorf("unread = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// ownFixture is a backend sitting in its own session's tab, the tab in the
+// background to start with, over a working state file written on the
+// backend's clock. The clock starts at wall-clock time because state
+// freshness is measured against it, and the file's age is zero so no run,
+// however slow, can turn it stale and hand the row to the ✳ title.
+type ownFixture struct {
+	t      *testing.T
+	b      *SidebarBackend
+	f      *fakeKitty
+	clock  *time.Time
+	own    *session.Session
+	states fakeStates
+}
+
+func newOwnFixture(t *testing.T) *ownFixture {
+	t.Helper()
+	b, f, clock := newTestBackend(t)
+	*clock = time.Now()
+	states := fakeStates{"own": {"working", *clock}}
+	b.readState = states.read
+	own := session.New("own", "/work/own", 0, 0)
+	b.ownID = own.ID
+	f.addTab(own, true)
+	if err := b.l.store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	return &ownFixture{t: t, b: b, f: f, clock: clock, own: own, states: states}
+}
+
+// show puts the own tab in front of the OS window or behind another tab,
+// and sets whether the OS window has keyboard focus.
+func (x *ownFixture) show(tabActive, osFocused bool) {
+	for i := range x.f.windows {
+		if x.f.windows[i].TabID == x.own.KittyTabID {
+			x.f.windows[i].TabActive = tabActive
+		}
+	}
+	x.f.osUnfocused = !osFocused
+}
+
+// advance moves the backend's clock.
+func (x *ownFixture) advance(d time.Duration) { *x.clock = x.clock.Add(d) }
+
+// setFile writes the own session's state file.
+func (x *ownFixture) setFile(st string, at time.Time) {
+	x.states["own"] = struct {
+		state string
+		at    time.Time
+	}{st, at}
+}
+
+// poll runs one List and returns the own row.
+func (x *ownFixture) poll() sidebar.Agent {
+	x.t.Helper()
+	agents, err := x.b.List()
+	if err != nil {
+		x.t.Fatalf("List: %v", err)
+	}
+	for _, a := range agents {
+		if a.Name == "own" {
+			return a
+		}
+	}
+	x.t.Fatal("own missing from List")
+	return sidebar.Agent{}
+}
+
+// wantRow polls and checks the own row's unread mark and state.
+func (x *ownFixture) wantRow(unread bool, st sidebar.State) {
+	x.t.Helper()
+	if a := x.poll(); a.Unread != unread || a.State != st {
+		x.t.Errorf("own row: unread %v state %s, want %v and %s", a.Unread, a.State, unread, st)
+	}
+}
+
+// wantViewedAt checks the own record's stamp; why names the rule under test.
+func (x *ownFixture) wantViewedAt(want time.Time, why string) {
+	x.t.Helper()
+	sess, err := x.b.l.store.Load("own")
+	if err != nil {
+		x.t.Fatal(err)
+	}
+	if !sess.ViewedAt.Equal(want) {
+		x.t.Errorf("ViewedAt = %v, want %v: %s", sess.ViewedAt, want, why)
+	}
+}
+
+// TestListStampsViewedAtOnVisibility covers when the own record is stamped
+// as viewed. Visible means the tab is in front of a focused OS window.
+func TestListStampsViewedAtOnVisibility(t *testing.T) {
+	t.Run("in the background the row is unread and nothing is stamped", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.wantRow(true, sidebar.StateWorking)
+		x.wantViewedAt(time.Time{}, "stamped while the tab was in the background")
+	})
+	t.Run("newly visible is stamped on that poll", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.poll()
+		x.show(true, true)
+		x.wantRow(false, sidebar.StateWorking)
+		x.wantViewedAt(*x.clock, "not stamped when the tab came to the front")
+	})
+	t.Run("staying visible is stamped once per debounce", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.show(true, true)
+		x.poll()
+		first := *x.clock
+		x.advance(time.Second)
+		x.poll()
+		x.wantViewedAt(first, "re-stamped inside the debounce")
+		x.advance(viewedDebounce)
+		x.poll()
+		x.wantViewedAt(*x.clock, "not re-stamped past the debounce")
+	})
+	t.Run("leaving is stamped once more", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.show(true, true)
+		x.poll()
+		x.advance(time.Second)
+		x.show(false, true)
+		x.poll()
+		x.wantViewedAt(*x.clock, "not stamped when the tab left the front")
+		left := *x.clock
+		x.advance(time.Second)
+		x.poll()
+		x.wantViewedAt(left, "stamped again while still in the background")
+	})
+	t.Run("a tab in front of an unfocused OS window is not visible", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.show(true, false)
+		x.wantRow(true, sidebar.StateWorking)
+		x.wantViewedAt(time.Time{}, "stamped while the OS window was unfocused")
+	})
+	t.Run("a done record stays done until the OS window is focused", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.f.find(x.own.KittyWindowID).Status = kitty.ProgramDone
+		x.setFile("idle", x.clock.Add(-time.Minute)) // stale, so the record speaks
+		x.show(true, false)
+		x.wantRow(true, sidebar.StateDone)
+		x.show(true, true)
+		x.wantRow(false, sidebar.StateIdle)
+		x.wantViewedAt(*x.clock, "not stamped once the OS window was focused")
+	})
+	t.Run("visible again inside the debounce is stamped at once", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.show(true, true)
+		x.poll()
+		x.show(false, true)
+		x.advance(time.Second)
+		x.poll() // the leaving stamp
+		x.advance(time.Second)
+		x.setFile("idle", *x.clock) // the turn ends in the background
+		x.wantRow(true, sidebar.StateDone)
+		x.show(true, true)
+		x.advance(time.Second)
+		x.wantRow(false, sidebar.StateIdle)
+		x.wantViewedAt(*x.clock, "not stamped on return inside the debounce")
+	})
+}
+
+func TestLiveVisible(t *testing.T) {
+	win := func(tabActive, osFocused bool) *kitty.Window {
+		return &kitty.Window{TabActive: tabActive, OSFocused: osFocused}
+	}
+	tests := []struct {
+		name string
+		lv   live
+		want bool
+	}{
+		{"tab in front of a focused OS window", live{claude: win(true, true)}, true},
+		{"sidebar alone counts", live{sidebar: win(true, true)}, true},
+		{"tab in front, OS window unfocused", live{claude: win(true, false)}, false},
+		{"OS window focused, tab behind", live{claude: win(false, true)}, false},
+		{"neither", live{claude: win(false, false)}, false},
+		{"no windows", live{}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.lv.visible(); got != tc.want {
+				t.Errorf("visible = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFocusStampsViewedAt checks that focusing a session from any sidebar
+// marks it seen at once, so its unread mark and done state clear on every
+// sidebar's next poll instead of waiting for the session's own sidebar.
+func TestFocusStampsViewedAt(t *testing.T) {
+	b, f, clock := newTestBackend(t)
+	other := session.New("other", "/work/other", 0, 0)
+	f.addTab(other, true)
+	if err := b.l.store.Save(other); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Focus("other"); err != nil {
+		t.Fatalf("Focus: %v", err)
+	}
+	sess, err := b.l.store.Load("other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sess.ViewedAt.Equal(*clock) || !sess.FocusedAt.Equal(*clock) {
+		t.Errorf("after Focus: ViewedAt %v FocusedAt %v, want both %v",
+			sess.ViewedAt, sess.FocusedAt, *clock)
 	}
 }
 

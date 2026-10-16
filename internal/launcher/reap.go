@@ -85,6 +85,11 @@ func (b *SidebarBackend) reapIfGone(all []kitty.Window, lv live) {
 	if b.ownID == "" || !b.reap.due(b.l.now(), all, lv, b.ownID) {
 		return
 	}
+	// The sidebar window posted the session's notification and goes with
+	// the tab, so the notification is taken down while it still can be.
+	if b.withdraw != nil {
+		b.withdraw()
+	}
 	b.l.reapTab(all, lv)
 }
 

@@ -70,7 +70,8 @@ func runImportToCmux(cmd *cobra.Command) error {
 	}
 	if !insideCmux() {
 		return errors.New(
-			"cmux only takes commands from its own terminals; run ks import --to cmux inside cmux")
+			"cmux only takes commands from its own terminals; run ks import --to cmux inside cmux",
+		)
 	}
 	opener, err := newWorkspaceOpener()
 	if err != nil {
@@ -100,9 +101,11 @@ func planCmux(agents []herdr.Agent) ([]cmuxItem, error) {
 		sess.ClaudeTranscriptPath = transcript
 		items = append(items, cmuxItem{
 			ws: cmux.Workspace{
-				Name:    name,
-				Dir:     a.Dir,
-				Command: launcher.AgentCmd(sess, launcher.ResumeStored),
+				Name: name,
+				Dir:  a.Dir,
+				// No ks sidebar watches a cmux workspace, so claude keeps
+				// its own notification: zero options.
+				Command: launcher.AgentCmd(sess, launcher.ResumeStored, launcher.AgentOptions{}),
 			},
 			sessionID:    a.SessionID,
 			transcriptOK: statErr == nil,

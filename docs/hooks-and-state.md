@@ -2,6 +2,8 @@
 
 `ks` shows a live state badge next to every session: `working`, `idle`, `input`, `done`, `error`, `waiting`, or `stopped`. This doc explains where each value comes from.
 
+The desktop notification a session's sidebar posts when its row turns `input` (or `done`, with `notify: [input, done]` in the config) is read off the same resolved state as the badge. Whatever source produced the `input` (a hook, a program status record, the screen check) produces the banner too; see [Sidebar guide](tui.md#notifications).
+
 The first source is the same for every agent kind: the program's own report through the Program Status Protocol, an Operating System Command (OSC) sequence numbered 7501, when kitty passes it (section 1). Where the rest comes from depends on the session's agent kind (the `agent` field of the record; see [Command reference](commands.md#ks-new)):
 
 - **claude**: the three further sources below, in preference order. This is the bulk of this doc.
@@ -61,7 +63,7 @@ A window can hold several records (the spec nests them by `id`). `internal/kitty
 |---|---|---|
 | `blocked` | `input` | The program cannot continue until you act: a permission prompt, a question, or an auth step |
 | `working` | `working` | |
-| `done` | `done` | The turn finished and the window has not been looked at since. On the active tab it reads `idle` |
+| `done` | `done` | The turn finished and the window has not been looked at since. On a seen tab (on screen in the active kitty window) it reads `idle` |
 | `error` | `error` | The program reported a failure and stopped |
 | `idle` | `idle` | |
 
@@ -71,7 +73,7 @@ The sidebar and `ks list` share this in `launcher.ReportedState`, applied right 
 
 kitty drops records on its own; ks never writes or clears one.
 
-- `done` and `error` go on the next focus-in or keypress in the window, not on focus-out. ks reads `done` as `idle` while its tab is active, so a result you looked at without typing shows as `done` again once you switch away, until the next visit. `viewed_at` plays no part.
+- `done` and `error` go on the next focus-in or keypress in the window, not on focus-out. ks reads `done` as `idle` while its tab is seen (on screen in the active kitty window), so a result you looked at without typing shows as `done` again once you switch away, until the next visit. `viewed_at` plays no part.
 - `working`, `blocked` and `idle` go at a new shell prompt and on a full terminal reset. The prompt is the OSC 133 mark, so only a window running a shell with integration prints one; a claude or pi window has no prompt and keeps its last record until the program replaces it.
 - A window's records vanish with the window. A crashed agent leaves nothing behind, and the row shows `stopped` through the window check anyway.
 
@@ -206,7 +208,7 @@ Both callers read the window with `kitty @ get-text --extent all`. The default e
 
 The session's own sidebar, and only it, re-reads its own claude window after the rules above, in two cases. Neither runs while the window carries a program status record (section 1).
 
-1. The clear, on every 3 s poll. The row is `input` and the state file is older than 10 s. A dialog still on screen keeps `input`, whatever else the screen shows. Otherwise a running turn rewrites the file to `working`, and the prompt box at rest rewrites it to `idle`. The row then reads `idle`, or `done` on an inactive tab, since the file's `idle` is newer than `viewed_at`. A window that cannot be read leaves the file alone.
+1. The clear, on every 3 s poll. The row is `input` and the state file is older than 10 s. A dialog still on screen keeps `input`, whatever else the screen shows. Otherwise a running turn rewrites the file to `working`, and the prompt box at rest rewrites it to `idle`. The row then reads `idle`, or `done` while the tab is not on screen or the kitty window is not the active one, since the file's `idle` is newer than `viewed_at`. A window that cannot be read leaves the file alone.
 2. The raise, reading at most once every 10 s. The row has no state file at all, or a stale `waiting`: a dialog at startup. The hooks miss it because the folder-trust dialog comes before any hook runs, and a login prompt reports nothing. While the hooks are not installed, any dialog at any time qualifies; that mode is what makes ks usable without `ks hooks install` at all. A visible dialog writes `input`.
 
 Before it writes, the sidebar re-reads the state file and skips the correction when a hook wrote in the meantime. Because the session's own sidebar writes the shared state file, every other sidebar and `ks list` follow without reading the screen themselves. `error` is never touched by the screen check.
@@ -233,10 +235,11 @@ cat ~/.config/ks/state/<name>.json
 kitty @ --to unix:$HOME/.config/ks/kitty.sock ls   # program_status under each window
 ```
 
-`ks list` prints the current state alongside the name, the agent kind and the directory. Both go through `launcher.ReportedState`, so with a record and no fresh state file they agree. Without one the sidebar's dot is computed separately, so the two can differ. It adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it or its own screen check clears it. A stale `error` is the exception: both keep it until Claude is seen working, in the pane text or the title, so a failed turn reads the same in both. For a pi session both then read the state file alone; for a shell both say `idle`.
+`ks list` prints the current state alongside the name, the agent kind and the directory. Both go through `launcher.ReportedState`, so with a record and no fresh state file they agree. Without one the sidebar's dot is computed separately, so the two can differ. It adds `done`, reads the title glyph instead of the pane text, and keeps `input` until a later hook replaces it or its own screen check clears it. It also draws a row's name in the accent colour while the row is unread: any state file but `waiting` newer than the record's `viewed_at` while the tab is not seen (on screen in the active kitty window). `done` is the unread case where the turn also finished (see [Sidebar guide](tui.md#unread-rows)). A stale `error` is the exception: both keep it until Claude is seen working, in the pane text or the title, so a failed turn reads the same in both. For a pi session both then read the state file alone; for a shell both say `idle`.
 
 ## Cleaning state
 
 - `ks close <name>` (with or without `--keep`) and the sidebar's close and delete actions all go through one helper, `launcher.Close`. It removes the state file, closes the session's live tabs, and then either marks the record `stopped` or moves it to the trash.
 - The `SessionEnd` hook removes the state file when it marks a record `stopped`.
+- Every relaunch (a new session, or a resume of a session whose window is gone) removes the old state file before the launch; the `SessionStart` hook writes a fresh one. So an attach never shows a stale `input` from before, and the sidebar never posts a banner for it.
 - Stale state for sessions that no longer exist is harmless. `ks list` and the sidebar only look up state for sessions that are present in the session store. A record whose `status` is `stopped` shows `stopped` without consulting kitty or the state file.

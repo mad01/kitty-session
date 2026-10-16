@@ -75,10 +75,27 @@ func (lv live) tabID() int {
 	return lv.tabs[0]
 }
 
-// tabActive reports whether the session's tab is the one its OS window shows.
+// tabActive reports whether the session's tab is the one its OS window
+// shows, focused or not: what Move needs, since kitty reorders tabs through
+// the showing one. Everything that asks whether the user is looking uses
+// visible instead.
 func (lv live) tabActive() bool {
 	for _, w := range []*kitty.Window{lv.sidebar, lv.claude} {
 		if w != nil && w.TabActive {
+			return true
+		}
+	}
+	return false
+}
+
+// visible reports whether the user is looking at the session's tab: it is
+// the tab its OS window shows, and that OS window has keyboard focus. The
+// viewed stamp, the unread mark and the done-reads-idle rule key on this
+// and not on the tab alone: a tab in front of an OS window the user has
+// left for another app is not being watched.
+func (lv live) visible() bool {
+	for _, w := range []*kitty.Window{lv.sidebar, lv.claude} {
+		if w != nil && w.TabActive && w.OSFocused {
 			return true
 		}
 	}

@@ -34,7 +34,7 @@ func NewDemoBackend() *DemoBackend {
 			{
 				Name: "dropbrain-app", Dir: filepath.Join(src, "dropbrain-app"),
 				Title: "Migrane iOS 27.1 migration ✳ follow-ups",
-				State: StateDone, Tab: 2,
+				State: StateDone, Tab: 2, Unread: true,
 			},
 			{
 				Name: "code-search-local", Dir: filepath.Join(src, "code-search-local"),
@@ -99,7 +99,8 @@ func (d *DemoBackend) List() ([]Agent, error) {
 	return out, nil
 }
 
-// Focus marks a done agent as seen, so it drops to idle like the real thing.
+// Focus marks an agent as seen like the real thing: a done one drops to
+// idle, and its unread mark clears.
 func (d *DemoBackend) Focus(name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -110,6 +111,7 @@ func (d *DemoBackend) Focus(name string) error {
 	if d.agents[i].State == StateDone {
 		d.agents[i].State = StateIdle
 	}
+	d.agents[i].Unread = false
 	return nil
 }
 

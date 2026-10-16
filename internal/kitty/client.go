@@ -253,6 +253,10 @@ type Window struct {
 	// TabActive is true when the window's tab is the one its OS window
 	// shows, whether or not that OS window has keyboard focus.
 	TabActive bool
+	// OSFocused is true when the window's OS window has keyboard focus: the
+	// user is in kitty, not in another app. With TabActive it says the
+	// window is on the screen the user is looking at.
+	OSFocused bool
 	// Title is the window title. Claude sets it through OSC while it runs,
 	// which is why ks never passes --title to the claude window.
 	Title   string
@@ -283,7 +287,8 @@ type Window struct {
 // ls JSON shapes, limited to the fields ks reads.
 type (
 	lsOSWindow struct {
-		Tabs []lsTab `json:"tabs"`
+		IsFocused bool    `json:"is_focused"`
+		Tabs      []lsTab `json:"tabs"`
 	}
 	lsTab struct {
 		ID       int        `json:"id"`
@@ -327,6 +332,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					TabID:     t.ID,
 					TabTitle:  t.Title,
 					TabActive: t.IsActive,
+					OSFocused: osw.IsFocused,
 					Title:     w.Title,
 					Columns:   w.Columns,
 					Lines:     w.Lines,

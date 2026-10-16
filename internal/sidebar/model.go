@@ -76,15 +76,21 @@ const (
 )
 
 type model struct {
-	opts    Options
-	backend Backend
-	home    string
-	now     func() time.Time
+	opts     Options
+	backend  Backend
+	notifier Notifier
+	home     string
+	now      func() time.Time
 
-	agents  []Agent // in tab order
-	listGen int     // generation of the latest List issued
-	cursor  int     // index into visible()
-	width   int     // terminal size from the last WindowSizeMsg; zero before it
+	agents []Agent // in tab order
+	// lastOwn is the Own row's state after the previous refresh, and ownSeen
+	// whether that refresh had an Own row at all; together they turn each
+	// refresh into a transition the notifier can act on.
+	lastOwn State
+	ownSeen bool
+	listGen int // generation of the latest List issued
+	cursor  int // index into visible()
+	width   int // terminal size from the last WindowSizeMsg; zero before it
 	height  int
 	pinned  int // width of the last successful PinWidth; zero before one
 	mode    mode
@@ -121,14 +127,19 @@ type model struct {
 }
 
 func newModel(opts Options, home string) model {
+	var notifier Notifier = noopNotifier{}
+	if opts.Notifier != nil {
+		notifier = opts.Notifier
+	}
 	return model{
-		opts:    opts,
-		backend: opts.Backend,
-		home:    home,
-		now:     time.Now,
-		filter:  newInput(""),
-		input:   newInput(""),
-		picker:  newPicker(),
+		opts:     opts,
+		backend:  opts.Backend,
+		notifier: notifier,
+		home:     home,
+		now:      time.Now,
+		filter:   newInput(""),
+		input:    newInput(""),
+		picker:   newPicker(),
 	}
 }
 
@@ -202,14 +213,15 @@ func (m model) pinCmd(cols int) tea.Cmd {
 // applyAgents replaces the list with a freshly sorted copy. The cursor goes
 // to the agent a pending follow names, else stays on the agent the user
 // navigated to, else snaps to the Own row. Results from a List older than
-// the latest issued one are dropped.
-func (m model) applyAgents(msg agentsMsg) model {
+// the latest issued one are dropped. The command, when there is one, raises
+// or takes down the own session's desktop notification (ownNotifyCmd).
+func (m model) applyAgents(msg agentsMsg) (model, tea.Cmd) {
 	if msg.gen < m.listGen {
-		return m
+		return m, nil
 	}
 	if msg.err != nil {
 		m.setError(msg.err)
-		return m
+		return m, nil
 	}
 	keep := m.cursorName()
 	if m.follow != "" {
@@ -219,12 +231,13 @@ func (m model) applyAgents(msg agentsMsg) model {
 	m.agents = make([]Agent, len(msg.agents))
 	copy(m.agents, msg.agents)
 	sortAgents(m.agents)
+	notify := m.ownNotifyCmd()
 	if i := m.indexOf(keep); m.navigated && i >= 0 {
 		m.cursor = i
-		return m
+		return m, notify
 	}
 	m.snapToOwn()
-	return m
+	return m, notify
 }
 
 // snapToOwn puts the cursor on the Own row, or row 0 when no agent is Own,

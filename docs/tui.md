@@ -19,7 +19,7 @@ Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instanc
 
 The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Its border is light green while the sidebar window has the keyboard and muted gray otherwise, so the frame tells you which side of the tab has focus. Under the `agents … tab order` header each agent takes two lines:
 
-- A dot for the state, then the name. A session whose agent is not claude carries a badge after the name: `pi` for a pi session, `sh` for a plain shell. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background.
+- A dot for the state, then the name. A session whose agent is not claude carries a badge after the name: `pi` for a pi session, `sh` for a plain shell. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background. The name draws in the accent colour while the row is unread (see [Unread rows](#unread-rows)).
 - Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one. A pi or shell row shows its window's title the same way, or the directory.
 
 The footer has two labels, `new` and `menu`, and the line above it shows the result of the last action or its error until the next key. The list refreshes every three seconds and after every action; the `working` and `input` dots pulse.
@@ -52,7 +52,11 @@ Without a record, or with a fresh state file, the rules depend on the agent kind
 10. Claude's title starts with the idle glyph `✳`: `done` when the state file says `idle` with an `updated_at` newer than the record's `viewed_at`, else `idle`.
 11. No glyph: the state file's `working` as is; `idle`, `waiting`, or no file at all: `idle`.
 
-`viewed_at` is stamped by the session's own sidebar while its tab is the active one, at most every 10 s. So a turn that finishes while you are in another tab shows as `done` until you switch to it, and drops to `idle` within a few seconds of your looking. A `done` record needs none of that, with one catch: kitty drops it on the next focus-in or keypress in the window, not on focus-out. The sidebar reads it as `idle` while its tab is active, but a result you looked at without pressing a key shows as `done` again once you switch to another tab, until the next visit. Without the hooks the only state file is the one the screen check below writes. On a kitty that passes program status, `input`, `done` and `error` still come from the record. The `waiting 12m` age on an `input` row does not: it is read from the state file, so it stays at zero. On an older kitty only the title glyph is left, which gives `working` and `idle`.
+A tab counts as seen while it is on screen and the kitty window is the active one (the OS window's `is_focused` in `kitty @ ls`). `viewed_at` is stamped the moment the session's tab becomes seen, or is opened from any sidebar, and once more when it stops being seen. So what you watched until the switch counts as seen. In between, its own sidebar refreshes the stamp at most every 10 s. A turn that finishes while you are in another tab, or in another app with the tab showing, reads `done` until you come back. It drops to `idle` on the next refresh after that. A `done` record needs none of that, with one catch: kitty drops it on the next focus-in or keypress in the window, not on focus-out. The sidebar reads it as `idle` while its tab is seen, but a result you looked at without pressing a key shows as `done` again once you switch to another tab, until the next visit. Without the hooks the only state file is the one the screen check below writes. On a kitty that passes program status, `input`, `done` and `error` still come from the record. The `waiting 12m` age on an `input` row does not: it is read from the state file, so it stays at zero. On an older kitty only the title glyph is left, which gives `working` and `idle`.
+
+### Unread rows
+
+A row is unread when the session's state changed since you last saw its tab. That is, the state file's stamp is newer than the record's `viewed_at`, and the tab is not seen right now (on screen in the active kitty window). Any change counts, a running turn included, so it works like kitty's own tab activity marker. A `waiting` file does not count: a launch is not activity. `done` keeps its meaning inside it: finished and not looked at. While a row is unread its name draws in the accent colour; the state dot, the title line and the sort order are unchanged. The row is read the moment its tab is seen or is opened from any sidebar. The state file is written by the hooks, the screen check and the pi extension. When none of them writes one, nothing marks a row unread.
 
 ### The screen check
 
@@ -66,6 +70,25 @@ Before it writes, the sidebar re-reads the state file and skips the correction w
 ### Sort
 
 Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order `ks move` last left them, then the rest in the order the sessions were created, before adding anything new, so the numbering survives a restart. `ks move <name> <where>` (or `ks move <where>` from inside a session) reorders the tabs; see the [command reference](commands.md#ks-move-name-where). A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
+
+## Notifications
+
+The session's own sidebar, and only it, posts a desktop notification for its own row. It writes the notification to its own terminal through kitty's desktop notification protocol, Operating System Command (OSC) 99 (see the [kitty docs](https://sw.kovidgoyal.net/kitty/desktop-notifications/)). The sidebar sits in the session's tab, so the request carries kitty's `o=invisible` flag. kitty then shows the banner only while that tab is not seen: off screen, or on screen in a kitty window that is not the active one. A prompt in the tab you are looking at posts nothing. One that lands in the visible tab while you are in another app does, and the row stays unread until you come back. Clicking the banner focuses the sidebar window, which brings the tab to the front.
+
+Which transitions post is the `notify` list in `config.yaml` (see [Configuration](configuration.md#notify)); the default is `[input]`.
+
+- `input`: the row enters `input`. The banner reads `<name> needs input`, its body is the row's second line (Claude's title or the session directory), and it plays kitty's `question` sound. Leaving `input` withdraws it.
+- `done`: the row enters `done`. The banner reads `<name> finished`, with the same body and the `info` sound. Leaving `done` withdraws it.
+
+A sidebar that starts while its session already waits posts at once. A relaunch removes the old state file first and the `SessionStart` hook writes a fresh one, so an attach never raises a banner for a stale `input` from before. The home tab's sidebar posts nothing. There is no delay before posting: kitty's visibility gate is the suppression, and a prompt answered within one poll just has its banner withdrawn. There is no per-session opt-out and no `error` notification.
+
+A banner is withdrawn when the row leaves the state. It is also withdrawn when you close or delete the session from the sidebar, and when the session's sidebar closes its own tab after claude exits. A session closed with `ks close` from a shell, and every session on `ks quit`, keeps its banner until you dismiss it. Clicking such a banner does nothing: the window it pointed at is gone.
+
+The badge and the banner come from the same resolved state. Whatever source gave the row its `input` (a hook, a program status record, the screen check) posts the banner too; see [Hooks and state detection](hooks-and-state.md).
+
+Claude Code has a channel of its own: it posts a desktop notification in kitty when a permission prompt waits and you seem away (`preferredNotifChannel: auto`). To avoid two banners for one prompt, `ks` starts claude with `--settings '{"preferredNotifChannel":"notifications_disabled"}'` whenever `input` is in `notify`. Without `input` in the list (`[]` or `[done]`) Claude's channel is left alone, by design: it is then the only signal for a waiting prompt.
+
+`ks _sidebar-demo` turns notifications on for its demo row, so in kitty it previews the banners. Only kitty implements OSC 99 here; other terminals ignore the sequence.
 
 ## Keys
 

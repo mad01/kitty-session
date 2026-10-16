@@ -28,6 +28,7 @@ type fakeKitty struct {
 	onLaunch    func()           // runs inside LaunchTab, standing in for the SessionStart hook
 	onWindows   func() error     // runs inside Windows, to fail one snapshot among several
 	claudeExits bool             // a window launched by LaunchVSplit vanishes at once
+	osUnfocused bool             // the OS window has lost keyboard focus; every window reports it
 	slept       time.Duration
 }
 
@@ -114,7 +115,11 @@ func (f *fakeKitty) Windows() ([]kitty.Window, error) {
 			return nil, err
 		}
 	}
-	return slices.Clone(f.windows), nil
+	out := slices.Clone(f.windows)
+	for i := range out {
+		out[i].OSFocused = !f.osUnfocused // one OS window, as kitty reports is_focused
+	}
+	return out, nil
 }
 
 func (f *fakeKitty) LaunchTab(l kitty.Launch) (int, error) {
@@ -295,6 +300,7 @@ func newTestLauncher(t *testing.T) (*Launcher, *fakeKitty, *session.Store) {
 		return clock
 	}
 	l.sleep = func(d time.Duration) { f.slept += d }
+	l.cleanState = func(string) {} // the real one would pin state.Dir to this HOME
 	return l, f, store
 }
 

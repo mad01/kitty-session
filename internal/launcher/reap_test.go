@@ -240,3 +240,29 @@ func TestHomeSidebarNeverReaps(t *testing.T) {
 		t.Errorf("home sidebar touched a tab: %v", calls)
 	}
 }
+
+// TestReapWithdrawsTheNotificationFirst checks that the own session's
+// notification is taken down before its tab is closed, while the sidebar
+// window that posted it is still there to do so.
+func TestReapWithdrawsTheNotificationFirst(t *testing.T) {
+	own := session.New("own", "/work/own", 0, 0)
+	b, f, _ := newOwnBackend(t, own, true)
+	var ran []int // how many kitty calls the poll had made when withdraw ran
+	b.withdraw = func() { ran = append(ran, len(f.calls)) }
+	listCalls(t, b, f) // claude seen
+	dropClaude(f, own)
+	calls := listCalls(t, b, f)
+	closeAt := slices.IndexFunc(calls, func(c string) bool {
+		return len(c) > 9 && c[:9] == "CloseTab("
+	})
+	if closeAt < 0 {
+		t.Fatalf("tab not closed: %v", calls)
+	}
+	if len(ran) != 1 || ran[0] > closeAt {
+		t.Fatalf("withdraw ran at kitty calls %v, want once before the close at %d", ran, closeAt)
+	}
+	listCalls(t, b, f)
+	if len(ran) != 1 {
+		t.Errorf("withdraw ran again on a later poll: %v", ran)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -318,9 +319,21 @@ func TestViewHomeHint(t *testing.T) {
 
 func TestViewWaitLabelOnInputRows(t *testing.T) {
 	fb := &fakeBackend{agents: []Agent{
-		{Name: "asked", Title: "Approve the merge", State: StateInput, Waiting: 12 * time.Minute, Tab: 1},
+		{
+			Name:    "asked",
+			Title:   "Approve the merge",
+			State:   StateInput,
+			Waiting: 12 * time.Minute,
+			Tab:     1,
+		},
 		{Name: "fresh", Title: "Just asked", State: StateInput, Waiting: 30 * time.Second, Tab: 2},
-		{Name: "long", Dir: "/home/u/code/long", State: StateInput, Waiting: 90 * time.Minute, Tab: 3},
+		{
+			Name:    "long",
+			Dir:     "/home/u/code/long",
+			State:   StateInput,
+			Waiting: 90 * time.Minute,
+			Tab:     3,
+		},
 		{Name: "finished", Title: "Done", State: StateDone, Waiting: time.Hour, Tab: 4},
 	}}
 	m := newTestModel(t, fb, "demo")
@@ -366,6 +379,44 @@ func TestViewErrorRow(t *testing.T) {
 	}
 	if got := dotError.GetForeground(); got != colorError {
 		t.Errorf("error dot colour = %v, want %v", got, colorError)
+	}
+}
+
+// TestViewUnreadRowName checks that an unread row's name is drawn in the
+// accent colour and that nothing else about the row changes: the dot, the
+// text and the title line are those of a read row in the same state.
+func TestViewUnreadRowName(t *testing.T) {
+	withColour(t)
+	fb := &fakeBackend{agents: []Agent{
+		{Name: "seen", Title: "Reindexing", State: StateWorking, Tab: 1},
+		{Name: "changed", Title: "Reindexing", State: StateWorking, Tab: 2, Unread: true},
+	}}
+	m := newTestModel(t, fb, "demo")
+	got := lines(m)
+	want := map[int]string{
+		3: "│ ● seen                           │",
+		4: "│   Reindexing                     │",
+		5: "│ ● changed                        │",
+		6: "│   Reindexing                     │",
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("line %d\n got %q\nwant %q", i, got[i], w)
+		}
+	}
+	raw := strings.Split(m.View(), "\n")
+	// Row 0 is the cursor row, so its name sits on the pick background.
+	if name := seg(nameStyle, colorPickBG, "seen"); !strings.Contains(raw[3], name) {
+		t.Errorf("read row name not in the plain style: %q", raw[3])
+	}
+	if name := seg(nameUnreadStyle, lipgloss.NoColor{}, "changed"); !strings.Contains(
+		raw[5],
+		name,
+	) {
+		t.Errorf("unread row name not in the unread style: %q", raw[5])
+	}
+	if got := nameUnreadStyle.GetForeground(); got != colorAccent {
+		t.Errorf("unread name colour = %v, want the accent %v", got, colorAccent)
 	}
 }
 

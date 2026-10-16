@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -44,7 +45,22 @@ type Config struct {
 	// KittyOverrides are extra key=value settings the instance starts with,
 	// each passed to kitty as -o after the ones ks needs.
 	KittyOverrides []string `yaml:"kitty_overrides"`
+	// Notify lists the states of its own session a sidebar raises a desktop
+	// notification for: NotifyInput, NotifyDone. Nil, the key absent, means
+	// input only; an empty list turns them off. Read it through Notifications.
+	Notify []string `yaml:"notify"`
 }
+
+// The states Notify accepts, named as the sidebar labels them.
+const (
+	// NotifyInput is the session waiting on the user: a permission prompt or a question.
+	NotifyInput = "input"
+	// NotifyDone is the session having finished a turn the user has not looked at.
+	NotifyDone = "done"
+)
+
+// notifyStates is every value Notify accepts.
+var notifyStates = []string{NotifyInput, NotifyDone}
 
 // EffectiveTmpDir returns the configured tmpdir for scratch sessions.
 // Returns empty string when unset, meaning os.MkdirTemp default should be used.
@@ -89,6 +105,16 @@ func (c *Config) Overrides() []string {
 		return nil
 	}
 	return c.KittyOverrides
+}
+
+// Notifications returns the states a sidebar notifies on: NotifyInput alone
+// when the key is absent (a nil config included), the parsed list
+// otherwise, so `notify: []` turns notifications off.
+func (c *Config) Notifications() []string {
+	if c == nil || c.Notify == nil {
+		return []string{NotifyInput}
+	}
+	return c.Notify
 }
 
 // Load reads config.yaml from ~/.config/ks/config.yaml.
@@ -143,6 +169,14 @@ func loadFrom(path string) (*Config, error) {
 				path,
 				i,
 				o,
+			)
+		}
+	}
+	for i, n := range cfg.Notify {
+		if !slices.Contains(notifyStates, n) {
+			return nil, fmt.Errorf(
+				"parsing %s: notify[%d] %q is not one of %s",
+				path, i, n, strings.Join(notifyStates, ", "),
 			)
 		}
 	}

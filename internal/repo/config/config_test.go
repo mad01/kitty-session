@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -153,6 +154,38 @@ func TestOverridesRejectNonAssignment(t *testing.T) {
 	_, err := LoadFrom(writeConfig(t, "kitty_overrides:\n  - font_size\n"))
 	if err == nil || !strings.Contains(err.Error(), "key=value") {
 		t.Fatalf("err = %v, want a key=value complaint", err)
+	}
+}
+
+func TestNotifications(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string // "" means nil config
+		want []string
+	}{
+		{"nil config notifies on input", "", []string{"input"}},
+		{"absent key notifies on input", "dirs:\n  - /tmp\n", []string{"input"}},
+		{"both states", "notify: [input, done]\n", []string{"input", "done"}},
+		{"done alone", "notify:\n  - done\n", []string{"done"}},
+		{"an empty list turns them off", "notify: []\n", []string{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg *Config
+			if tc.yaml != "" {
+				cfg = load(t, tc.yaml)
+			}
+			if got := cfg.Notifications(); !slices.Equal(got, tc.want) {
+				t.Errorf("Notifications() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNotifyRejectsUnknownState(t *testing.T) {
+	_, err := LoadFrom(writeConfig(t, "notify: [input, banner]\n"))
+	if err == nil || !strings.Contains(err.Error(), `notify[1] "banner"`) {
+		t.Fatalf("err = %v, want a complaint naming banner", err)
 	}
 }
 

@@ -127,7 +127,10 @@ func (m model) startConfirm(action confirmAction) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// runConfirm performs the confirmed close or delete.
+// runConfirm performs the confirmed close or delete. When the row is this
+// sidebar's own session, its desktop notification is taken down first: the
+// sidebar window, which posted it, goes with the tab. A failed take-down
+// is dropped, since the tab goes either way and the window with it.
 func (m model) runConfirm() (tea.Model, tea.Cmd) {
 	m.mode = modeList
 	keep := m.confirm == actionClose
@@ -136,8 +139,16 @@ func (m model) runConfirm() (tea.Model, tea.Cmd) {
 		verb = "closed "
 	}
 	backend, name := m.backend, m.target
+	notifier, id := m.notifier, m.notifyID()
+	own, ok := m.ownAgent()
+	withdraw := ok && own.Name == name
 	return m, act(
-		func() error { return backend.Close(name, keep) },
+		func() error {
+			if withdraw {
+				_ = notifier.Close(id)
+			}
+			return backend.Close(name, keep)
+		},
 		doneMsg{status: verb + name, refresh: true},
 	)
 }

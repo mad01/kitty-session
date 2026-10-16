@@ -14,12 +14,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/mad01/kitty-session/internal/claude"
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
+	"github.com/mad01/kitty-session/internal/state"
 )
 
 // ResumeMode selects how the agent starts inside the session's window.
@@ -80,8 +82,21 @@ type Launcher struct {
 	kitty        backend
 	sidebarWidth int
 	exe          string // the ks binary each tab's sidebar runs
+	agent        AgentOptions
 	now          func() time.Time
 	sleep        func(time.Duration)
+	// cleanState removes a session's state file; tests substitute a recorder.
+	cleanState func(name string)
+}
+
+// AgentOptions is what the agent's command line depends on beyond the
+// session record.
+type AgentOptions struct {
+	// NotifyInput is whether the session's sidebar raises a desktop
+	// notification when the session needs input (config notify). Claude
+	// then starts with its own notification turned off, so one prompt does
+	// not raise two.
+	NotifyInput bool
 }
 
 // New returns a launcher for the instance behind client. cfg may be nil.
@@ -90,7 +105,16 @@ func New(store *session.Store, client *kitty.Client, cfg *config.Config) (*Launc
 	if err != nil {
 		return nil, fmt.Errorf("cannot locate the ks binary: %w", err)
 	}
-	return newLauncher(store, client, cfg.EffectiveSidebarWidth(), exe), nil
+	l := newLauncher(store, client, cfg.EffectiveSidebarWidth(), exe)
+	l.agent = agentOptions(cfg)
+	return l, nil
+}
+
+// agentOptions derives the agent command's options from cfg, which may be nil.
+func agentOptions(cfg *config.Config) AgentOptions {
+	return AgentOptions{
+		NotifyInput: slices.Contains(cfg.Notifications(), config.NotifyInput),
+	}
 }
 
 func newLauncher(store *session.Store, b backend, sidebarWidth int, exe string) *Launcher {
@@ -101,6 +125,7 @@ func newLauncher(store *session.Store, b backend, sidebarWidth int, exe string) 
 		exe:          exe,
 		now:          time.Now,
 		sleep:        time.Sleep,
+		cleanState:   state.Clean,
 	}
 }
 
@@ -140,6 +165,12 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 	if err := l.store.Save(sess); err != nil {
 		return nil, fmt.Errorf("cannot save session: %w", err)
 	}
+	// The agent window is about to be launched, so the state file of its
+	// last run is stale: an input it held before ks quit would raise a
+	// banner and read as unread on attach. The SessionStart hook writes a
+	// fresh one moments after the launch; until then the screen backstop's
+	// no-file gate covers the trust dialog.
+	l.cleanState(sess.Name)
 	w, err := l.launch(sess, req.Resume, sidebar)
 	if err != nil {
 		return nil, err
@@ -234,14 +265,16 @@ func (l *Launcher) focus(
 	return &Result{Session: saved, Focused: true, Warnings: warnings}, nil
 }
 
-// stampFocus reloads the record and sets FocusedAt, so a hook update made in
-// the meantime is kept.
+// stampFocus reloads the record and sets FocusedAt and ViewedAt, so a hook
+// update made in the meantime is kept and the session reads as seen from
+// the moment its tab comes to the front, before its own sidebar polls.
 func (l *Launcher) stampFocus(name string) (*session.Session, error) {
 	sess, err := l.store.Load(name)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reload session: %w", err)
 	}
-	sess.FocusedAt = l.now()
+	now := l.now()
+	sess.FocusedAt, sess.ViewedAt = now, now
 	if err := l.store.Save(sess); err != nil {
 		return nil, fmt.Errorf("cannot save session: %w", err)
 	}
@@ -256,7 +289,7 @@ func (l *Launcher) plan(sess *session.Session, mode ResumeMode) plan {
 		env:        sessionEnv(sess, l.exe),
 		vars:       []string{kitty.SessionVar + "=" + sess.ID},
 		sidebarCmd: []string{l.exe, "sidebar", "--session-id", sess.ID},
-		agentCmd:   AgentCmd(sess, mode),
+		agentCmd:   AgentCmd(sess, mode, l.agent),
 	}
 }
 
@@ -277,15 +310,16 @@ func sessionEnv(sess *session.Session, exe string) []string {
 
 // AgentCmd builds the command that starts the session's agent, by kind:
 // claude as claudeCmd does, pi as piCmd does, and nothing for a shell, since
-// a launch with no command runs kitty's default shell.
-func AgentCmd(sess *session.Session, mode ResumeMode) []string {
+// a launch with no command runs kitty's default shell. opts only affects
+// claude.
+func AgentCmd(sess *session.Session, mode ResumeMode, opts AgentOptions) []string {
 	switch sess.Kind() {
 	case session.AgentPi:
 		return piCmd(sess, mode)
 	case session.AgentShell:
 		return nil
 	default:
-		return claudeCmd(sess, mode)
+		return claudeCmd(sess, mode, opts)
 	}
 }
 
@@ -303,22 +337,38 @@ func piCmd(sess *session.Session, mode ResumeMode) []string {
 	return append(cmd, "--session", sess.PiSessionPath)
 }
 
+// claudeQuietSettings is the inline settings override that turns off Claude
+// Code's own desktop notification, passed with --settings when ks raises the
+// input notification itself.
+const claudeQuietSettings = `{"preferredNotifChannel":"notifications_disabled"}`
+
 // claudeCmd starts claude: --resume <id> when the record's own transcript
 // still exists, --continue when the directory has any transcript to
 // continue, and a fresh claude otherwise. --continue with nothing to
-// continue makes claude exit at once.
-func claudeCmd(sess *session.Session, mode ResumeMode) []string {
+// continue makes claude exit at once. With opts.NotifyInput the command
+// ends with the settings override that mutes claude's own notification.
+func claudeCmd(sess *session.Session, mode ResumeMode, opts AgentOptions) []string {
 	cmd := []string{"claude"}
-	if mode == ResumeNone {
-		return cmd
-	}
-	if sess.ClaudeSessionID != "" && transcriptExists(sess) {
-		return append(cmd, "--resume", sess.ClaudeSessionID)
-	}
-	if claude.HasTranscripts(sess.Dir) {
-		return append(cmd, "--continue")
+	cmd = append(cmd, claudeResumeArgs(sess, mode)...)
+	if opts.NotifyInput {
+		cmd = append(cmd, "--settings", claudeQuietSettings)
 	}
 	return cmd
+}
+
+// claudeResumeArgs picks how claude picks the conversation up, nil for a
+// fresh one.
+func claudeResumeArgs(sess *session.Session, mode ResumeMode) []string {
+	if mode == ResumeNone {
+		return nil
+	}
+	if sess.ClaudeSessionID != "" && transcriptExists(sess) {
+		return []string{"--resume", sess.ClaudeSessionID}
+	}
+	if claude.HasTranscripts(sess.Dir) {
+		return []string{"--continue"}
+	}
+	return nil
 }
 
 // transcriptExists reports whether Claude Code still has the transcript of

@@ -33,7 +33,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 		return m, animCmd()
 	case agentsMsg:
-		return m.applyAgents(msg), nil
+		return m.applyAgents(msg)
 	case reposMsg:
 		m.picker.setRepos(msg.repos, msg.err)
 		return m, nil
