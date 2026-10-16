@@ -101,6 +101,16 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 			[]string{"close-window", "--match=all"},
 		},
 		{
+			"SignalChild",
+			func(c *Client) error { return c.SignalChild(2, "SIGUSR1") },
+			[]string{"signal-child", "--match=id:2", "SIGUSR1"},
+		},
+		{
+			"UnsetUserVars passes bare names",
+			func(c *Client) error { return c.UnsetUserVars(7, MovingVar) },
+			[]string{"set-user-vars", "--match=id:7", "KS_MOVING"},
+		},
+		{
 			"GetTextAll",
 			func(c *Client) error { _, err := c.GetTextAll(3); return err },
 			[]string{"get-text", "--match=id:3", "--extent=all"},

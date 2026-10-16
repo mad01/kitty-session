@@ -3,11 +3,29 @@ package cli
 import (
 	"bytes"
 	"slices"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/spf13/cobra"
 )
+
+// TestWithdrawOnSignalRunsTheHook checks that a handling sidebar runs its
+// withdraw hook on SIGUSR1, the launcher's ask to take the banner down.
+func TestWithdrawOnSignalRunsTheHook(t *testing.T) {
+	ran := make(chan struct{}, 1)
+	stop := withdrawOnSignal(func() { ran <- struct{}{} })
+	defer stop()
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGUSR1); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the withdraw hook did not run on SIGUSR1")
+	}
+}
 
 func TestHomeVars(t *testing.T) {
 	tests := []struct {

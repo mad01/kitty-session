@@ -92,7 +92,12 @@ func listState(c *kitty.Client, all []kitty.Window, sess *session.Session) strin
 	if err != nil { // no state file
 		file, fileAt = "", time.Time{}
 	}
-	if st, ok := launcher.ReportedState(w.Status, fileAt, w.TabActive && w.OSFocused); ok {
+	if st, ok := launcher.ReportedState(w.Status, fileAt); ok {
+		// A done on the tab the user is looking at reads idle, the one
+		// visible-tab pass the sidebar also applies (launcher.resolveState).
+		if st == sidebar.StateDone && w.TabActive && w.OSFocused {
+			st = sidebar.StateIdle
+		}
 		return st.String()
 	}
 	return kindState(c, w, sess, file, fileAt).String()

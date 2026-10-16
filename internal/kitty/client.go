@@ -40,6 +40,12 @@ const HomeVar = "KS_HOME"
 // exists, except one carrying this tag, which would take the agent with it.
 const HomeAgentVar = "KS_HOME_AGENT"
 
+// MovingVar marks a session's sidebar window while ks move reorders its tab;
+// the value is the unix second the move began. The session's own sidebar
+// reads a fresh marker as the tab not being seen, so the moment Move brings
+// the tab to the front to reorder it does not count as a look.
+const MovingVar = "KS_MOVING"
+
 // Layout names ks sets on its tabs.
 const (
 	// LayoutSplits is the kitty layout that honours --location=vsplit.
@@ -274,6 +280,10 @@ type Window struct {
 	// Focused is true when the window has keyboard focus: the active window
 	// of the active tab in the OS window the user is typing in.
 	Focused bool
+	// MovingAt is the MovingVar user variable parsed as a time, zero when the
+	// window carries none or it does not parse. ks move sets it on a sidebar
+	// window for the moment it brings the tab to the front to reorder it.
+	MovingAt time.Time
 	// Status is the state of the most urgent Program Status Protocol record
 	// the window carries, "" when it carries none: a kitty older than the
 	// protocol, an empty list, or only states ks does not know. Records live
@@ -340,12 +350,26 @@ func parseWindows(data []byte) ([]Window, error) {
 					Home:      w.UserVars[HomeVar] != "",
 					HomeAgent: w.UserVars[HomeAgentVar] != "",
 					Focused:   w.IsFocused,
+					MovingAt:  parseUnixVar(w.UserVars[MovingVar]),
 					Status:    mostUrgent(w.Status),
 				})
 			}
 		}
 	}
 	return windows, nil
+}
+
+// parseUnixVar reads a user variable holding a unix second, returning the
+// zero time when it is absent or does not parse.
+func parseUnixVar(v string) time.Time {
+	if v == "" {
+		return time.Time{}
+	}
+	secs, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return time.Unix(secs, 0)
 }
 
 // Launch describes a window to create.
@@ -471,6 +495,14 @@ func (c *Client) SetUserVars(windowID int, vars ...string) error {
 	return err
 }
 
+// UnsetUserVars removes user variables from the window by name: kitty's
+// set-user-vars unsets a variable passed with no =value.
+func (c *Client) UnsetUserVars(windowID int, names ...string) error {
+	args := append([]string{"set-user-vars", matchID(windowID)}, names...)
+	_, err := c.at(args...)
+	return err
+}
+
 // MoveActiveTab moves the active tab of the visible OS window by steps
 // positions in the tab order: towards the end for positive steps, towards
 // the front for negative, one move_tab_forward or move_tab_backward action
@@ -499,6 +531,15 @@ func (c *Client) CloseTab(tabID int) error {
 // CloseAll closes every window in the instance, which ends it.
 func (c *Client) CloseAll() error {
 	_, err := c.at("close-window", "--match=all")
+	return err
+}
+
+// SignalChild sends the named signal (SIGUSR1, SIGTERM, ...) to the
+// foreground process of the window. The launcher uses it to ask a session's
+// sidebar, alone in its pty, to take its desktop notification down before
+// the window goes.
+func (c *Client) SignalChild(windowID int, signal string) error {
+	_, err := c.at("signal-child", matchID(windowID), signal)
 	return err
 }
 

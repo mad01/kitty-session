@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
@@ -93,6 +94,10 @@ func (l *Launcher) Move(name string, where MoveTarget) (*MoveResult, error) {
 	if res.To == res.From {
 		return res, nil
 	}
+	// Only a tab brought up from behind flashes; one already in front stays
+	// in front, and marking it not seen would wrongly unread the session the
+	// user is looking at while it moves itself.
+	marked := !lv.tabActive() && l.markMoving(lv)
 	if err := l.showTab(all, lv); err != nil {
 		return nil, err
 	}
@@ -100,7 +105,37 @@ func (l *Launcher) Move(name string, where MoveTarget) (*MoveResult, error) {
 		return nil, fmt.Errorf("cannot move the tab: %w", err)
 	}
 	res.Warnings = append(l.returnKeyboard(all, lv), l.recordOrder()...)
+	if marked {
+		res.Warnings = append(res.Warnings, l.unmarkMoving(lv)...)
+	}
 	return res, nil
+}
+
+// markMoving tags the session's sidebar window with KS_MOVING set to the
+// current unix second, so the session's own sidebar treats the tab as not
+// seen for the moment Move brings it to the front to reorder it, and the
+// flash does not stamp the tab as viewed. It is a no-op when the sidebar
+// window is gone, and a set that fails just leaves the old behaviour, so it
+// is not worth a warning. unmarkMoving removes the marker; a Move that
+// returns early before that leaves it to age out after movingTTL.
+func (l *Launcher) markMoving(lv live) bool {
+	if lv.sidebar == nil {
+		return false
+	}
+	stamp := kitty.MovingVar + "=" + strconv.FormatInt(l.now().Unix(), 10)
+	return l.kitty.SetUserVars(lv.sidebar.ID, stamp) == nil
+}
+
+// unmarkMoving removes the KS_MOVING marker markMoving set. A removal that
+// fails is a warning: the marker ages out after movingTTL regardless.
+func (l *Launcher) unmarkMoving(lv live) []error {
+	if lv.sidebar == nil {
+		return nil
+	}
+	if err := l.kitty.UnsetUserVars(lv.sidebar.ID, kitty.MovingVar); err != nil {
+		return []error{fmt.Errorf("could not clear the move marker: %w", err)}
+	}
+	return nil
 }
 
 func noOpenTab(name string) error {
