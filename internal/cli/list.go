@@ -27,8 +27,10 @@ func init() {
 // readState reads a session's state file; tests substitute a fake.
 var readState = state.Read
 
-// paneText reads a window's terminal text; tests substitute a fake.
-var paneText = (*kitty.Client).GetText
+// paneText reads a window's terminal text with its scrollback, so the last
+// lines are the live screen even when the user has scrolled the window up;
+// kindState cuts it to the window's rows. Tests substitute a fake.
+var paneText = (*kitty.Client).GetTextAll
 
 // stoppedLabel is what the state column prints for a session without a live
 // agent window, in the vocabulary the sidebar shares.
@@ -123,7 +125,7 @@ func kindState(
 	if err != nil {
 		return claude.StateWorking
 	}
-	st := claude.DetectState(text)
+	st := claude.DetectState(claude.LiveScreen(text, w.Lines))
 	if st != claude.StateWorking && claude.ParseState(file) == claude.StateError {
 		return claude.StateError
 	}

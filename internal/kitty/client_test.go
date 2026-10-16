@@ -101,9 +101,9 @@ func TestEveryCallTargetsTheSocket(t *testing.T) {
 			[]string{"close-window", "--match=all"},
 		},
 		{
-			"GetText",
-			func(c *Client) error { _, err := c.GetText(3); return err },
-			[]string{"get-text", "--match=id:3"},
+			"GetTextAll",
+			func(c *Client) error { _, err := c.GetTextAll(3); return err },
+			[]string{"get-text", "--match=id:3", "--extent=all"},
 		},
 		{
 			"LaunchTab",
@@ -321,14 +321,17 @@ func TestWindows(t *testing.T) {
 		t.Fatalf("Windows: %v", err)
 	}
 	want := []Window{
-		{ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: 158, Home: true, HomeAgent: true},
+		{
+			ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: 158, Lines: 39,
+			Home: true, HomeAgent: true,
+		},
 		{
 			ID: 2, TabID: 2, TabTitle: "demo", TabActive: true,
-			Title: "ks", Columns: 36, SessionID: "abc",
+			Title: "ks", Columns: 36, Lines: 39, SessionID: "abc",
 		},
 		{
 			ID: 3, TabID: 2, TabTitle: "demo", TabActive: true,
-			Title: "✳ claude", Columns: 119, SessionID: "abc", Focused: true,
+			Title: "✳ claude", Columns: 119, Lines: 39, SessionID: "abc", Focused: true,
 		},
 	}
 	if !slices.Equal(windows, want) {

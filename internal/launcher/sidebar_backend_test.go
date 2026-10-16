@@ -51,6 +51,7 @@ func newTestBackend(t *testing.T) (*SidebarBackend, *fakeKitty, *time.Time) {
 	l.now = func() time.Time { return clock }
 	b := newSidebarBackend(l, nil, "")
 	b.readState = fakeStates{}.read
+	b.hooksInstalled = func() bool { return true }
 	return b, f, &clock
 }
 
@@ -1119,6 +1120,249 @@ func TestListReportsHowLongAnInputRowHasWaited(t *testing.T) {
 			if a.Waiting != 0 {
 				t.Errorf("busy waited %v, want 0", a.Waiting)
 			}
+		}
+	}
+}
+
+// Screens in the shapes claude.ParseScreen reads, enough of each for the
+// backstop to tell them apart.
+const (
+	promptBoxScreen = "─────────\n❯ \n─────────\n  ? for shortcuts\n"
+	workingScreen   = "✻ Crunching… (3s · esc to interrupt)\n"
+	trustScreen     = " Do you trust the files in this folder?\n" +
+		" ❯ 1. Yes, proceed\n   2. No, exit\n Enter to confirm · Esc to exit\n"
+	welcomeScreen = " ✻ Welcome to Claude Code!\n /help for help\n"
+	// leftoverScreen is promptBoxScreen (four rows) under a spinner row left
+	// in the scrollback.
+	leftoverScreen = workingScreen + "\n\n" + promptBoxScreen
+)
+
+// backstopFixture is the own claude session of a backstop test: its state
+// file, its screen and the hooks, with the state and the writes expected.
+type backstopFixture struct {
+	kind    string
+	status  kitty.ProgramState
+	file    string        // the state file's state, "" for none
+	fileAge time.Duration // the file's age against the backend's clock
+	foreign bool          // the row belongs to another session
+	noHooks bool          // the ks hooks are not installed
+	lines   int           // the window's rows, zero for uncut text
+	text    string
+	readErr error
+	// hookWrites restamps the state file on the second read of a poll, as a
+	// hook writing between the poll's read and the correction would.
+	hookWrites  bool
+	want        sidebar.State
+	wantWaiting time.Duration
+	wantReads   int
+	wantWrite   string // the state written, "" for none
+}
+
+// TestListScreenBackstop checks the own sidebar's screen check on its
+// claude row: a stale input is cleared by the prompt box or a running turn
+// and the correction written to the state file, a dialog on screen keeps
+// it, an input is raised from a dialog when no hook has spoken or none is
+// installed, a hook write in the meantime wins, and nothing is read for a
+// fresh file, a Program Status record, another session's row or another
+// kind.
+func TestListScreenBackstop(t *testing.T) {
+	tests := []struct {
+		name string
+		backstopFixture
+	}{
+		{"stale input, prompt box clears it", backstopFixture{
+			file: "input", fileAge: time.Hour, text: promptBoxScreen,
+			want: sidebar.StateIdle, wantReads: 1, wantWrite: "idle",
+		}},
+		{"stale input, running turn clears it", backstopFixture{
+			file: "input", fileAge: time.Hour, text: workingScreen,
+			want: sidebar.StateWorking, wantReads: 1, wantWrite: "working",
+		}},
+		{"stale input, running turn with the prompt box drawn", backstopFixture{
+			file: "input", fileAge: time.Hour, text: workingScreen + promptBoxScreen,
+			want: sidebar.StateWorking, wantReads: 1, wantWrite: "working",
+		}},
+		{"stale input, dialog under a running turn keeps it", backstopFixture{
+			file: "input", fileAge: time.Hour, text: workingScreen + trustScreen,
+			want: sidebar.StateInput, wantWaiting: time.Hour, wantReads: 1,
+		}},
+		{"stale input, dialog on screen keeps it", backstopFixture{
+			file: "input", fileAge: time.Hour, text: trustScreen,
+			want: sidebar.StateInput, wantWaiting: time.Hour, wantReads: 1,
+		}},
+		{"stale input, read error keeps it", backstopFixture{
+			file: "input", fileAge: time.Hour, readErr: errors.New("get-text: no such window"),
+			want: sidebar.StateInput, wantWaiting: time.Hour, wantReads: 1,
+		}},
+		{"stale input, a hook wrote during the read", backstopFixture{
+			file: "input", fileAge: time.Hour, text: promptBoxScreen, hookWrites: true,
+			want: sidebar.StateInput, wantWaiting: time.Hour, wantReads: 1,
+		}},
+		{"stale input, spinner above a short screen is scrollback", backstopFixture{
+			file: "input", fileAge: time.Hour, text: leftoverScreen, lines: 4,
+			want: sidebar.StateIdle, wantReads: 1, wantWrite: "idle",
+		}},
+		{"fresh input is not read", backstopFixture{
+			file: "input", fileAge: time.Second, text: promptBoxScreen,
+			want: sidebar.StateInput, wantWaiting: time.Second,
+		}},
+		{"input from a record is not read", backstopFixture{
+			status: kitty.ProgramBlocked, file: "input", fileAge: time.Hour,
+			text: promptBoxScreen, want: sidebar.StateInput, wantWaiting: time.Hour,
+		}},
+		{"another session's row is not read", backstopFixture{
+			foreign: true, file: "input", fileAge: time.Hour, text: promptBoxScreen,
+			want: sidebar.StateInput, wantWaiting: time.Hour,
+		}},
+		{"no state file, trust dialog raises input", backstopFixture{
+			text: trustScreen, want: sidebar.StateInput, wantReads: 1, wantWrite: "input",
+		}},
+		{"no state file, a hook wrote during the read", backstopFixture{
+			text: trustScreen, hookWrites: true, want: sidebar.StateIdle, wantReads: 1,
+		}},
+		{"stale waiting, welcome screen writes nothing", backstopFixture{
+			file: "waiting", fileAge: time.Hour, text: welcomeScreen,
+			want: sidebar.StateIdle, wantReads: 1,
+		}},
+		{"fresh waiting is not read", backstopFixture{
+			file: "waiting", fileAge: time.Second, text: trustScreen, want: sidebar.StateIdle,
+		}},
+		{"hooks installed, stale idle is not read", backstopFixture{
+			file: "idle", fileAge: time.Hour, text: trustScreen, want: sidebar.StateIdle,
+		}},
+		{"hooks not installed, stale idle, dialog raises input", backstopFixture{
+			noHooks: true, file: "idle", fileAge: time.Hour, text: trustScreen,
+			want: sidebar.StateInput, wantReads: 1, wantWrite: "input",
+		}},
+		{"a shell row is not read", backstopFixture{
+			kind: session.AgentShell, text: trustScreen, want: sidebar.StateIdle,
+		}},
+		{"a pi row is not read", backstopFixture{
+			kind: session.AgentPi, text: trustScreen, want: sidebar.StateIdle,
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runBackstop(t, tt.backstopFixture)
+		})
+	}
+}
+
+// runBackstop lists one own session built from fx and checks the row, the
+// text reads and the state writes against it.
+func runBackstop(t *testing.T, fx backstopFixture) {
+	t.Helper()
+	type write struct{ name, state string }
+	b, f, clock := newTestBackend(t)
+	*clock = time.Now() // freshness is wall-clock; waiting is the backend's
+	own := session.New("own", "/work/own", 0, 0)
+	own.Agent = fx.kind
+	f.addTab(own, true)
+	w := f.find(own.KittyWindowID)
+	w.Title, w.Status, w.Lines = "Claude Code", fx.status, fx.lines
+	if err := b.l.store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	if !fx.foreign {
+		b.ownID = own.ID
+	}
+	b.hooksInstalled = func() bool { return !fx.noHooks }
+	states := fakeStates{}
+	if fx.file != "" {
+		states["own"] = struct {
+			state string
+			at    time.Time
+		}{fx.file, clock.Add(-fx.fileAge)}
+	}
+	stateReads := 0
+	b.readState = func(name string) (string, time.Time, error) {
+		stateReads++
+		if fx.hookWrites && stateReads > 1 {
+			return "working", clock.Add(-time.Millisecond), nil
+		}
+		return states.read(name)
+	}
+	reads := 0
+	b.readText = func(id int) (string, error) {
+		reads++
+		if id != own.KittyWindowID {
+			t.Errorf("read window %d, want %d", id, own.KittyWindowID)
+		}
+		return fx.text, fx.readErr
+	}
+	var writes []write
+	b.writeState = func(name, st string) error {
+		writes = append(writes, write{name, st})
+		return nil
+	}
+
+	agents, err := b.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("got %d agents, want 1: %+v", len(agents), agents)
+	}
+	if a := agents[0]; a.State != fx.want || a.Waiting != fx.wantWaiting {
+		t.Errorf("row = %s waiting %s, want %s waiting %s",
+			a.State, a.Waiting, fx.want, fx.wantWaiting)
+	}
+	if reads != fx.wantReads {
+		t.Errorf("read the text %d times, want %d", reads, fx.wantReads)
+	}
+	var wantWrites []write
+	if fx.wantWrite != "" {
+		wantWrites = []write{{"own", fx.wantWrite}}
+	}
+	if !slices.Equal(writes, wantWrites) {
+		t.Errorf("writes = %v, want %v", writes, wantWrites)
+	}
+}
+
+// TestListScreenBackstopDebouncesRaiseReads checks that with the hooks not
+// installed the own row's text is read for a dialog at most once per
+// raiseDebounce, and the hooks check itself at most once per hooksRecheck.
+func TestListScreenBackstopDebouncesRaiseReads(t *testing.T) {
+	b, f, clock := newTestBackend(t)
+	own := session.New("own", "/work/own", 0, 0)
+	b.ownID = own.ID
+	f.addTab(own, true)
+	f.find(own.KittyWindowID).Title = "Claude Code"
+	if err := b.l.store.Save(own); err != nil {
+		t.Fatal(err)
+	}
+	states := fakeStates{"own": {"idle", clock.Add(-time.Hour)}}
+	b.readState = states.read
+	reads, checks := 0, 0
+	b.readText = func(int) (string, error) { reads++; return welcomeScreen, nil }
+	b.hooksInstalled = func() bool { checks++; return false }
+	b.writeState = func(name, st string) error {
+		t.Errorf("wrote %s for %s on a welcome screen", st, name)
+		return nil
+	}
+	list := func() {
+		t.Helper()
+		if _, err := b.List(); err != nil {
+			t.Fatalf("List: %v", err)
+		}
+	}
+	steps := []struct {
+		advance    time.Duration
+		wantReads  int
+		wantChecks int
+	}{
+		{0, 1, 1},
+		{0, 1, 1},
+		{raiseDebounce - time.Second, 1, 1},
+		{time.Second, 2, 1},
+		{hooksRecheck - raiseDebounce, 3, 2},
+	}
+	for i, st := range steps {
+		*clock = clock.Add(st.advance)
+		list()
+		if reads != st.wantReads || checks != st.wantChecks {
+			t.Errorf("step %d: %d reads, %d hook checks, want %d and %d",
+				i, reads, checks, st.wantReads, st.wantChecks)
 		}
 	}
 }

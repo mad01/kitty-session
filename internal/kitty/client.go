@@ -257,6 +257,9 @@ type Window struct {
 	// which is why ks never passes --title to the claude window.
 	Title   string
 	Columns int
+	// Lines is the window's height in rows: the live screen, which is what
+	// the text GetTextAll returns ends with.
+	Lines int
 	// SessionID is the SessionVar user variable: the owning ks session's ID,
 	// empty for windows ks did not launch.
 	SessionID string
@@ -292,6 +295,7 @@ type (
 		ID        int               `json:"id"`
 		Title     string            `json:"title"`
 		Columns   int               `json:"columns"`
+		Lines     int               `json:"lines"`
 		IsFocused bool              `json:"is_focused"`
 		UserVars  map[string]string `json:"user_vars"`
 		Status    []lsProgramStatus `json:"program_status"`
@@ -325,6 +329,7 @@ func parseWindows(data []byte) ([]Window, error) {
 					TabActive: t.IsActive,
 					Title:     w.Title,
 					Columns:   w.Columns,
+					Lines:     w.Lines,
 					SessionID: w.UserVars[SessionVar],
 					Home:      w.UserVars[HomeVar] != "",
 					HomeAgent: w.UserVars[HomeAgentVar] != "",
@@ -491,9 +496,13 @@ func (c *Client) CloseAll() error {
 	return err
 }
 
-// GetText reads the terminal text of the window.
-func (c *Client) GetText(windowID int) (string, error) {
-	out, err := c.at("get-text", matchID(windowID))
+// GetTextAll reads the scrollback and the screen of the window as one text,
+// whose last Window.Lines lines are the live screen even when the window is
+// scrolled back. kitty's default extent is the viewport as shown, which for
+// a window the user scrolled up in is the scrolled-back part, so ks never
+// reads it.
+func (c *Client) GetTextAll(windowID int) (string, error) {
+	out, err := c.at("get-text", matchID(windowID), "--extent=all")
 	if err != nil {
 		return "", err
 	}

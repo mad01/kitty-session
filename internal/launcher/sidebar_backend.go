@@ -28,6 +28,13 @@ const (
 	viewedDebounce = 10 * time.Second
 	// shellSplitBias is the share of claude's height a shell split takes.
 	shellSplitBias = 30
+	// raiseDebounce is the least time between two reads of the own window's
+	// text that look for a dialog (backstop's raise), which can go on for a
+	// whole session when the hooks are not installed.
+	raiseDebounce = 10 * time.Second
+	// hooksRecheck is how long backstop trusts its last look at whether the
+	// ks hooks are installed.
+	hooksRecheck = time.Minute
 )
 
 // SidebarBackend is the sidebar.Backend over one ks instance: every action
@@ -43,9 +50,21 @@ type SidebarBackend struct {
 	quit  func() error
 	// readState reads a session's state file; tests substitute a fake.
 	readState func(name string) (string, time.Time, error)
+	// writeState writes a session's state file, for backstop; tests
+	// substitute a fake.
+	writeState func(name, st string) error
+	// readText reads the live bottom of a window's terminal text, for
+	// backstop; tests substitute a fake.
+	readText func(windowID int) (string, error)
+	// hooksInstalled reports whether the ks hooks are registered with
+	// Claude Code, for backstop's raise gate; tests substitute a fake.
+	hooksInstalled func() bool
 
-	mu         sync.Mutex // guards lastViewed; List runs off the UI loop
+	mu         sync.Mutex // guards the fields below; List runs off the UI loop
 	lastViewed time.Time
+	lastRaise  time.Time // when backstop last read the text for a dialog
+	hooksAt    time.Time // when hooksOK was last read, zero before the first
+	hooksOK    bool
 	reap       reaper // closes the own tab once its claude is gone; see reapIfGone
 }
 
@@ -64,6 +83,7 @@ func NewSidebarBackend(
 	}
 	b := newSidebarBackend(l, cfg, ownID)
 	b.quit = func() error { return instance.Shutdown(client) }
+	b.readText = client.GetTextAll
 	return b, nil
 }
 
@@ -73,13 +93,30 @@ func newSidebarBackend(l *Launcher, cfg *config.Config, ownID string) *SidebarBa
 		home = ""
 	}
 	return &SidebarBackend{
-		l:         l,
-		cfg:       cfg,
-		ownID:     ownID,
-		home:      home,
-		quit:      func() error { return errors.New("launcher: quit is not wired") },
-		readState: state.Read,
+		l:          l,
+		cfg:        cfg,
+		ownID:      ownID,
+		home:       home,
+		quit:       func() error { return errors.New("launcher: quit is not wired") },
+		readState:  state.Read,
+		writeState: state.Write,
+		readText: func(int) (string, error) {
+			return "", errors.New("launcher: text reader is not wired")
+		},
+		hooksInstalled: ksHooksInstalled,
 	}
+}
+
+// ksHooksInstalled reports whether any ks hook event is registered in
+// Claude Code's settings. Settings that cannot be read count as none: Claude
+// Code would not run the hooks from them either.
+func ksHooksInstalled() bool {
+	path, err := hooks.Path()
+	if err != nil {
+		return false
+	}
+	installed, err := hooks.Installed(path)
+	return err == nil && len(installed) > 0
 }
 
 // List returns one agent per session record from one store listing and one
@@ -152,6 +189,9 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 		in.fileState, in.fileAt = s, at
 	}
 	st := resolveState(in)
+	if own {
+		st = b.backstop(sess.Name, w, in, st)
+	}
 	return sidebar.Agent{
 		Name:    sess.Name,
 		Kind:    in.kind,
@@ -243,6 +283,14 @@ type stateInput struct {
 // StopFailure hook when a turn dies on an API error, is sticky the same way
 // and ranks right under input: the failure needs the user as much as a
 // prompt does, and only a retry (working) or a later event clears it.
+//
+// The own session's sidebar runs one check more on its claude row after
+// these rules, backstop: when the hooks left a stale input, or no state at
+// all, or are not installed, and no record speaks, it reads the window's
+// text and corrects the state from what is on screen, writing the
+// correction to the state file. It is the single writer of that
+// correction, so every other sidebar, which never reads the text, and ks
+// list follow through the file.
 func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
@@ -294,6 +342,107 @@ func claudeState(in stateInput) sidebar.State {
 		return sidebar.StateWorking
 	}
 	return sidebar.StateIdle
+}
+
+// backstop is the screen check the own sidebar runs on its claude row after
+// resolveState, for the two gaps the hooks leave when no Program Status
+// record speaks. A stale input (the hooks said prompt, and nothing since)
+// is cleared when the window shows a running turn or the prompt box at
+// rest: the user answered through a path no hook reports. A dialog still
+// on screen keeps it, whatever else the screen shows, and a running turn
+// outranks a drawn prompt box, since Claude Code keeps the box on screen
+// mid-turn. An input is raised when the window shows a dialog and the
+// raise gate is open (raiseDue): no state file or a stale waiting, as at
+// startup, where the folder-trust dialog comes before any hook fires, or
+// the ks hooks not installed, where nothing else would ever report a
+// prompt. A clear reads the text on every poll, since that wait is the
+// user's; a raise reads at most once per raiseDebounce. The text is cut to
+// the window's rows (claude.LiveScreen) so that what Ink left in the
+// scrollback above a short screen does not count. A read error leaves the
+// row alone. The corrected state is written to the state file (see
+// resolveState and correct) and shown on the row.
+func (b *SidebarBackend) backstop(
+	name string, w *kitty.Window, in stateInput, st sidebar.State,
+) sidebar.State {
+	if in.kind != session.AgentClaude || in.report != "" || w == nil ||
+		st == sidebar.StateStopped {
+		return st
+	}
+	clear := st == sidebar.StateInput && !state.IsFresh(in.fileAt)
+	if !clear && !b.raiseDue(in, st) {
+		return st
+	}
+	text, err := b.readText(w.ID)
+	if err != nil {
+		return st
+	}
+	screen := claude.ParseScreen(claude.LiveScreen(text, w.Lines))
+	switch {
+	case clear && screen.Blocker:
+		return st
+	case clear && screen.Working:
+		return b.correct(name, in, st, sidebar.StateWorking)
+	case clear && screen.PromptBox:
+		return b.correct(name, in, st, sidebar.StateIdle)
+	case !clear && screen.Blocker:
+		return b.correct(name, in, st, sidebar.StateInput)
+	}
+	return st
+}
+
+// raiseDue reports whether backstop may look for a dialog on this poll: the
+// row is not at input, the gate is open (no state file, a stale waiting, or
+// the ks hooks not installed), and raiseDebounce has passed since the last
+// such read, which it then stamps.
+func (b *SidebarBackend) raiseDue(in stateInput, st sidebar.State) bool {
+	if st == sidebar.StateInput {
+		return false
+	}
+	staleWaiting := claude.ParseState(in.fileState) == claude.StateWaiting &&
+		!state.IsFresh(in.fileAt)
+	open := in.fileState == "" || staleWaiting || !b.hooksOn()
+	if !open {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.l.now()
+	if now.Sub(b.lastRaise) < raiseDebounce {
+		return false
+	}
+	b.lastRaise = now
+	return true
+}
+
+// hooksOn reports whether the ks hooks are installed, re-reading the
+// settings at most once per hooksRecheck.
+func (b *SidebarBackend) hooksOn() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.l.now()
+	if b.hooksAt.IsZero() || now.Sub(b.hooksAt) >= hooksRecheck {
+		b.hooksOK, b.hooksAt = b.hooksInstalled(), now
+	}
+	return b.hooksOK
+}
+
+// correct writes st to the session's state file and returns it for the row,
+// unless the file changed since the poll read it (in.fileAt): the text read
+// takes a subprocess, and a hook can write in the meantime. Then the hook's
+// word stands, nothing is written, and the row keeps prev. A failed write
+// is dropped, as every launcher warning in the sidebar is.
+func (b *SidebarBackend) correct(
+	name string, in stateInput, prev, st sidebar.State,
+) sidebar.State {
+	_, at, err := b.readState(name)
+	if err != nil {
+		at = time.Time{}
+	}
+	if !at.Equal(in.fileAt) {
+		return prev
+	}
+	_ = b.writeState(name, st.String())
+	return st
 }
 
 // fileOnlyState is resolveState's pi branch: the state file alone, with no
