@@ -2,6 +2,9 @@ package launcher
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -143,20 +146,128 @@ func TestListReapsOwnTabOnceClaudeIsGone(t *testing.T) {
 	}
 }
 
-func TestReapLeavesTheRecordAlone(t *testing.T) {
-	own := session.New("own", "/work/own", 0, 0)
-	b, f, _ := newOwnBackend(t, own, true)
-	listCalls(t, b, f)
-	dropClaude(f, own)
-	if calls := listCalls(t, b, f); !hasPrefixCall(f, "CloseTab(") {
-		t.Fatalf("tab not closed: %v", calls)
+// TestReapEndsTheSession checks what the reap does to the record and the
+// state file. A claude or pi agent whose window a snapshot first showed
+// reapRan or more before the tick that finds it gone takes both away, the
+// record to the trash, stopped, as the sidebar's delete sends it; so does
+// one the hook marked stopped, however short its run. A shell keeps its record. So does an agent gone
+// inside reapRan, or never seen within the grace, whatever the kind, so a
+// launch that fails on attach is not thrown away; and one whose record no
+// longer names the window the snapshots showed, a relaunch under way. A
+// record the store cannot move stays in place, stopped.
+func TestReapEndsTheSession(t *testing.T) {
+	const never = -1
+	tests := []struct {
+		name       string
+		kind       string
+		stopped    bool          // the hook marked the record stopped before the reap
+		seen       time.Duration // how long before the gone tick the window first showed; never for none
+		relaunched bool          // the record carries a cleared window id, as Open leaves it mid-launch
+		noTrash    bool          // the trash directory cannot take the record
+		wantTrash  bool
+		wantActive bool // the record stays and is active
+	}{
+		{name: "claude ran and is gone", kind: session.AgentClaude, seen: reapRan, wantTrash: true},
+		{name: "pi ran and is gone", kind: session.AgentPi, seen: reapRan, wantTrash: true},
+		{name: "shell ran and is gone", kind: session.AgentShell, seen: reapRan, wantActive: true},
+		{
+			name: "claude the hook marked stopped, gone at once", kind: session.AgentClaude,
+			stopped: true, wantTrash: true,
+		},
+		{
+			name: "claude gone inside reapRan", kind: session.AgentClaude,
+			seen: reapRan - time.Second, wantActive: true,
+		},
+		{
+			name: "claude relaunched meanwhile", kind: session.AgentClaude,
+			seen: reapRan, relaunched: true, wantActive: true,
+		},
+		{name: "claude never came up", kind: session.AgentClaude, seen: never, wantActive: true},
+		{name: "pi never came up", kind: session.AgentPi, seen: never, wantActive: true},
+		{name: "shell never came up", kind: session.AgentShell, seen: never, wantActive: true},
+		{
+			name:    "claude ran, trash unwritable",
+			kind:    session.AgentClaude,
+			seen:    reapRan,
+			noTrash: true,
+		},
 	}
-	got, err := b.l.store.Load("own")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			own := session.New("own", "/work/own", 0, 0)
+			own.Agent = tt.kind
+			if tt.stopped {
+				own.Status = session.StatusStopped
+			}
+			b, f, clock := newOwnBackend(t, own, tt.seen != never)
+			var cleaned []string
+			b.l.cleanState = func(name string) { cleaned = append(cleaned, name) }
+			if tt.noTrash {
+				blockTrash(t)
+			}
+			listCalls(t, b, f)
+			if tt.seen == never {
+				*clock = clock.Add(reapGrace)
+			} else {
+				*clock = clock.Add(tt.seen)
+				listCalls(t, b, f)
+				dropClaude(f, own)
+				if tt.relaunched {
+					own.KittyWindowID = 0
+					if err := b.l.store.Save(own); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if calls := listCalls(t, b, f); !hasPrefixCall(f, "CloseTab(") {
+				t.Fatalf("tab not closed: %v", calls)
+			}
+
+			got, err := b.l.store.Load("own")
+			trashed, _ := b.l.store.ListTrashed()
+			if tt.wantTrash {
+				if err == nil {
+					t.Errorf("record still in the store: %+v", got)
+				}
+				if len(trashed) != 1 || trashed[0].ID != own.ID || trashed[0].IsActive() {
+					t.Errorf("trash = %+v, want the own record, stopped", trashed)
+				}
+				if want := []string{"own"}; !slices.Equal(cleaned, want) {
+					t.Errorf("state files cleaned = %v, want %v", cleaned, want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("record gone from the store: %v", err)
+			}
+			if got.IsActive() != tt.wantActive || got.ID != own.ID ||
+				got.KittyTabID != own.KittyTabID {
+				t.Errorf("record = %+v, want active %v", got, tt.wantActive)
+			}
+			if len(trashed) != 0 {
+				t.Errorf("trash = %+v, want empty", trashed)
+			}
+			if len(cleaned) != 0 {
+				t.Errorf("state files cleaned = %v, want none", cleaned)
+			}
+		})
+	}
+}
+
+// blockTrash puts a file where the store's trash directory is, so a move
+// into it fails.
+func blockTrash(t *testing.T) {
+	t.Helper()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.IsActive() || got.ID != own.ID || got.KittyTabID != own.KittyTabID {
-		t.Errorf("record changed by the reap: %+v", got)
+	dir := filepath.Join(home, ".config", "ks", "sessions", "trash")
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -290,5 +401,76 @@ func TestWithdrawAndCloseNeedsNoRecord(t *testing.T) {
 	}
 	if f.hasTab(own.KittyTabID) {
 		t.Errorf("own tab still in the instance: %+v", f.windows)
+	}
+}
+
+func TestPokeLooksUntilTheReapFires(t *testing.T) {
+	own := session.New("own", "/work/own", 0, 0)
+	b, f, _ := newOwnBackend(t, own, true)
+	listCalls(t, b, f)
+
+	f.calls, f.slept = nil, 0
+	b.Poke() // the agent is still there: every look, nothing closed
+	if n := countCalls(f, "Windows"); n != pokeLooks {
+		t.Errorf("looks with the agent present = %d, want %d", n, pokeLooks)
+	}
+	if hasPrefixCall(f, "CloseTab(") {
+		t.Errorf("closed a tab with the agent present: %v", f.calls)
+	}
+	if want := time.Duration(pokeLooks-1) * pokePoll; f.slept != want {
+		t.Errorf("slept %v between looks, want %v", f.slept, want)
+	}
+
+	dropClaude(f, own)
+	f.calls, f.slept = nil, 0
+	b.Poke() // gone: the first look reaps and the poke ends
+	if n := countCalls(f, "Windows"); n != 1 {
+		t.Errorf("looks with the agent gone = %d, want 1: %v", n, f.calls)
+	}
+	if !hasPrefixCall(f, "CloseTab(") {
+		t.Errorf("tab not closed: %v", f.calls)
+	}
+	if f.slept != 0 {
+		t.Errorf("slept %v after the reap, want none", f.slept)
+	}
+
+	f.calls = nil
+	b.Poke() // reaped already: nothing to look for
+	if len(f.calls) != 0 {
+		t.Errorf("poke after the reap made calls: %v", f.calls)
+	}
+}
+
+func TestPokeIgnoresTheHomeSidebar(t *testing.T) {
+	b, f, _ := newTestBackend(t)
+	f.calls = nil
+	b.Poke()
+	if len(f.calls) != 0 {
+		t.Errorf("home sidebar poke made calls: %v", f.calls)
+	}
+}
+
+func TestLauncherPoke(t *testing.T) {
+	l, f, _ := newTestLauncher(t)
+	sess := session.New("s", "/work", 3, 4)
+	sess.KittySidebarWindowID = 5
+	if err := l.Poke(sess); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{fmt.Sprintf("SignalTagged(5,%s,SIGUSR2)", sess.ID)}; !slices.Equal(
+		f.calls,
+		want,
+	) {
+		t.Errorf("calls = %v, want %v", f.calls, want)
+	}
+
+	f.calls = nil
+	if err := l.Poke(session.New("bare", "/work", 0, 0)); err != nil || len(f.calls) != 0 {
+		t.Errorf("record without a sidebar: err %v, calls %v; want neither", err, f.calls)
+	}
+
+	f.errs["SignalTagged"] = errors.New("no matching windows")
+	if err := l.Poke(sess); err == nil {
+		t.Error("a failed signal was not reported")
 	}
 }

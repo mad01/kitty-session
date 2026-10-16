@@ -90,8 +90,11 @@ func runHook(cmd *cobra.Command, args []string) error {
 		name = sess.Name // state files follow the record's current name
 	}
 	if isEnd {
-		if sess != nil && payload.AgentID == "" {
-			markSessionStopped(stderr, store, sess, payload.Reason)
+		if sess != nil && payload.AgentID == "" && userExit(payload.Reason) {
+			markSessionStopped(stderr, store, sess)
+			if err := hookPoke(sess); err != nil {
+				hookWarn(stderr, err)
+			}
 		}
 		return nil
 	}
@@ -288,19 +291,17 @@ func recordClaudeSession(
 	}
 }
 
+// userExit reports whether a SessionEnd reason is the user ending the agent
+// at its prompt: /exit, ctrl+c twice or ctrl+d (prompt_input_exit) and
+// logout. A window closed by kitty (other) or a /clear or /resume restart
+// are not.
+func userExit(reason string) bool {
+	return reason == hooks.ReasonPromptInputExit || reason == hooks.ReasonLogout
+}
+
 // markSessionStopped records that the user ended the agent and drops the
-// session's state file. Only an explicit exit counts; a window closed by
-// kitty (reason other) or a /clear or /resume restart leaves the session
-// active.
-func markSessionStopped(
-	stderr io.Writer,
-	store *session.Store,
-	sess *session.Session,
-	reason string,
-) {
-	if reason != hooks.ReasonPromptInputExit && reason != hooks.ReasonLogout {
-		return
-	}
+// session's state file, so the next attach leaves the session alone.
+func markSessionStopped(stderr io.Writer, store *session.Store, sess *session.Session) {
 	sess.Status = session.StatusStopped
 	if err := store.Save(sess); err != nil {
 		hookWarn(stderr, err)

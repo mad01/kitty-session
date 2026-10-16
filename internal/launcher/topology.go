@@ -24,6 +24,7 @@ type backend interface {
 	MoveActiveTab(steps int) error
 	CloseTab(tabID int) error
 	SignalChild(windowID int, signal string) error
+	SignalTagged(windowID int, sessionID, signal string) error
 	SetUserVars(windowID int, vars ...string) error
 	UnsetUserVars(windowID int, names ...string) error
 }

@@ -32,6 +32,7 @@ type piHookCase struct {
 	wantStatus,
 	wantPiID,
 	wantPiPath string
+	wantPoke bool // the sidebar is poked to close the tab now
 }
 
 func piHookCases() []piHookCase {
@@ -137,6 +138,7 @@ func piHookCases() []piHookCase {
 			wantStatus: session.StatusActive,
 			wantPiID:   "p1",
 			wantPiPath: "/s.jsonl",
+			wantPoke:   true,
 		},
 		{
 			name:       "pi session_shutdown reload drops the state file and keeps the record active",
@@ -192,6 +194,7 @@ func runPiHookCase(t *testing.T, store *session.Store, tc piHookCase) {
 	}
 	t.Setenv("KS_SESSION_NAME", tc.session)
 	t.Setenv("KS_SESSION_ID", tc.id)
+	poked := recordPokes(t)
 
 	var stderr bytes.Buffer
 	rootCmd.SetIn(strings.NewReader(tc.payload))
@@ -216,6 +219,9 @@ func runPiHookCase(t *testing.T, store *session.Store, tc piHookCase) {
 	}
 	if tc.seed != nil {
 		checkPiRecord(t, store, record, tc)
+	}
+	if (*poked > 0) != tc.wantPoke {
+		t.Errorf("sidebar poked %d times, want poke = %v", *poked, tc.wantPoke)
 	}
 	if got := strings.Contains(stderr.String(), "ks _pi-hook:"); got != tc.wantWarn {
 		t.Errorf("stderr = %q, want a ks _pi-hook: line = %v", stderr.String(), tc.wantWarn)

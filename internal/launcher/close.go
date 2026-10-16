@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/mad01/kitty-session/internal/session"
-	"github.com/mad01/kitty-session/internal/state"
 )
 
 // CloseOptions tunes Close.
@@ -39,14 +38,13 @@ func (l *Launcher) Close(sess *session.Session, opts CloseOptions) ([]error, err
 	if opts.Keep {
 		// Record the stop before the tab goes away: closing the window ends
 		// claude with SessionEnd reason "other", which the hook ignores.
-		sess.Status = session.StatusStopped
-		if err := l.store.Save(sess); err != nil {
-			return nil, fmt.Errorf("cannot save session: %w", err)
+		if err := l.stop(sess); err != nil {
+			return nil, err
 		}
-	} else if err := l.store.Delete(sess.Name); err != nil {
-		return nil, fmt.Errorf("cannot delete session file: %w", err)
+		l.cleanState(sess.Name)
+	} else if err := l.trash(sess); err != nil {
+		return nil, err
 	}
-	state.Clean(sess.Name)
 
 	all, lv, err := l.snapshot(sess)
 	if err != nil {
@@ -62,4 +60,30 @@ func (l *Launcher) Close(sess *session.Session, opts CloseOptions) ([]error, err
 		}
 	}
 	return append(warnings, l.closeTabs(all, lv)...), nil
+}
+
+// stop marks the record stopped and saves it, so the next attach leaves the
+// session alone and enter on its row reopens it.
+func (l *Launcher) stop(sess *session.Session) error {
+	sess.Status = session.StatusStopped
+	if err := l.store.Save(sess); err != nil {
+		return fmt.Errorf("cannot save session: %w", err)
+	}
+	return nil
+}
+
+// trash ends a session's record: marked stopped, so a restore brings it
+// back the way ks close --keep leaves it, then moved to the trash, and its
+// state file removed. The in-memory sess keeps its kitty ids, so the
+// session's tab can still be found once the record is gone. A record the
+// store cannot move is left in place, stopped.
+func (l *Launcher) trash(sess *session.Session) error {
+	if err := l.stop(sess); err != nil {
+		return err
+	}
+	if err := l.store.Delete(sess.Name); err != nil {
+		return fmt.Errorf("cannot delete session file: %w", err)
+	}
+	l.cleanState(sess.Name)
+	return nil
 }

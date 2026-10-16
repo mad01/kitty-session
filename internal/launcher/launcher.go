@@ -169,8 +169,12 @@ func (l *Launcher) Open(req Request) (*Result, error) {
 	}
 
 	// Save before the first kitty call: claude fires SessionStart as soon as
-	// it starts, and that hook must find the record it updates.
+	// it starts, and that hook must find the record it updates. The agent
+	// window id is cleared until recordWindows writes the new one: the old
+	// window is gone, and a sidebar reap that fires meanwhile reads the
+	// cleared id as a relaunch under way and leaves the record alone.
 	sess.Status = session.StatusActive
+	sess.KittyWindowID = 0
 	if err := l.store.Save(sess); err != nil {
 		return nil, fmt.Errorf("cannot save session: %w", err)
 	}

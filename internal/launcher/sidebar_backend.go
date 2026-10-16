@@ -3,6 +3,7 @@ package launcher
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"sync"
@@ -139,7 +140,7 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 		}
 		agents = append(agents, b.agent(sess, lv, own, pos[lv.tabID()]))
 		if own {
-			b.reapIfGone(all, lv)
+			b.reapIfGone(all, lv, sess)
 		}
 	}
 	return agents, nil
@@ -168,6 +169,11 @@ func (b *SidebarBackend) markViewed(
 		return sess, nil
 	}
 	fresh, err := b.l.store.Load(sess.Name)
+	if errors.Is(err, fs.ErrNotExist) {
+		// Trashed under this tick, by the reap of an overlapping one or a
+		// ks close: nothing to stamp, and the tab is on its way out.
+		return sess, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cannot reload session: %w", err)
 	}
@@ -668,7 +674,7 @@ func (b *SidebarBackend) Quit() error {
 }
 
 // WithdrawAndClose takes the own session's banner down (when there is one)
-// and closes the own tab through the reap path, leaving the record alone.
+// and closes the own tab (closeTabs), leaving the record alone.
 // The sidebar's SIGUSR1 handler runs it when a launcher close signals this
 // sidebar: only this process can take its own banner down, and it dies with
 // the tab. closeTabs recreates the home tab when this was the last session
@@ -690,7 +696,7 @@ func (b *SidebarBackend) WithdrawAndClose() {
 	if err != nil {
 		return
 	}
-	b.l.reapTab(all, lv)
+	b.l.closeTabs(all, lv)
 }
 
 // Repos lists the git repositories under the configured dirs.

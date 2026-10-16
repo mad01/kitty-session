@@ -15,7 +15,7 @@ import (
 // withdraw hook on SIGUSR1, the launcher's ask to take the banner down.
 func TestWithdrawOnSignalRunsTheHook(t *testing.T) {
 	ran := make(chan struct{}, 1)
-	stop := withdrawOnSignal(func() { ran <- struct{}{} })
+	stop := onSignal(syscall.SIGUSR1, func() { ran <- struct{}{} })
 	defer stop()
 	if err := syscall.Kill(syscall.Getpid(), syscall.SIGUSR1); err != nil {
 		t.Fatalf("kill: %v", err)

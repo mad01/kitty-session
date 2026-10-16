@@ -14,6 +14,10 @@ const (
 	// down and close its own tab; every ks sidebar handles it (internal/cli).
 	// It is SIGUSR1, whose default action would otherwise end the process.
 	closeSignal = "SIGUSR1"
+	// pokeSignal tells a session's sidebar to look for its agent window now
+	// (SidebarBackend.Poke); the exit hooks send it through Launcher.Poke.
+	// It is SIGUSR2, handled by every ks sidebar like closeSignal.
+	pokeSignal = "SIGUSR2"
 	// closeGrace caps how long the launcher waits for the signalled sidebars
 	// to close their tabs before it closes whatever they left behind.
 	closeGrace = 500 * time.Millisecond

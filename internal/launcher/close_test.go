@@ -18,6 +18,7 @@ import (
 // between them.
 func TestClose(t *testing.T) {
 	l, f, store := newTestLauncher(t)
+	l.cleanState = state.Clean // the subtests check the state file on disk
 
 	// open adds a session with a tab (sidebar + claude), writes a state file,
 	// and resets the fake's recording. withSidebar false drops the sidebar
@@ -101,8 +102,17 @@ func TestClose(t *testing.T) {
 		if _, err := store.Load("deleted"); err == nil {
 			t.Fatal("record still in the store, want trashed")
 		}
-		if trashed, err := store.ListTrashed(); err != nil || !containsName(trashed, "deleted") {
+		trashed, err := store.ListTrashed()
+		if err != nil || !containsName(trashed, "deleted") {
 			t.Errorf("trash = %v, %v; want deleted present", trashed, err)
+		}
+		for _, s := range trashed {
+			if s.Name == "deleted" && s.IsActive() {
+				t.Errorf("trashed record is active, want stopped: %+v", s)
+			}
+		}
+		if _, _, err := state.Read("deleted"); err == nil {
+			t.Error("state file still there, want removed")
 		}
 	})
 
@@ -141,51 +151,60 @@ func TestClose(t *testing.T) {
 		wantStopped("self")
 	})
 
-	t.Run("an older sidebar that ignores the signal is waited out, then closed", func(t *testing.T) {
-		sess := open("older", true)
-		f.ignoreSignal = true // the sidebar never closes its tab
-		warnings, err := l.Close(sess, CloseOptions{Keep: true, Signal: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(warnings) != 0 {
-			t.Errorf("warnings = %v, want none", warnings)
-		}
-		if !slices.Contains(f.calls, fmt.Sprintf("SignalChild(%d,SIGUSR1)", sess.KittySidebarWindowID)) {
-			t.Errorf("calls = %v, want a SignalChild", f.calls)
-		}
-		if !slices.Contains(f.calls, fmt.Sprintf("CloseTab(%d)", sess.KittyTabID)) {
-			t.Errorf("calls = %v, want the leftover tab closed", f.calls)
-		}
-		if f.slept != closeGrace {
-			t.Errorf("slept %v, want the cap %v", f.slept, closeGrace)
-		}
-		wantStopped("older")
-	})
+	t.Run(
+		"an older sidebar that ignores the signal is waited out, then closed",
+		func(t *testing.T) {
+			sess := open("older", true)
+			f.ignoreSignal = true // the sidebar never closes its tab
+			warnings, err := l.Close(sess, CloseOptions{Keep: true, Signal: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(warnings) != 0 {
+				t.Errorf("warnings = %v, want none", warnings)
+			}
+			if !slices.Contains(
+				f.calls,
+				fmt.Sprintf("SignalChild(%d,SIGUSR1)", sess.KittySidebarWindowID),
+			) {
+				t.Errorf("calls = %v, want a SignalChild", f.calls)
+			}
+			if !slices.Contains(f.calls, fmt.Sprintf("CloseTab(%d)", sess.KittyTabID)) {
+				t.Errorf("calls = %v, want the leftover tab closed", f.calls)
+			}
+			if f.slept != closeGrace {
+				t.Errorf("slept %v, want the cap %v", f.slept, closeGrace)
+			}
+			wantStopped("older")
+		},
+	)
 
-	t.Run("a sidebar that cannot be signalled is a warning, the tab still closes", func(t *testing.T) {
-		sess := open("deaf", true)
-		f.errs["SignalChild"] = errors.New("no such process")
-		warnings, err := l.Close(sess, CloseOptions{Keep: true, Signal: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(warnings) != 1 {
-			t.Errorf("warnings = %v, want 1", warnings)
-		}
-		want := []string{
-			"Windows",
-			fmt.Sprintf("SignalChild(%d,SIGUSR1)", sess.KittySidebarWindowID),
-			fmt.Sprintf("CloseTab(%d)", sess.KittyTabID),
-		}
-		if !slices.Equal(f.calls, want) {
-			t.Errorf("calls = %v, want %v", f.calls, want)
-		}
-		if f.slept != 0 {
-			t.Errorf("slept %v, want 0: a failed signal is not awaited", f.slept)
-		}
-		wantStopped("deaf")
-	})
+	t.Run(
+		"a sidebar that cannot be signalled is a warning, the tab still closes",
+		func(t *testing.T) {
+			sess := open("deaf", true)
+			f.errs["SignalChild"] = errors.New("no such process")
+			warnings, err := l.Close(sess, CloseOptions{Keep: true, Signal: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(warnings) != 1 {
+				t.Errorf("warnings = %v, want 1", warnings)
+			}
+			want := []string{
+				"Windows",
+				fmt.Sprintf("SignalChild(%d,SIGUSR1)", sess.KittySidebarWindowID),
+				fmt.Sprintf("CloseTab(%d)", sess.KittyTabID),
+			}
+			if !slices.Equal(f.calls, want) {
+				t.Errorf("calls = %v, want %v", f.calls, want)
+			}
+			if f.slept != 0 {
+				t.Errorf("slept %v, want 0: a failed signal is not awaited", f.slept)
+			}
+			wantStopped("deaf")
+		},
+	)
 
 	t.Run("an unreachable instance is a warning, the record still stops", func(t *testing.T) {
 		sess := open("offline", true)

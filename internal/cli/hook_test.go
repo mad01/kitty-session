@@ -36,6 +36,7 @@ type hookCase struct {
 	wantStatus,
 	wantClaudeID,
 	wantTranscript string
+	wantPoke bool // the sidebar is poked to close the tab now
 }
 
 // All hook cases share one fake HOME: state.Dir resolves HOME once per process,
@@ -353,6 +354,7 @@ func hookCases() []hookCase {
 			seedFile:     state.Entry{State: "idle"},
 			seed:         &session.Session{Status: session.StatusActive, ClaudeSessionID: "id-1"},
 			wantStatus:   session.StatusStopped,
+			wantPoke:     true,
 			wantClaudeID: "id-1",
 		},
 		{
@@ -361,6 +363,7 @@ func hookCases() []hookCase {
 			payload:    `{"hook_event_name":"SessionEnd","reason":"logout","session_id":"s1","transcript_path":"/t","cwd":"/tmp"}`,
 			seed:       &session.Session{Status: session.StatusActive},
 			wantStatus: session.StatusStopped,
+			wantPoke:   true,
 		},
 		{
 			name:       "SessionEnd from a subagent leaves the record alone",
@@ -435,6 +438,7 @@ func runHookCase(t *testing.T, store *session.Store, tc hookCase) {
 	t.Setenv("KS_SESSION_NAME", tc.session)
 	t.Setenv("KS_SESSION_ID", tc.id)
 	useFakeProcessTree(t, tc.nested)
+	poked := recordPokes(t)
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetIn(strings.NewReader(tc.payload))
@@ -469,6 +473,9 @@ func runHookCase(t *testing.T, store *session.Store, tc hookCase) {
 	if tc.seed != nil {
 		checkRecord(t, store, record, tc)
 	}
+	if (*poked > 0) != tc.wantPoke {
+		t.Errorf("sidebar poked %d times, want poke = %v", *poked, tc.wantPoke)
+	}
 	if tc.quiet && stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want nothing", stderr.String())
 	}
@@ -478,6 +485,16 @@ func runHookCase(t *testing.T, store *session.Store, tc hookCase) {
 			t.Errorf("stderr = %q, want a ks _hook: line about the missing record", stderr.String())
 		}
 	}
+}
+
+// recordPokes replaces the sidebar poke with a counter for the test.
+func recordPokes(t *testing.T) *int {
+	t.Helper()
+	n := 0
+	prev := hookPoke
+	hookPoke = func(*session.Session) error { n++; return nil }
+	t.Cleanup(func() { hookPoke = prev })
+	return &n
 }
 
 // useFakeProcessTree points the hook at a fake tree where the hook's real

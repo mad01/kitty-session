@@ -80,8 +80,10 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	stop := withdrawOnSignal(b.WithdrawAndClose)
-	defer stop()
+	stopClose := onSignal(syscall.SIGUSR1, b.WithdrawAndClose)
+	defer stopClose()
+	stopPoke := onSignal(syscall.SIGUSR2, b.Poke)
+	defer stopPoke()
 	return sidebar.Run(sidebar.Options{
 		Session:   ownName,
 		SessionID: ownID,
@@ -113,21 +115,21 @@ func sidebarNotifier(
 	return n, func() { _ = n.Close(id) }
 }
 
-// withdrawOnSignal makes the sidebar answer SIGUSR1, the launcher's ask to
-// take the own session's banner down and close its own tab (ks close from a
-// shell, a close from another sidebar, ks quit). Every sidebar installs it,
-// the home tab's included, because the signal's default action is to end the
-// process; the handler on a sidebar with no banner or no own session just
-// does nothing. Each signal runs run (WithdrawAndClose). The returned func
-// restores the default action.
-func withdrawOnSignal(run func()) (stop func()) {
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGUSR1)
+// onSignal makes the sidebar answer sig by running run on a goroutine of
+// its own, once per delivery, until the returned stop is called. Every
+// sidebar installs both handlers, the home tab's included, because the
+// default action of either signal is to end the process; a home sidebar's
+// run does nothing. SIGUSR1 is the launcher's ask to take the own banner
+// down and close the own tab (WithdrawAndClose); SIGUSR2 is the exit
+// hooks' poke to look for the agent window now (Poke).
+func onSignal(sig os.Signal, run func()) (stop func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sig)
 	done := make(chan struct{})
 	go func() {
 		for {
 			select {
-			case <-sig:
+			case <-ch:
 				run()
 			case <-done:
 				return
@@ -135,7 +137,7 @@ func withdrawOnSignal(run func()) (stop func()) {
 		}
 	}()
 	return func() {
-		signal.Stop(sig)
+		signal.Stop(ch)
 		close(done)
 	}
 }

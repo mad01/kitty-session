@@ -281,6 +281,11 @@ func (f *fakeKitty) CloseTab(tab int) error {
 // signalled window's whole tab, as a real sidebar's SIGUSR1 handler closes
 // its own tab. With ignoreSignal it only records, as an older build that
 // dies on the signal leaving its windows for the caller to close.
+// SignalTagged records the signal; the poke it carries ends no process.
+func (f *fakeKitty) SignalTagged(id int, sessionID, signal string) error {
+	return f.record("SignalTagged(%d,%s,%s)", id, sessionID, signal)
+}
+
 func (f *fakeKitty) SignalChild(id int, signal string) error {
 	if err := f.record("SignalChild(%d,%s)", id, signal); err != nil {
 		return err
