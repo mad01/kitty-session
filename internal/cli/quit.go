@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mad01/kitty-session/internal/instance"
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +35,10 @@ func runQuit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	l, err := launcher.New(store, c, cfg)
+	if err != nil {
+		return err
+	}
 	sessions, err := store.List()
 	if err != nil {
 		return err
@@ -44,6 +49,10 @@ func runQuit(cmd *cobra.Command, args []string) error {
 			active++
 		}
 	}
+	// The sidebars die with their windows, so each is asked to take its
+	// banner down and close its own tab before CloseAll; "" skips none,
+	// since the shell running ks quit is no session's sidebar.
+	printWarnings(cmd, l.WithdrawBanners(sessions, ""))
 	if err := instance.Shutdown(c); err != nil {
 		return err
 	}

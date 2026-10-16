@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/kitty"
 	"github.com/mad01/kitty-session/internal/session"
@@ -22,7 +23,16 @@ type backend interface {
 	FocusWindow(windowID int) error
 	MoveActiveTab(steps int) error
 	CloseTab(tabID int) error
+	SignalChild(windowID int, signal string) error
+	SetUserVars(windowID int, vars ...string) error
+	UnsetUserVars(windowID int, names ...string) error
 }
+
+// movingTTL caps how long a KS_MOVING marker keeps a tab counted as not
+// seen. ks move sets it for the moment it brings a tab to the front and
+// clears it after; the cap makes sure a move that failed before clearing it
+// cannot park a tab unseen for good.
+const movingTTL = 10 * time.Second
 
 // Geometry constants of a session tab.
 const (
@@ -88,18 +98,32 @@ func (lv live) tabActive() bool {
 	return false
 }
 
-// visible reports whether the user is looking at the session's tab: it is
-// the tab its OS window shows, and that OS window has keyboard focus. The
-// viewed stamp, the unread mark and the done-reads-idle rule key on this
-// and not on the tab alone: a tab in front of an OS window the user has
-// left for another app is not being watched.
-func (lv live) visible() bool {
-	for _, w := range []*kitty.Window{lv.sidebar, lv.claude} {
+// visible reports whether the user is looking at the session's tab at now:
+// it is the tab its OS window shows, and that OS window has keyboard focus,
+// and no window of the session carries a fresh KS_MOVING marker. The viewed
+// stamp, the unread mark and the done-reads-idle rule key on this and not on
+// the tab alone: a tab in front of an OS window the user has left for
+// another app is not being watched, and neither is the flash of a tab ks
+// move brings up to reorder it.
+func (lv live) visible(now time.Time) bool {
+	windows := []*kitty.Window{lv.sidebar, lv.claude}
+	for _, w := range windows {
+		if w != nil && moving(w.MovingAt, now) {
+			return false
+		}
+	}
+	for _, w := range windows {
 		if w != nil && w.TabActive && w.OSFocused {
 			return true
 		}
 	}
 	return false
+}
+
+// moving reports whether a KS_MOVING marker stamped at movingAt is still
+// within movingTTL of now.
+func moving(movingAt, now time.Time) bool {
+	return !movingAt.IsZero() && now.Sub(movingAt) < movingTTL
 }
 
 // ClaudeWindow returns sess's claude window from an already-taken snapshot,

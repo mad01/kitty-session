@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/mad01/kitty-session/internal/launcher"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +34,7 @@ func runClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session %q not found", name)
 	}
 
-	warnings, err := w.launcher.Close(sess, keepSession)
+	warnings, err := w.launcher.Close(sess, launcher.CloseOptions{Keep: keepSession, Signal: true})
 	printWarnings(cmd, warnings)
 	if err != nil {
 		return err

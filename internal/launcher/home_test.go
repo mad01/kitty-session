@@ -50,7 +50,11 @@ func TestCloseLastSessionRecreatesHomeFirst(t *testing.T) {
 	}
 	f.calls, f.launches = nil, nil
 
-	warnings, err := l.Close(res.Session, true)
+	// Signal off: the own-session close path, where the launcher closes the
+	// tab itself and recreates the home tab first. A close from a shell or
+	// another sidebar signals this sidebar to do the same from its own
+	// process (covered in reap and close tests).
+	warnings, err := l.Close(res.Session, CloseOptions{Keep: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +90,7 @@ func TestCloseLastSessionBesideAUserTabMakesNoHome(t *testing.T) {
 	user := f.addUserTab()
 	f.calls = nil
 
-	warnings, err := l.Close(res.Session, true)
+	warnings, err := l.Close(res.Session, CloseOptions{Keep: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +98,8 @@ func TestCloseLastSessionBesideAUserTabMakesNoHome(t *testing.T) {
 		t.Errorf("warnings = %v", warnings)
 	}
 	// The user's tab holds the instance up, so only the session tab goes.
-	if want := []string{"Windows", "CloseTab(2)"}; !slices.Equal(f.calls, want) {
+	want := []string{"Windows", "CloseTab(2)"}
+	if !slices.Equal(f.calls, want) {
 		t.Errorf("calls = %v, want %v", f.calls, want)
 	}
 	if len(f.windows) != 1 || !f.hasTab(user) {
@@ -205,10 +210,11 @@ func TestCloseWithOtherSessionsLeavesHomeAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.calls = nil
-	if _, err := l.Close(one.Session, false); err != nil {
+	if _, err := l.Close(one.Session, CloseOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"Windows", "CloseTab(2)"}; !slices.Equal(f.calls, want) {
+	want := []string{"Windows", "CloseTab(2)"}
+	if !slices.Equal(f.calls, want) {
 		t.Errorf("calls = %v, want %v", f.calls, want)
 	}
 }

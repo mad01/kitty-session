@@ -15,35 +15,30 @@ import (
 // from a hook that saw the event, while a record stays until kitty drops
 // it, so the file wins while it is fresh. The sidebar and ks list both
 // decide this here. ok is false when the caller should fall back to the
-// kind's own rules.
-func ReportedState(
-	report kitty.ProgramState, fileAt time.Time, visible bool,
-) (sidebar.State, bool) {
+// kind's own rules. A done the caller is looking at is turned to idle by the
+// caller's own visible-tab pass, not here.
+func ReportedState(report kitty.ProgramState, fileAt time.Time) (sidebar.State, bool) {
 	if report == "" || state.IsFresh(fileAt) {
 		return sidebar.StateIdle, false
 	}
-	return ProgramState(report, visible)
+	return ProgramState(report)
 }
 
 // ProgramState maps a Program Status Protocol state onto the sidebar's:
-// blocked is input, and working, done, error and idle keep their names,
-// except that done on the tab the user is looking at reads idle. kitty
-// drops a done record on a focus-in or a keypress only, so a turn that ends
-// while the user sits in the window would otherwise stay at done. The
+// blocked is input, and working, done, error and idle keep their names. The
 // record is the program's own word, so it reads the same whatever the
-// session's kind. ok is false without a record or with a state ks does not
-// map, and the caller falls back to its own rules; the kitty package
-// already drops states it does not know, so that fallthrough is defensive.
-func ProgramState(st kitty.ProgramState, visible bool) (sidebar.State, bool) {
+// session's kind. A done on the tab the user is looking at becomes idle in
+// the single visible-tab pass the callers apply (resolveState, ks list), not
+// here. ok is false without a record or with a state ks does not map, and
+// the caller falls back to its own rules; the kitty package already drops
+// states it does not know, so that fallthrough is defensive.
+func ProgramState(st kitty.ProgramState) (sidebar.State, bool) {
 	switch st {
 	case kitty.ProgramBlocked:
 		return sidebar.StateInput, true
 	case kitty.ProgramWorking:
 		return sidebar.StateWorking, true
 	case kitty.ProgramDone:
-		if visible {
-			return sidebar.StateIdle, true
-		}
 		return sidebar.StateDone, true
 	case kitty.ProgramError:
 		return sidebar.StateError, true

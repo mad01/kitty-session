@@ -29,6 +29,7 @@ type fakeKitty struct {
 	onWindows   func() error     // runs inside Windows, to fail one snapshot among several
 	claudeExits bool             // a window launched by LaunchVSplit vanishes at once
 	osUnfocused bool             // the OS window has lost keyboard focus; every window reports it
+	ignoreSignal bool // a signalled sidebar does not close its tab, as an older build would not
 	slept       time.Duration
 }
 
@@ -274,6 +275,45 @@ func (f *fakeKitty) CloseTab(tab int) error {
 	}
 	f.windows = slices.DeleteFunc(f.windows, func(w kitty.Window) bool { return w.TabID == tab })
 	return nil
+}
+
+// SignalChild records the signal and, unless ignoreSignal is set, drops the
+// signalled window's whole tab, as a real sidebar's SIGUSR1 handler closes
+// its own tab. With ignoreSignal it only records, as an older build that
+// dies on the signal leaving its windows for the caller to close.
+func (f *fakeKitty) SignalChild(id int, signal string) error {
+	if err := f.record("SignalChild(%d,%s)", id, signal); err != nil {
+		return err
+	}
+	if !f.ignoreSignal {
+		if w := f.find(id); w != nil {
+			f.windows = slices.DeleteFunc(f.windows, func(x kitty.Window) bool {
+				return x.TabID == w.TabID
+			})
+		}
+	}
+	return nil
+}
+
+// SetUserVars records the call by variable name only: markMoving sets a
+// KS_MOVING stamp whose value is a wall-clock second, which a call-sequence
+// assertion should not depend on.
+func (f *fakeKitty) SetUserVars(id int, vars ...string) error {
+	return f.record("SetUserVars(%d,%s)", id, varNames(vars))
+}
+
+// UnsetUserVars records the names it was asked to remove.
+func (f *fakeKitty) UnsetUserVars(id int, names ...string) error {
+	return f.record("UnsetUserVars(%d,%s)", id, strings.Join(names, ","))
+}
+
+// varNames joins the KEY of each KEY=VALUE pair, dropping the value.
+func varNames(vars []string) string {
+	names := make([]string, len(vars))
+	for i, v := range vars {
+		names[i], _, _ = strings.Cut(v, "=")
+	}
+	return strings.Join(names, ",")
 }
 
 // varValue returns the value of the named user variable in a launch, empty

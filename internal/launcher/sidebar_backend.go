@@ -53,9 +53,10 @@ type SidebarBackend struct {
 	readText func(windowID int) (string, error)
 
 	// withdraw takes down the own session's desktop notification. It runs
-	// before the sidebar closes its own tab (reapIfGone), since the sidebar
-	// window, which posted the notification, goes with the tab. Nil when
-	// there is none to take down.
+	// before the sidebar closes its own tab (reapIfGone), and on the SIGUSR1
+	// a launcher close sends (WithdrawAndClose), since the sidebar window,
+	// which posted the notification, goes with the tab. Nil when there is
+	// none to take down.
 	withdraw func()
 
 	mu         sync.Mutex // guards the fields below; List runs off the UI loop
@@ -132,7 +133,7 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 		lv := findLive(all, sess)
 		own := b.ownID != "" && sess.ID == b.ownID
 		if own {
-			if sess, err = b.markViewed(sess, lv.visible()); err != nil {
+			if sess, err = b.markViewed(sess, lv.visible(b.l.now())); err != nil {
 				return nil, err
 			}
 		}
@@ -149,9 +150,9 @@ func (b *SidebarBackend) List() ([]sidebar.Agent, error) {
 // kept, at three moments: the poll that finds the tab newly visible (the
 // user has just looked), every viewedDebounce while it stays visible, and
 // the poll that finds it no longer visible (the user watched until the
-// switch). A tab that ks move shows for a moment while it reorders can
-// land in a poll and be stamped as viewed; that race is accepted. It
-// returns the record to resolve state from.
+// switch). The brief moment ks move brings a tab to the front to reorder it
+// does not count: Move marks the sidebar window KS_MOVING, which live.visible
+// reads as not seen. It returns the record to resolve state from.
 func (b *SidebarBackend) markViewed(
 	sess *session.Session, visible bool,
 ) (*session.Session, error) {
@@ -184,7 +185,7 @@ func (b *SidebarBackend) agent(sess *session.Session, lv live, own bool, tab int
 	w := lv.claude
 	in := stateInput{
 		kind: sess.Kind(), active: sess.IsActive(), viewedAt: sess.ViewedAt,
-		visible: lv.visible(),
+		visible: lv.visible(b.l.now()),
 	}
 	if w != nil {
 		in.hasWindow, in.title, in.report = true, w.Title, w.Status
@@ -267,7 +268,7 @@ type stateInput struct {
 // apply whatever the kind, in this order:
 //
 //	state file fresh (state.IsFresh)                → the kind's own rules below: the hooks saw the event
-//	agent window has a Program Status record        → blocked is input; working, done, error and idle are themselves, except done while the tab is visible, which is idle
+//	agent window has a Program Status record        → blocked is input; working, done, error and idle are themselves
 //
 // The record (OSC 7501, mapped by ProgramState and gated by ReportedState)
 // is the program's own word, so a shell running a program that speaks the
@@ -292,6 +293,13 @@ type stateInput struct {
 //	state file working, whatever its age            → working
 //	state file idle later than viewed_at            → done
 //	anything else (idle, waiting, no state file)    → idle
+//
+// Whatever produced it, a done on the tab the user is looking at reads idle:
+// the result is already on screen. kitty drops its own done record on a
+// focus-in or a keypress, never on focus-out, so a turn that ends while the
+// user sits in the window would otherwise stay done; the state-file done the
+// hooks and the pi extension produce is turned the same way. resolveState
+// applies that once, after the rules above.
 //
 // A fresh working state file outranks the ✳ idle title because ✳ is also one
 // of Claude Code's spinner frames, so a mid-turn snapshot can catch it while
@@ -321,7 +329,18 @@ func resolveState(in stateInput) sidebar.State {
 	if !in.active || !in.hasWindow {
 		return sidebar.StateStopped
 	}
-	if st, ok := ReportedState(in.report, in.fileAt, in.visible); ok {
+	st := resolveActive(in)
+	// A tab the user is looking at never reads done: the result is on screen.
+	if st == sidebar.StateDone && in.visible {
+		return sidebar.StateIdle
+	}
+	return st
+}
+
+// resolveActive picks a live session's state by the rules in resolveState's
+// comment, before the visible-tab done→idle pass resolveState applies.
+func resolveActive(in stateInput) sidebar.State {
+	if st, ok := ReportedState(in.report, in.fileAt); ok {
 		return st
 	}
 	switch in.kind {
@@ -467,7 +486,8 @@ func (b *SidebarBackend) correct(
 }
 
 // fileOnlyState is resolveState's pi branch: the state file alone, with no
-// title to arbitrate against, so its age plays no part.
+// title to arbitrate against, so its age plays no part. The visible-tab
+// done→idle pass is resolveState's, applied after this.
 func fileOnlyState(in stateInput) sidebar.State {
 	switch claude.ParseState(in.fileState) {
 	case claude.StateNeedsInput:
@@ -523,15 +543,18 @@ func (b *SidebarBackend) TmpDir() (string, error) {
 }
 
 // Close tears the session down; keep leaves the record, marked stopped.
-// Tab-close warnings have no home in the sidebar and are dropped, as every
-// launcher warning here is: the UI has one status line and the action itself
+// Closing another session signals its sidebar to close its own tab; closing
+// this sidebar's own session does not, since runConfirm already withdrew its
+// banner and it cannot answer a signal while it is blocked here. Tab-close
+// warnings have no home in the sidebar and are dropped, as every launcher
+// warning here is: the UI has one status line and the action itself
 // succeeded.
 func (b *SidebarBackend) Close(name string, keep bool) error {
 	sess, err := b.l.store.Load(name)
 	if err != nil {
 		return err
 	}
-	_, err = b.l.Close(sess, keep)
+	_, err = b.l.Close(sess, CloseOptions{Keep: keep, Signal: sess.ID != b.ownID})
 	return err
 }
 
@@ -628,8 +651,47 @@ func (b *SidebarBackend) HooksStatus() (string, error) {
 	return st.Brief(), nil
 }
 
-// Quit ends the ks instance; records stay active for the next attach.
-func (b *SidebarBackend) Quit() error { return b.quit() }
+// Quit ends the ks instance; records stay active for the next attach. Every
+// other session's sidebar is first asked to take its banner down and close
+// its tab (WithdrawBanners), and this one withdraws its own banner inline,
+// since it dies with its window when CloseAll runs and cannot answer a
+// signal while it is blocked here. Warnings, and a store listing that fails,
+// are dropped, as every launcher warning in the sidebar is.
+func (b *SidebarBackend) Quit() error {
+	if b.withdraw != nil {
+		b.withdraw()
+	}
+	if sessions, err := b.l.store.List(); err == nil {
+		_ = b.l.WithdrawBanners(sessions, b.ownID)
+	}
+	return b.quit()
+}
+
+// WithdrawAndClose takes the own session's banner down (when there is one)
+// and closes the own tab through the reap path, leaving the record alone.
+// The sidebar's SIGUSR1 handler runs it when a launcher close signals this
+// sidebar: only this process can take its own banner down, and it dies with
+// the tab. closeTabs recreates the home tab when this was the last session
+// tab. The home tab's sidebar has no own session and does nothing.
+//
+// The record is not read: a ks close without --keep trashes it before it
+// signals, and a store lookup would then fail and leave the tab for the
+// launcher to close after its whole wait. closeTabs needs only lv.tabs,
+// which findLive fills from the KS_SESSION_ID tag alone, so a bare record
+// carrying just the id is enough.
+func (b *SidebarBackend) WithdrawAndClose() {
+	if b.ownID == "" {
+		return
+	}
+	if b.withdraw != nil {
+		b.withdraw()
+	}
+	all, lv, err := b.l.snapshot(&session.Session{ID: b.ownID})
+	if err != nil {
+		return
+	}
+	b.l.reapTab(all, lv)
+}
 
 // Repos lists the git repositories under the configured dirs.
 func (b *SidebarBackend) Repos() ([]sidebar.Repo, error) {

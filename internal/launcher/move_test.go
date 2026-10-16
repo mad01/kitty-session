@@ -62,7 +62,8 @@ func TestMove(t *testing.T) {
 			session: "c", where: MoveTarget{Kind: MoveTop},
 			wantFrom: 3, wantTo: 1, wantOrder: "c a b d",
 			wantCalls: []string{
-				"Windows", "FocusWindow(6)", "MoveActiveTab(-2)", "FocusWindow(4)", "Windows",
+				"Windows", "SetUserVars(5,KS_MOVING)", "FocusWindow(6)", "MoveActiveTab(-2)",
+				"FocusWindow(4)", "Windows", "UnsetUserVars(5,KS_MOVING)",
 			},
 			wantRanks: map[string]int{"c": 1, "a": 2, "b": 3, "d": 4, "stopped": 5, "ghost": 0},
 		},
@@ -70,7 +71,8 @@ func TestMove(t *testing.T) {
 			name: "to bottom", session: "a", where: MoveTarget{Kind: MoveBottom},
 			wantFrom: 1, wantTo: 4, wantOrder: "b c d a",
 			wantCalls: []string{
-				"Windows", "FocusWindow(2)", "MoveActiveTab(3)", "FocusWindow(4)", "Windows",
+				"Windows", "SetUserVars(1,KS_MOVING)", "FocusWindow(2)", "MoveActiveTab(3)",
+				"FocusWindow(4)", "Windows", "UnsetUserVars(1,KS_MOVING)",
 			},
 			wantRanks: map[string]int{"b": 1, "c": 2, "d": 3, "a": 4, "stopped": 5, "ghost": 0},
 		},
@@ -78,12 +80,14 @@ func TestMove(t *testing.T) {
 			name: "the showing tab moves up without any focus change",
 			session: "b", where: MoveTarget{Kind: MoveUp},
 			wantFrom: 2, wantTo: 1, wantOrder: "b a c d",
+			// b is the visible tab, so Move does not mark it moving.
 			wantCalls: []string{"Windows", "MoveActiveTab(-1)", "Windows"},
 			wantRanks: map[string]int{"b": 1, "a": 2, "c": 3, "d": 4, "stopped": 5, "ghost": 0},
 		},
 		{
 			name: "down", session: "b", where: MoveTarget{Kind: MoveDown},
 			wantFrom: 2, wantTo: 3, wantOrder: "a c b d",
+			// b is the visible tab, so Move does not mark it moving.
 			wantCalls: []string{"Windows", "MoveActiveTab(1)", "Windows"},
 			wantRanks: map[string]int{"a": 1, "c": 2, "b": 3, "d": 4, "stopped": 5, "ghost": 0},
 		},
@@ -91,7 +95,8 @@ func TestMove(t *testing.T) {
 			name: "to a position", session: "a", where: MoveTarget{Kind: MoveTo, Position: 3},
 			wantFrom: 1, wantTo: 3, wantOrder: "b c a d",
 			wantCalls: []string{
-				"Windows", "FocusWindow(2)", "MoveActiveTab(2)", "FocusWindow(4)", "Windows",
+				"Windows", "SetUserVars(1,KS_MOVING)", "FocusWindow(2)", "MoveActiveTab(2)",
+				"FocusWindow(4)", "Windows", "UnsetUserVars(1,KS_MOVING)",
 			},
 			wantRanks: map[string]int{"b": 1, "c": 2, "a": 3, "d": 4, "stopped": 5, "ghost": 0},
 		},
@@ -100,7 +105,8 @@ func TestMove(t *testing.T) {
 			session: "d", where: MoveTarget{Kind: MoveTo, Position: 2},
 			wantFrom: 4, wantTo: 2, wantOrder: "a d b c",
 			wantCalls: []string{
-				"Windows", "FocusWindow(7)", "MoveActiveTab(-2)", "FocusWindow(4)", "Windows",
+				"Windows", "SetUserVars(7,KS_MOVING)", "FocusWindow(7)", "MoveActiveTab(-2)",
+				"FocusWindow(4)", "Windows", "UnsetUserVars(7,KS_MOVING)",
 			},
 			wantRanks: map[string]int{"a": 1, "d": 2, "b": 3, "c": 4, "stopped": 5, "ghost": 0},
 		},
@@ -109,7 +115,8 @@ func TestMove(t *testing.T) {
 			session: "a", where: MoveTarget{Kind: MoveTo, Position: 40},
 			wantFrom: 1, wantTo: 4, wantOrder: "b c d a",
 			wantCalls: []string{
-				"Windows", "FocusWindow(2)", "MoveActiveTab(3)", "FocusWindow(4)", "Windows",
+				"Windows", "SetUserVars(1,KS_MOVING)", "FocusWindow(2)", "MoveActiveTab(3)",
+				"FocusWindow(4)", "Windows", "UnsetUserVars(1,KS_MOVING)",
 			},
 			wantRanks: map[string]int{"b": 1, "c": 2, "d": 3, "a": 4, "stopped": 5, "ghost": 0},
 		},
@@ -137,7 +144,8 @@ func TestMove(t *testing.T) {
 			session: "c", where: MoveTarget{Kind: MoveTop}, blurred: true,
 			wantFrom: 3, wantTo: 1, wantOrder: "c a b d",
 			wantCalls: []string{
-				"Windows", "FocusWindow(6)", "MoveActiveTab(-2)", "FocusWindow(3)", "Windows",
+				"Windows", "SetUserVars(5,KS_MOVING)", "FocusWindow(6)", "MoveActiveTab(-2)",
+				"FocusWindow(3)", "Windows", "UnsetUserVars(5,KS_MOVING)",
 			},
 			wantRanks: map[string]int{"c": 1, "a": 2, "b": 3, "d": 4, "stopped": 5, "ghost": 0},
 		},

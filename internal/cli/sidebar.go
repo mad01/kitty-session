@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/mad01/kitty-session/internal/instance"
 	"github.com/mad01/kitty-session/internal/kitty"
@@ -78,6 +80,8 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	stop := withdrawOnSignal(b.WithdrawAndClose)
+	defer stop()
 	return sidebar.Run(sidebar.Options{
 		Session:   ownName,
 		SessionID: ownID,
@@ -107,6 +111,33 @@ func sidebarNotifier(
 	}
 	id := sidebar.NotifyID(ownID)
 	return n, func() { _ = n.Close(id) }
+}
+
+// withdrawOnSignal makes the sidebar answer SIGUSR1, the launcher's ask to
+// take the own session's banner down and close its own tab (ks close from a
+// shell, a close from another sidebar, ks quit). Every sidebar installs it,
+// the home tab's included, because the signal's default action is to end the
+// process; the handler on a sidebar with no banner or no own session just
+// does nothing. Each signal runs run (WithdrawAndClose). The returned func
+// restores the default action.
+func withdrawOnSignal(run func()) (stop func()) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGUSR1)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-sig:
+				run()
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(sig)
+		close(done)
+	}
 }
 
 // sidebarIdentity resolves which session's tab this sidebar sits in. The

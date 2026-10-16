@@ -136,6 +136,14 @@ func TestResolveState(t *testing.T) {
 			sidebar.StateDone,
 		},
 		{
+			"idle title, finished after last view, on the visible tab is idle",
+			stateInput{
+				active: true, hasWindow: true, title: "✳ Claude Code",
+				fileState: "idle", fileAt: stale, viewedAt: viewed, visible: true,
+			},
+			sidebar.StateIdle,
+		},
+		{
 			"fresh working state file outranks the idle glyph",
 			stateInput{
 				active:    true,
@@ -321,6 +329,14 @@ func TestResolveState(t *testing.T) {
 				fileState: "idle", fileAt: stale, viewedAt: viewed,
 			},
 			sidebar.StateDone,
+		},
+		{
+			"pi: idle after last view on the visible tab is idle",
+			stateInput{
+				kind: session.AgentPi, active: true, hasWindow: true,
+				fileState: "idle", fileAt: stale, viewedAt: viewed, visible: true,
+			},
+			sidebar.StateIdle,
 		},
 		{
 			"pi: idle before last view is idle",
@@ -737,7 +753,8 @@ func TestListStampsViewedAtAndDropsDoneToIdle(t *testing.T) {
 		t.Error("ViewedAt stamped while the tab was not active")
 	}
 
-	// Tab comes to the front: stamped now, so the finish is older → idle.
+	// Tab comes to the front: stamped at once, and a visible tab never reads
+	// done, so the finish is older → idle.
 	for i := range f.windows {
 		if f.windows[i].TabID == own.KittyTabID {
 			f.windows[i].TabActive = true
@@ -915,8 +932,15 @@ func (x *ownFixture) wantViewedAt(want time.Time, why string) {
 	}
 }
 
+// setMoving stamps or clears the KS_MOVING marker on the own sidebar window,
+// as ks move does around a reorder.
+func (x *ownFixture) setMoving(at time.Time) {
+	x.f.find(x.own.KittySidebarWindowID).MovingAt = at
+}
+
 // TestListStampsViewedAtOnVisibility covers when the own record is stamped
-// as viewed. Visible means the tab is in front of a focused OS window.
+// as viewed. Visible means the tab is in front of a focused OS window with
+// no fresh ks move marker on it.
 func TestListStampsViewedAtOnVisibility(t *testing.T) {
 	t.Run("in the background the row is unread and nothing is stamped", func(t *testing.T) {
 		x := newOwnFixture(t)
@@ -929,6 +953,17 @@ func TestListStampsViewedAtOnVisibility(t *testing.T) {
 		x.show(true, true)
 		x.wantRow(false, sidebar.StateWorking)
 		x.wantViewedAt(*x.clock, "not stamped when the tab came to the front")
+	})
+	t.Run("a fresh move marker keeps the tab from counting as seen", func(t *testing.T) {
+		x := newOwnFixture(t)
+		x.poll()
+		x.show(true, true)
+		x.setMoving(*x.clock) // ks move has the tab up to reorder it
+		x.wantRow(true, sidebar.StateWorking)
+		x.wantViewedAt(time.Time{}, "stamped while the move marker was fresh")
+		x.setMoving(time.Time{}) // the move cleared it
+		x.wantRow(false, sidebar.StateWorking)
+		x.wantViewedAt(*x.clock, "not stamped once the move marker was cleared")
 	})
 	t.Run("staying visible is stamped once per debounce", func(t *testing.T) {
 		x := newOwnFixture(t)
@@ -989,8 +1024,14 @@ func TestListStampsViewedAtOnVisibility(t *testing.T) {
 }
 
 func TestLiveVisible(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	win := func(tabActive, osFocused bool) *kitty.Window {
 		return &kitty.Window{TabActive: tabActive, OSFocused: osFocused}
+	}
+	moving := func(tabActive, osFocused bool, at time.Time) *kitty.Window {
+		w := win(tabActive, osFocused)
+		w.MovingAt = at
+		return w
 	}
 	tests := []struct {
 		name string
@@ -1003,10 +1044,20 @@ func TestLiveVisible(t *testing.T) {
 		{"OS window focused, tab behind", live{claude: win(false, true)}, false},
 		{"neither", live{claude: win(false, false)}, false},
 		{"no windows", live{}, false},
+		{
+			"a fresh move marker hides a tab in front",
+			live{sidebar: moving(true, true, now.Add(-time.Second))},
+			false,
+		},
+		{
+			"a stale move marker no longer hides it",
+			live{sidebar: moving(true, true, now.Add(-2*movingTTL))},
+			true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.lv.visible(); got != tc.want {
+			if got := tc.lv.visible(now); got != tc.want {
 				t.Errorf("visible = %v, want %v", got, tc.want)
 			}
 		})

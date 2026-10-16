@@ -266,3 +266,29 @@ func TestReapWithdrawsTheNotificationFirst(t *testing.T) {
 		t.Errorf("withdraw ran again on a later poll: %v", ran)
 	}
 }
+
+// TestWithdrawAndCloseNeedsNoRecord checks that the SIGUSR1 handler still
+// takes the banner down and closes the own tab after ks close has trashed
+// the record: it finds the tab by the KS_SESSION_ID tag, not the store.
+func TestWithdrawAndCloseNeedsNoRecord(t *testing.T) {
+	own := session.New("own", "/work/own", 0, 0)
+	b, f, _ := newOwnBackend(t, own, true)
+	if err := b.l.store.Delete(own.Name); err != nil {
+		t.Fatal(err)
+	}
+	withdrew := false
+	b.withdraw = func() { withdrew = true }
+	f.calls = nil
+
+	b.WithdrawAndClose()
+
+	if !withdrew {
+		t.Error("the banner was not withdrawn")
+	}
+	if !slices.Contains(f.calls, "CloseTab("+itoa(own.KittyTabID)+")") {
+		t.Errorf("own tab not closed with the record trashed: %v", f.calls)
+	}
+	if f.hasTab(own.KittyTabID) {
+		t.Errorf("own tab still in the instance: %+v", f.windows)
+	}
+}

@@ -82,7 +82,7 @@ Focus or recreate the named session. Starts the instance if needed; a fresh inst
 Usage: ks close <name> [--keep]
 ```
 
-Close the session's tab. Works while the instance is down; the tab is then reported as left alone and the record is handled regardless.
+Close the session's tab. Works while the instance is down; the tab is then reported as left alone and the record is handled regardless. The session's sidebar is signalled (`SIGUSR1`) to take down any desktop notification it posted and close its own tab, so no banner outlives the session. The command waits up to half a second for the tab to go, then closes whatever is left. A sidebar that cannot be signalled is a warning.
 
 ### Flags
 
@@ -157,7 +157,7 @@ With one argument the command moves the session it runs in. It finds that sessio
 
 Only a session with an open tab can move; a stopped session, or an active one whose tab is gone, fails with `session "<name>" has no open tab`. The instance must be running, since there is nothing to move otherwise; a down instance surfaces as the kitty error.
 
-kitty can only reorder the tab that is showing. When the moved session is not the one in front, its tab is brought up, moved, and the tab you were on is put back in front. That shows the moved tab for a moment. From inside the session itself nothing changes on screen but the sidebar numbers.
+kitty can only reorder the tab that is showing. When the moved session is not the one in front, its tab is brought up, moved, and the tab you were on is put back in front. That shows the moved tab for a moment. It does not count as having looked at it: for the move's duration the tab's sidebar window carries a `KS_MOVING` marker, which the sidebar reads as the tab not being seen. From inside the session itself nothing changes on screen but the sidebar numbers.
 
 After a move every open session is ranked by the new tab order and the rank is written to its session file as `position`. Bare `ks` and any command that has to start the instance open tabs in that order (ranked sessions first, then the rest by creation), so the order survives `ks quit`. Once any session is ranked, every tab launch ranks the open sessions again, so a new session, or a stopped one you reopen, takes the bottom rank. A store that never saw a move is left as it is.
 
@@ -173,7 +173,7 @@ Close every window of the instance, which ends it. Session records stay `active`
 ks instance closed; 3 active session(s) will resume on the next attach
 ```
 
-Prints `ks instance not running` when there is nothing to close.
+Before the windows go, every session's sidebar is signalled (`SIGUSR1`): it takes down any desktop notification it posted and closes its own tab. No banner then outlives the instance, and closing every window ends it regardless. A sidebar that cannot be signalled is a warning. Prints `ks instance not running` when there is nothing to close.
 
 ## `ks sidebar`
 
