@@ -8,7 +8,7 @@ This walks you through installing `ks`, writing the smallest useful config, and 
 
 - **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview)** on `PATH`. Every session runs `claude`; `ks` forwards your `PATH` into the instance's windows so a `claude` installed under your home directory is found.
 
-- **Go 1.25+** to build from source.
+- **Go 1.27.3+** to build from source.
 
 ## Install
 

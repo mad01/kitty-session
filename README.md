@@ -45,7 +45,7 @@ One row per session: a dot for the state (`input`, `done`, `working`, `idle`, `e
 
 ## Install
 
-You need [kitty](https://sw.kovidgoyal.net/kitty/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`; `ks` starts its own kitty instance. Go 1.25 or later is required to build from source.
+You need [kitty](https://sw.kovidgoyal.net/kitty/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/overview) on `PATH`; `ks` starts its own kitty instance. Go 1.27.3 or later is required to build from source.
 
 ```bash
 make install

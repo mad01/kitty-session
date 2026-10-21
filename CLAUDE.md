@@ -2,7 +2,7 @@
 
 `ks` is a session manager for the [kitty](https://sw.kovidgoyal.net/kitty/) terminal. It runs a kitty instance of its own. Every session is one tab in it: the ks sidebar (a Bubble Tea agent list) on the left and the session's agent on the right. The agent is one of three kinds: `claude` (Claude Code, the default), `pi`, or `shell` (kitty's default shell, no agent at all). The tab bar is hidden; the sidebar is the tab list. It tracks each session's state and brings every session back on attach. The user's own kitty is never touched. `README.md` is the front door; the `docs/` set is the deep dive. This file is the agent-facing working context: where code lives, how the on-disk model works, and the gotchas that bite.
 
-Go module `github.com/mad01/kitty-session`, builds to a single `ks` binary. Needs Go 1.25+.
+Go module `github.com/mad01/kitty-session`, builds to a single `ks` binary. Needs Go 1.27.3+.
 
 ## Where things live
 
