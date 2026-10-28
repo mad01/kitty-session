@@ -20,7 +20,7 @@ The sidebar on fake agents, recorded from `ks _sidebar-demo` with [vhs](https://
 
 ### Agent list
 
-One row per session: a dot for the state (`input`, `done`, `working`, `idle`, `error`, `stopped`), then the name. A `pi` or `sh` badge follows the name when the agent is not claude. Under it sits Claude's tab title, or the session directory. The marked row is the tab the sidebar sits in. An `input` row says how long it has waited.
+One row per session: a dot for the state (`input`, `done`, `working`, `idle`, `error`, `stopped`), then the name. A `pi` or `sh` badge follows the name when the agent is not claude. Under it, below the dot, the tab's number, 1 to 9: the N of `goto_tab N` (`cmd+N` when your kitty.conf maps it that way) and the sidebar's own jump key. Then Claude's tab title, or the session directory. The marked row is the tab the sidebar sits in. An `input` row says how long it has waited.
 
 <img src="images/sidebar.png" alt="Agent list" width="220">
 

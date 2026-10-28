@@ -253,9 +253,12 @@ func (c *Client) Ping() error {
 
 // Window is one kitty window (pane) as reported by `kitty @ ls`.
 type Window struct {
-	ID       int
-	TabID    int
-	TabTitle string
+	ID    int
+	TabID int
+	// OSWindowID is the kitty OS window the tab is in. Tab numbering
+	// (goto_tab N) is per OS window.
+	OSWindowID int
+	TabTitle   string
 	// TabActive is true when the window's tab is the one its OS window
 	// shows, whether or not that OS window has keyboard focus.
 	TabActive bool
@@ -297,6 +300,7 @@ type Window struct {
 // ls JSON shapes, limited to the fields ks reads.
 type (
 	lsOSWindow struct {
+		ID        int     `json:"id"`
 		IsFocused bool    `json:"is_focused"`
 		Tabs      []lsTab `json:"tabs"`
 	}
@@ -338,20 +342,21 @@ func parseWindows(data []byte) ([]Window, error) {
 		for _, t := range osw.Tabs {
 			for _, w := range t.Windows {
 				windows = append(windows, Window{
-					ID:        w.ID,
-					TabID:     t.ID,
-					TabTitle:  t.Title,
-					TabActive: t.IsActive,
-					OSFocused: osw.IsFocused,
-					Title:     w.Title,
-					Columns:   w.Columns,
-					Lines:     w.Lines,
-					SessionID: w.UserVars[SessionVar],
-					Home:      w.UserVars[HomeVar] != "",
-					HomeAgent: w.UserVars[HomeAgentVar] != "",
-					Focused:   w.IsFocused,
-					MovingAt:  parseUnixVar(w.UserVars[MovingVar]),
-					Status:    mostUrgent(w.Status),
+					ID:         w.ID,
+					TabID:      t.ID,
+					OSWindowID: osw.ID,
+					TabTitle:   t.Title,
+					TabActive:  t.IsActive,
+					OSFocused:  osw.IsFocused,
+					Title:      w.Title,
+					Columns:    w.Columns,
+					Lines:      w.Lines,
+					SessionID:  w.UserVars[SessionVar],
+					Home:       w.UserVars[HomeVar] != "",
+					HomeAgent:  w.UserVars[HomeAgentVar] != "",
+					Focused:    w.IsFocused,
+					MovingAt:   parseUnixVar(w.UserVars[MovingVar]),
+					Status:     mostUrgent(w.Status),
 				})
 			}
 		}

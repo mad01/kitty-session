@@ -58,9 +58,10 @@ type Agent struct {
 	// Waiting is how long Claude has been waiting on the user: the age of the
 	// prompt behind StateInput. Zero for every other state.
 	Waiting time.Duration
-	// Tab is the 1-based position of the agent's tab in the ks instance, the N
-	// of kitty's goto_tab N (cmd+N on macOS). Zero means no tab: the session
-	// is stopped or its tab is gone.
+	// Tab is the 1-based position of the agent's tab in its kitty OS window,
+	// the N of kitty's goto_tab N (cmd+N where kitty.conf maps it so; kitty
+	// binds no goto_tab key by itself) and of the sidebar's own jump key.
+	// Zero means no tab: the session is stopped or its tab is gone.
 	Tab int
 	// Own marks the session this sidebar belongs to. The model also treats
 	// an agent whose Name equals Options.Session as own.

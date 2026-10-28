@@ -99,15 +99,15 @@ func TestViewMockup(t *testing.T) {
 		1:  "│ agents                 tab order │",
 		2:  "│                                  │",
 		3:  "│ ● thismoon                       │",
-		4:  "│   Mods overview and integration… │",
+		4:  "│ 1 Mods overview and integration… │",
 		5:  "│ ● dropbrain-app                  │",
-		6:  "│   Migrane iOS 27.1 migration ✳ … │",
+		6:  "│ 2 Migrane iOS 27.1 migration ✳ … │",
 		7:  "│ ● code-search-local              │",
-		8:  "│   Reindex 日本語 テスト after s… │",
+		8:  "│ 3 Reindex 日本語 テスト after s… │",
 		9:  "│ ○ migraine-me                    │",
-		10: "│   Migrane iOS 27.1 update        │",
+		10: "│ 4 Migrane iOS 27.1 update        │",
 		11: "│▌○ kitty-session                  │",
-		12: "│   Claude Code                    │",
+		12: "│ 5 Claude Code                    │",
 		13: "│ · dotfiles                       │",
 		14: "│   ~/code/dotfiles                │",
 		22: "│ new                         menu │",
@@ -162,7 +162,7 @@ func TestViewMenuPopup(t *testing.T) {
 			t.Errorf("menu line %d = %q, want %q", first+i, got[first+i], e.label)
 		}
 	}
-	if !strings.HasPrefix(got[first], "│   Claude Code") {
+	if !strings.HasPrefix(got[first], "│ 5 Claude Code") {
 		t.Errorf("row left of the popup lost: %q", got[first])
 	}
 }
@@ -339,10 +339,10 @@ func TestViewWaitLabelOnInputRows(t *testing.T) {
 	m := newTestModel(t, fb, "demo")
 	got := lines(m)
 	want := map[int]string{
-		4:  "│   waiting 12m · Approve the mer… │",
-		6:  "│   Just asked" + strings.Repeat(" ", 21) + "│",
-		8:  "│   waiting 1h30m · ~/code/long    │",
-		10: "│   Done" + strings.Repeat(" ", 27) + "│",
+		4:  "│ 1 waiting 12m · Approve the mer… │",
+		6:  "│ 2 Just asked" + strings.Repeat(" ", 21) + "│",
+		8:  "│ 3 waiting 1h30m · ~/code/long    │",
+		10: "│ 4 Done" + strings.Repeat(" ", 27) + "│",
 	}
 	for i, w := range want {
 		if got[i] != w {
@@ -365,7 +365,7 @@ func TestViewErrorRow(t *testing.T) {
 	got := lines(m)
 	want := map[int]string{
 		3: "│ ✗ broken                         │",
-		4: "│   Push rejected                  │",
+		4: "│ 1 Push rejected                  │",
 		5: "│ ● finished                       │",
 	}
 	for i, w := range want {
@@ -395,9 +395,9 @@ func TestViewUnreadRowName(t *testing.T) {
 	got := lines(m)
 	want := map[int]string{
 		3: "│ ● seen                           │",
-		4: "│   Reindexing                     │",
+		4: "│ 1 Reindexing                     │",
 		5: "│ ● changed                        │",
-		6: "│   Reindexing                     │",
+		6: "│ 2 Reindexing                     │",
 	}
 	for i, w := range want {
 		if got[i] != w {
@@ -474,4 +474,33 @@ func TestShortDuration(t *testing.T) {
 			t.Errorf("shortDuration(%v) = %q, want %q", tt.d, got, tt.want)
 		}
 	}
+}
+
+// TestViewTabDigitUnderDot checks a row's second line starts with the tab's
+// number under the dot for tabs 1 to 9, the N of cmd+N, and with a blank on
+// a stopped row and past 9.
+func TestViewTabDigitUnderDot(t *testing.T) {
+	fb := &fakeBackend{agents: []Agent{
+		{Name: "first", Title: "One", State: StateInput, Tab: 1},
+		{Name: "ninth", Title: "Nine", State: StateIdle, Tab: 9},
+		{Name: "tenth", Title: "Ten", State: StateIdle, Tab: 10},
+		{Name: "gone", Dir: "/home/u/code/gone", State: StateStopped},
+	}}
+	m := newTestModel(t, fb, "demo")
+	got := lines(m)
+	row := func(s string) string {
+		return "│" + s + strings.Repeat(" ", DefaultWidth-2-len(s)) + "│"
+	}
+	want := map[int]string{
+		4:  row(" 1 One"),
+		6:  row(" 9 Nine"),
+		8:  row("   Ten"),
+		10: row("   ~/code/gone"),
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("line %d\n got %q\nwant %q", i, got[i], w)
+		}
+	}
+	assertGeometry(t, m, DefaultWidth, testLines)
 }

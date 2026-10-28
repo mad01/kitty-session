@@ -3,6 +3,7 @@ package sidebar
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,22 +175,36 @@ func (m model) nameWithBadge(a Agent, bg lipgloss.TerminalColor, textWidth int) 
 	return seg(style, bg, name) + seg(kindStyle, bg, badge)
 }
 
-// titleLine is a row's second line: Claude's title, or the session directory
-// with $HOME shortened, indented under the name. An input row whose prompt
-// has waited a minute or more leads with how long, so a prompt left behind
-// stands out from one that just appeared.
+// titleLine is a row's second line: the tab's number under the dot, then
+// Claude's title, or the session directory with $HOME shortened, indented
+// under the name. An input row whose prompt has waited a minute or more
+// leads with how long, so a prompt left behind stands out from one that
+// just appeared.
 func (m model) titleLine(a Agent, bg lipgloss.TerminalColor, textWidth int) string {
 	title := a.Title
 	if title == "" {
 		title = ShortenHome(a.Dir, m.home)
 	}
-	line := seg(titleStyle, bg, strings.Repeat(" ", rowIndent))
+	line := seg(titleStyle, bg, " "+tabDigit(a.Tab)+strings.Repeat(" ", rowIndent-2))
 	if label := waitLabel(a); label != "" {
 		label += " · "
 		line += seg(waitStyle, bg, label)
 		textWidth -= ansi.StringWidth(label)
 	}
 	return line + seg(titleStyle, bg, truncate(title, textWidth))
+}
+
+// tabDigit is the cell under a row's dot: the tab's number, the N of
+// kitty's goto_tab N (cmd+N where kitty.conf maps it so; kitty binds no
+// goto_tab key by itself) and of the sidebar's own jump key, for tabs 1 to
+// 9. A row without a tab (stopped) gets a blank, and so does a tab past 9,
+// which neither key reaches and whose two digits would push the title out
+// of line.
+func tabDigit(tab int) string {
+	if tab < 1 || tab > 9 {
+		return " "
+	}
+	return strconv.Itoa(tab)
 }
 
 // waitLabel is the "waiting 12m" label of an input row that has waited at

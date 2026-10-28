@@ -59,3 +59,22 @@ func TestKeysPopupFitsWidth36(t *testing.T) {
 		t.Errorf("ks maps no ctrl chords any more:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+// TestDigitKeysJumpByTabNumber checks 1-9 focus the row whose tab carries
+// that number, the digit under its dot, not the nth row: a tab of the
+// user's own between session tabs leaves a gap the keys honour, a number
+// no row carries does nothing, and a stopped row, which has no tab, is not
+// reached. The cursor itself snaps back to the own row on a focus, as
+// focusCursor always does.
+func TestDigitKeysJumpByTabNumber(t *testing.T) {
+	fb := &fakeBackend{agents: []Agent{
+		{Name: "one", State: StateIdle, Tab: 1},
+		{Name: "three", State: StateIdle, Tab: 3},
+		{Name: "gone", State: StateStopped},
+	}}
+	m := newTestModel(t, fb, "")
+	for _, k := range []string{"3", "2", "4", "1"} {
+		m, _ = run(t, m, k)
+	}
+	wantCalls(t, fb, "focus:three", "focus:one")
+}

@@ -102,7 +102,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if n, ok := digitKey(msg); ok {
-		return m.jumpTo(n - 1)
+		return m.jumpToTab(n)
 	}
 	switch msg.String() {
 	case "j", "down":
@@ -151,14 +151,20 @@ func digitKey(msg tea.KeyMsg) (int, bool) {
 	return int(r - '0'), true
 }
 
-// jumpTo moves the cursor to the row at index i and focuses that agent.
-func (m model) jumpTo(i int) (tea.Model, tea.Cmd) {
-	if i >= len(m.visible()) {
-		return m, nil
+// jumpToTab moves the cursor to the row whose tab is number n, the digit
+// under its dot, and focuses that agent: the sidebar's n does what cmd+n
+// does in a kitty.conf that maps it to goto_tab n, whatever sits between
+// the tabs. No row with that tab (a stopped session, a tab of the user's
+// own, a number past the last tab) does nothing.
+func (m model) jumpToTab(n int) (tea.Model, tea.Cmd) {
+	for i, a := range m.visible() {
+		if a.Tab == n {
+			m.cursor = i
+			m.navigated = true
+			return m.focusCursor()
+		}
 	}
-	m.cursor = i
-	m.navigated = true
-	return m.focusCursor()
+	return m, nil
 }
 
 // updateFilter edits the `/` filter. Enter keeps it, esc clears it.
