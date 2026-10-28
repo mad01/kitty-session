@@ -1737,3 +1737,27 @@ func TestListScreenBackstopRaiseGateFollowsTheWriter(t *testing.T) {
 		}
 	}
 }
+
+// TestTabPositionsCountPerOSWindow checks a tab's number is its position in
+// its own OS window, every tab counted, the way goto_tab N counts: a tab
+// detached into a second OS window starts at 1 again there.
+func TestTabPositionsCountPerOSWindow(t *testing.T) {
+	all := []kitty.Window{
+		{ID: 1, TabID: 10, OSWindowID: 1},
+		{ID: 2, TabID: 10, OSWindowID: 1},
+		{ID: 3, TabID: 11, OSWindowID: 1}, // the user's own tab counts
+		{ID: 4, TabID: 12, OSWindowID: 1},
+		{ID: 5, TabID: 20, OSWindowID: 2},
+		{ID: 6, TabID: 21, OSWindowID: 2},
+	}
+	want := map[int]int{10: 1, 11: 2, 12: 3, 20: 1, 21: 2}
+	got := tabPositions(all)
+	for tab, n := range want {
+		if got[tab] != n {
+			t.Errorf("tab %d numbered %d, want %d", tab, got[tab], n)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("numbered %d tabs, want %d", len(got), len(want))
+	}
+}

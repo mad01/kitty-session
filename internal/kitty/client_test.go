@@ -337,15 +337,15 @@ func TestWindows(t *testing.T) {
 	}
 	want := []Window{
 		{
-			ID: 1, TabID: 1, TabTitle: "ks", Title: "ks", Columns: 158, Lines: 39,
+			ID: 1, TabID: 1, OSWindowID: 1, TabTitle: "ks", Title: "ks", Columns: 158, Lines: 39,
 			Home: true, HomeAgent: true,
 		},
 		{
-			ID: 2, TabID: 2, TabTitle: "demo", TabActive: true,
+			ID: 2, TabID: 2, OSWindowID: 1, TabTitle: "demo", TabActive: true,
 			Title: "ks", Columns: 36, Lines: 39, SessionID: "abc",
 		},
 		{
-			ID: 3, TabID: 2, TabTitle: "demo", TabActive: true,
+			ID: 3, TabID: 2, OSWindowID: 1, TabTitle: "demo", TabActive: true,
 			Title: "✳ claude", Columns: 119, Lines: 39, SessionID: "abc", Focused: true,
 		},
 	}
@@ -458,9 +458,9 @@ func TestParseWindowsOSFocus(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Window{
-		{ID: 1, TabID: 1, TabActive: true},
-		{ID: 2, TabID: 2, TabActive: true, OSFocused: true},
-		{ID: 3, TabID: 3, OSFocused: true},
+		{ID: 1, TabID: 1, OSWindowID: 1, TabActive: true},
+		{ID: 2, TabID: 2, OSWindowID: 2, TabActive: true, OSFocused: true},
+		{ID: 3, TabID: 3, OSWindowID: 2, OSFocused: true},
 	}
 	if !slices.Equal(windows, want) {
 		t.Errorf("parseWindows =\n%+v\nwant\n%+v", windows, want)

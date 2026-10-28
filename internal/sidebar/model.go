@@ -38,7 +38,9 @@ const (
 	minTermWidth  = 8
 )
 
-// Timings.
+// Timings. The poll is where a change only kitty knows about is picked up:
+// a title, a program status record, a window gone. A change to ks's own
+// files reaches the list sooner, as a changeMsg.
 const (
 	pollInterval = 3 * time.Second
 	animInterval = 350 * time.Millisecond
@@ -46,8 +48,11 @@ const (
 
 // Messages the model sends itself.
 type (
-	tickMsg   time.Time
-	animMsg   time.Time
+	tickMsg time.Time
+	animMsg time.Time
+	// changeMsg says a record or a state file changed on disk
+	// (Options.Changes): list now, and leave the poll where it is.
+	changeMsg struct{}
 	agentsMsg struct {
 		gen    int // listGen when the List was issued; older results are dropped
 		agents []Agent

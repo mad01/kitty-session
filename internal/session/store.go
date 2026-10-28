@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Store persists Session records as one JSON file per session, with a trash
@@ -13,6 +15,10 @@ import (
 type Store struct {
 	dir      string
 	trashDir string
+
+	fpMu  sync.Mutex
+	fpMod time.Time // the directory's modification time behind fp
+	fp    string
 }
 
 // NewStore opens the store under ~/.config/ks/sessions/, creating it on demand.
@@ -30,6 +36,53 @@ func NewStore() (*Store, error) {
 		return nil, fmt.Errorf("cannot create trash directory: %w", err)
 	}
 	return &Store{dir: dir, trashDir: trashDir}, nil
+}
+
+// Fingerprint returns a string that moves whenever a record is written,
+// renamed, moved to the trash, restored or removed: every record's name and
+// modification time, in name order. It is the sidebar's change signal for
+// records (internal/watch). The directory is listed again only when its
+// own modification time has moved, as every write is a rename into it; in
+// between the last result is returned, so a quiet poll is one stat. The
+// temporary files a write goes through have no .json suffix and are left
+// out, so a write counts once, when it lands. A directory that cannot be
+// read reads as empty.
+func (s *Store) Fingerprint() string {
+	s.fpMu.Lock()
+	defer s.fpMu.Unlock()
+	info, err := os.Stat(s.dir)
+	if err != nil {
+		s.fpMod, s.fp = time.Time{}, ""
+		return ""
+	}
+	if !s.fpMod.IsZero() && info.ModTime().Equal(s.fpMod) {
+		return s.fp
+	}
+	s.fpMod, s.fp = info.ModTime(), listRecords(s.dir)
+	return s.fp
+}
+
+// listRecords lists dir's record files as name@mtime lines.
+func listRecords(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		b.WriteString(e.Name())
+		b.WriteByte('@')
+		b.WriteString(info.ModTime().Format(time.RFC3339Nano))
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // Save writes sess to <name>.json, replacing any existing record atomically.

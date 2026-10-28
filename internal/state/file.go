@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -115,6 +116,66 @@ func ReadEntry(name string) (Entry, error) {
 		return Entry{}, fmt.Errorf("cannot parse state file: %w", err)
 	}
 	return e, nil
+}
+
+var (
+	fpMu  sync.Mutex
+	fpMod time.Time // the directory's modification time behind fpVal
+	fpVal string
+)
+
+// Fingerprint returns a string that moves whenever a session's state moves,
+// appears or goes: every state file's name and state, in name order. A
+// rewrite with the same state leaves it as it was. That is what makes it
+// the sidebar's change signal for states (internal/watch) rather than the
+// directory's modification time, since the hooks write working on every
+// tool call. The files are read again only when the directory's
+// modification time has moved, as every write is a rename into it; in
+// between the last result is returned, so a quiet poll is one stat. A
+// directory that cannot be read reads as empty. A file that cannot be read
+// or parsed is left out, as one gone between the listing and the read.
+func Fingerprint() string {
+	dir := Dir()
+	fpMu.Lock()
+	defer fpMu.Unlock()
+	info, err := os.Stat(dir)
+	if err != nil {
+		fpMod, fpVal = time.Time{}, ""
+		return ""
+	}
+	if !fpMod.IsZero() && info.ModTime().Equal(fpMod) {
+		return fpVal
+	}
+	fpMod, fpVal = info.ModTime(), readStates(dir)
+	return fpVal
+}
+
+// readStates lists dir's state files as name=state lines.
+func readStates(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		var en Entry
+		if json.Unmarshal(data, &en) != nil {
+			continue
+		}
+		b.WriteString(strings.TrimSuffix(name, ".json"))
+		b.WriteByte('=')
+		b.WriteString(en.State)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // Read returns the state string and timestamp for the named session.

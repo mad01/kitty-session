@@ -18,6 +18,36 @@ func TestWriteEntry(t *testing.T) {
 		t.Fatalf("Dir() = %s, want a path under %s", dir, home)
 	}
 
+	t.Run("fingerprint moves with states, not rewrites", func(t *testing.T) {
+		before := Fingerprint()
+		if err := Write("fp-a", "working"); err != nil {
+			t.Fatal(err)
+		}
+		appeared := Fingerprint()
+		if appeared == before {
+			t.Fatal("fingerprint unchanged after a state file appeared")
+		}
+		if err := Write("fp-a", "working"); err != nil {
+			t.Fatal(err)
+		}
+		if got := Fingerprint(); got != appeared {
+			t.Fatalf("fingerprint moved on a rewrite with the same state:\n%q\n%q", appeared, got)
+		}
+		if err := Write("fp-a", "idle"); err != nil {
+			t.Fatal(err)
+		}
+		moved := Fingerprint()
+		if moved == appeared {
+			t.Fatal("fingerprint unchanged after the state moved")
+		}
+		if err := os.Remove(filepath.Join(Dir(), "fp-a.json")); err != nil {
+			t.Fatal(err)
+		}
+		if got := Fingerprint(); got == moved {
+			t.Fatal("fingerprint unchanged after the state file went")
+		}
+	})
+
 	t.Run("round trip with source", func(t *testing.T) {
 		in := Entry{State: "input", AgentID: "agent-7", Tool: "mcp__linear__", Source: SourceScreen}
 		if err := WriteEntry("demo", in); err != nil {

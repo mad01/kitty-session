@@ -238,3 +238,39 @@ func TestFocusedAtRoundTrip(t *testing.T) {
 		t.Errorf("KittySidebarWindowID = %d, want 3", got.KittySidebarWindowID)
 	}
 }
+
+// TestFingerprintMovesWithRecords checks the store's fingerprint moves on a
+// record written, rewritten or removed, and not on the temporary file a
+// write goes through.
+func TestFingerprintMovesWithRecords(t *testing.T) {
+	store := newTestStore(t)
+	before := store.Fingerprint()
+	sess := &Session{Name: "fp", Dir: "/tmp/fp"}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	saved := store.Fingerprint()
+	if saved == before {
+		t.Fatal("fingerprint unchanged after a record was saved")
+	}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	rewritten := store.Fingerprint()
+	if rewritten == saved {
+		t.Fatal("fingerprint unchanged after a record was rewritten")
+	}
+	tmp := filepath.Join(store.dir, ".fp.json.123")
+	if err := os.WriteFile(tmp, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Fingerprint(); got != rewritten {
+		t.Fatalf("fingerprint moved on a temporary file:\n%q\n%q", rewritten, got)
+	}
+	if err := os.Remove(filepath.Join(store.dir, "fp.json")); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Fingerprint(); got == rewritten {
+		t.Fatal("fingerprint unchanged after a record was removed")
+	}
+}

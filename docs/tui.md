@@ -20,9 +20,9 @@ Run by hand, `ks sidebar` needs the instance to be up and exits with `ks instanc
 The frame is `sidebar_width` columns wide (default 36, see [Configuration](configuration.md)) and as tall as the window. Its border is light green while the sidebar window has the keyboard and muted gray otherwise, so the frame tells you which side of the tab has focus. Under the `agents … tab order` header each agent takes two lines:
 
 - A dot for the state, then the name. A session whose agent is not claude carries a badge after the name: `pi` for a pi session, `sh` for a plain shell. The cursor row has a highlight; the row of the tab the sidebar sits in carries a `▌` marker and its own background. The name draws in the accent colour while the row is unread (see [Unread rows](#unread-rows)).
-- Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one. A pi or shell row shows its window's title the same way, or the directory.
+- Under the dot, the tab's number, 1 to 9. It is the N of kitty's `goto_tab N` (`cmd+N` when your kitty.conf maps it that way; kitty binds no `goto_tab` key by itself), and the sidebar's own jump key. It is the tab's position in its kitty OS window, so a tab of your own (`cmd+t`) counts. It is blank on a stopped row, and past 9, which neither key reaches. Then Claude's tab title minus its state glyph (`Plan the merge`), or the session directory with `$HOME` shortened to `~` when Claude has not set one. A pi or shell row shows its window's title the same way, or the directory.
 
-The footer has two labels, `new` and `menu`, and the line above it shows the result of the last action or its error until the next key. The list refreshes every three seconds and after every action; the `working` and `input` dots pulse.
+The footer has two labels, `new` and `menu`, and the line above it shows the result of the last action or its error until the next key. The list refreshes after every action and the moment a record or a state file changes under `~/.config/ks/`: a hook event, a session opened, closed, renamed or moved, an agent that exited. It also refreshes every three seconds, which is when a change only kitty knows about (a title, a program status record, a window gone) is picked up. A state file rewritten with the same state, the hooks' `working` on every tool call, wakes nothing. The `working` and `input` dots pulse.
 
 ## States
 
@@ -69,7 +69,7 @@ Before it writes, the sidebar re-reads the state file and skips the correction w
 
 ### Sort
 
-Rows follow the tab order of the ks instance: the top row is the first tab, which kitty's default macOS keys reach with `cmd+1`, the next is `cmd+2`, and so on. State never moves a row, so the number you see is the number you press, and the sidebar's own `1`-`9` jump keys agree with kitty's. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order `ks move` last left them, then the rest in the order the sessions were created, before adding anything new, so the numbering survives a restart. `ks move <name> <where>` (or `ks move <where>` from inside a session) reorders the tabs; see the [command reference](commands.md#ks-move-name-where). A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
+Rows follow the tab order of the ks instance: the top row is the first tab, the next the second, and so on. The digit under each dot is that number, the N of `goto_tab N` (`cmd+N` when your kitty.conf maps it that way). State never moves a row. The sidebar's own `1`-`9` keys go by the same number, so the number you see is the number you press, with or without a tab of your own in between. Stopped sessions have no tab and sit at the bottom, by name. Bare `ks`, and any command that has to start the instance, opens tabs in the order `ks move` last left them, then the rest in the order the sessions were created, before adding anything new, so the numbering survives a restart. `ks move <name> <where>` (or `ks move <where>` from inside a session) reorders the tabs; see the [command reference](commands.md#ks-move-name-where). A stopped session you reopen gets a fresh tab at the bottom. The cursor stays on the same agent across refreshes.
 
 ## Notifications
 
@@ -95,7 +95,7 @@ Claude Code has a channel of its own: it posts a desktop notification in kitty w
 | Key | Action |
 |---|---|
 | `j` / `↓`, `k` / `↑` | Move the cursor |
-| `1`-`9` | Jump to that row and focus it |
+| `1`-`9` | Jump to the tab with that number, the digit under the dot, and focus it |
 | `enter` | Focus the agent under the cursor; a tab that is gone is recreated |
 | `l`, `tab`, `q` | Hand the keyboard to this tab's claude window |
 | `n` | New agent: the repo picker, then the kind (claude, pi or shell) |
@@ -135,7 +135,7 @@ Both pop a confirmation with the agent's name. `y` or `enter` confirms, `n` or `
 
 ## When the agent exits
 
-A session tab closes on its own once its agent window is gone: claude ended with `/exit`, pi with `/quit`, a shell with `exit`, or the agent crashed or was killed. The tab's sidebar checks its agent window on every refresh, and claude's `/exit` and pi's `/quit` tell it to check at once, so those tabs go within a moment. A crash or a kill waits for the next refresh, up to three seconds. Once it has seen the window and then finds it missing, it closes its own tab. The home tab is recreated first when it was the last session tab. An agent that never shows up within 30 seconds of the sidebar's first refresh (bad flags, a missing binary) closes the tab as well. Another window of the session still in the tab, a shell split for one, holds the tab open until it exits too.
+A session tab closes on its own once its agent window is gone: claude ended with `/exit`, pi with `/quit`, a shell with `exit`, or the agent crashed or was killed. The tab's sidebar checks its agent window on every refresh, and claude's `/exit` and pi's `/quit` tell it to check at once, so those tabs go within a moment. A crash or a kill waits for the next refresh, up to three seconds. Every other sidebar drops the row the moment its record moves. Once it has seen the window and then finds it missing, it closes its own tab. The home tab is recreated first when it was the last session tab. An agent that never shows up within 30 seconds of the sidebar's first refresh (bad flags, a missing binary) closes the tab as well. Another window of the session still in the tab, a shell split for one, holds the tab open until it exits too.
 
 What becomes of the record depends on the kind and on how long the agent ran. A claude or pi agent takes its record along, to `~/.config/ks/sessions/trash/`, the way `d` does. That happens when you told claude to exit (`/exit`, which its hook records), or when the agent had been in the tab for ten seconds before it went: pi's `/quit`, a crash, a kill. The row disappears, the next `ks` leaves it alone, and `u` brings it back when you want the conversation again. The restored row is stopped, and `enter` reopens it; a claude that died mid-task is one `u` away. A shell keeps its record, so the next `ks` opens a fresh shell in that directory; `d` on its row deletes it. An agent gone within ten seconds of coming up, or one that never came up, keeps its record whatever the kind. So a launch that fails on attach (an expired login, a purged transcript, a broken install) is not thrown away (see [Troubleshooting](troubleshooting.md#claude-exits-right-after-ks-or-ks-open)). The home tab's sidebar never closes anything.
 

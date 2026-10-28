@@ -786,13 +786,17 @@ func tabWindows(all []kitty.Window, tabID int) int {
 }
 
 // tabPositions maps each tab id in the snapshot to its 1-based position in
-// kitty's order, which is the N of goto_tab N (cmd+N). Stopped sessions have
-// no tab and get no entry.
+// its OS window, in kitty's order, which is the N of goto_tab N: kitty
+// numbers tabs per OS window, so a tab detached into a second one starts
+// at 1 again. Every tab counts, the home tab and the user's own included.
+// Stopped sessions have no tab and get no entry.
 func tabPositions(all []kitty.Window) map[int]int {
 	pos := map[int]int{}
+	tabs := map[int]int{} // tabs seen so far, per OS window
 	for _, w := range all {
 		if _, seen := pos[w.TabID]; !seen {
-			pos[w.TabID] = len(pos) + 1
+			tabs[w.OSWindowID]++
+			pos[w.TabID] = tabs[w.OSWindowID]
 		}
 	}
 	return pos
