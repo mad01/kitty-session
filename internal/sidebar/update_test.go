@@ -275,7 +275,11 @@ func TestKindChooserMovesAndBacksOutToTheName(t *testing.T) {
 	}
 	m, _ = press(t, m, "-x", "enter")
 	if m.mode != modeKind || m.kindIdx != 2 {
-		t.Fatalf("enter should return to the chooser on shell: mode %v kindIdx %d", m.mode, m.kindIdx)
+		t.Fatalf(
+			"enter should return to the chooser on shell: mode %v kindIdx %d",
+			m.mode,
+			m.kindIdx,
+		)
 	}
 	m, _ = run(t, m, "k", "enter")
 	wantCalls(t, fb, "new:sug-zeta-x:/r/zeta:pi")
@@ -478,6 +482,53 @@ func TestFirstLine(t *testing.T) {
 	for in, want := range tests {
 		if got := firstLine(in); got != want {
 			t.Errorf("firstLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestChangeListsAtOnce checks a change report (Options.Changes) lists
+// again without waiting for the poll, and schedules no tick of its own.
+func TestChangeListsAtOnce(t *testing.T) {
+	fb := &fakeBackend{agents: mockupAgents()}
+	m := newTestModel(t, fb, "kitty-session")
+	fb.agents = append(fb.agents, Agent{Name: "newcomer", State: StateWorking, Tab: 6})
+	next, cmd := m.Update(changeMsg{})
+	m = asModel(t, next)
+	msgs := drain(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("a change produced %d messages, want one List result", len(msgs))
+	}
+	res, ok := msgs[0].(agentsMsg)
+	if !ok {
+		t.Fatalf("a change produced %T, want agentsMsg", msgs[0])
+	}
+	m = update(t, m, res)
+	if m.indexOf("newcomer") < 0 {
+		t.Fatalf("rows after the change: %v, want newcomer listed", names(m.agents))
+	}
+}
+
+// TestForwardSendsAChangePerValue checks Run's bridge from Options.Changes
+// to the program: one changeMsg per value, and an end when the channel
+// closes.
+func TestForwardSendsAChangePerValue(t *testing.T) {
+	ch := make(chan struct{})
+	var got []tea.Msg
+	done := make(chan struct{})
+	go func() {
+		forward(ch, func(msg tea.Msg) { got = append(got, msg) })
+		close(done)
+	}()
+	ch <- struct{}{}
+	ch <- struct{}{}
+	close(ch)
+	<-done
+	if len(got) != 2 {
+		t.Fatalf("forwarded %d messages, want 2", len(got))
+	}
+	for _, msg := range got {
+		if _, ok := msg.(changeMsg); !ok {
+			t.Fatalf("forwarded %T, want changeMsg", msg)
 		}
 	}
 }

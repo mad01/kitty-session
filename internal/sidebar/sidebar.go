@@ -45,6 +45,11 @@ type Options struct {
 	// notification down on its own, builds one with NewSyncOutput and
 	// NewOSCNotifier and passes both.
 	Output *SyncOutput
+	// Changes wakes the list: every value received lists again at once,
+	// the way the host reports a record or a state file written under
+	// ~/.config/ks (internal/watch). Nil leaves the poll on its own. A
+	// closed channel ends the wakes and nothing else.
+	Changes <-chan struct{}
 }
 
 // ErrNoBackend is returned by Run when Options.Backend is nil.
@@ -66,6 +71,7 @@ func New(opts Options) tea.Model {
 // moves between the sidebar and claude; every frame goes out as one
 // synchronized update so that recolour never shows half-painted. The
 // desktop notifications go out through the same terminal, between frames.
+// Each value from Options.Changes becomes a list request to the program.
 func Run(opts Options) error {
 	if opts.Backend == nil {
 		return ErrNoBackend
@@ -84,8 +90,19 @@ func Run(opts Options) error {
 		tea.WithReportFocus(),
 		tea.WithOutput(out),
 	)
+	if opts.Changes != nil {
+		go forward(opts.Changes, p.Send)
+	}
 	_, err := p.Run()
 	return err
+}
+
+// forward turns every value from changes into a changeMsg for the program,
+// through send, until changes closes.
+func forward(changes <-chan struct{}, send func(tea.Msg)) {
+	for range changes {
+		send(changeMsg{})
+	}
 }
 
 // ShortenHome replaces home, when it is dir itself or one of its ancestors,

@@ -29,6 +29,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyDone(msg)
 	case tickMsg:
 		return m, tea.Batch(m.listCmd(), tickCmd())
+	case changeMsg:
+		return m, m.listCmd()
 	case animMsg:
 		m.frame++
 		return m, animCmd()

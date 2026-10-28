@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/mad01/kitty-session/internal/instance"
 	"github.com/mad01/kitty-session/internal/kitty"
@@ -13,6 +15,8 @@ import (
 	"github.com/mad01/kitty-session/internal/repo/config"
 	"github.com/mad01/kitty-session/internal/session"
 	"github.com/mad01/kitty-session/internal/sidebar"
+	"github.com/mad01/kitty-session/internal/state"
+	"github.com/mad01/kitty-session/internal/watch"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +27,12 @@ const (
 	listenOnEnv = "KITTY_LISTEN_ON"
 	windowIDEnv = "KITTY_WINDOW_ID"
 )
+
+// changePoll is how often a sidebar looks at ks's own files for a change
+// (internal/watch over the store's and the state files' fingerprints). A
+// change wakes the list at once; the sidebar's own poll stays at 3 s for
+// what only kitty knows (a title, a program status record, a window gone).
+const changePoll = 200 * time.Millisecond
 
 var (
 	sidebarSession   string
@@ -84,6 +94,8 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 	defer stopClose()
 	stopPoke := onSignal(syscall.SIGUSR2, b.Poke)
 	defer stopPoke()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	return sidebar.Run(sidebar.Options{
 		Session:   ownName,
 		SessionID: ownID,
@@ -92,6 +104,7 @@ func runSidebar(cmd *cobra.Command, args []string) error {
 		Notify:    notify,
 		Notifier:  notifier,
 		Output:    out,
+		Changes:   watch.Changes(ctx, changePoll, store.Fingerprint, state.Fingerprint),
 	})
 }
 

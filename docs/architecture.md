@@ -37,7 +37,8 @@ cmd/ks
 |---|---|
 | `internal/instance` | `Ensure(cfg, opts)` pings the configured socket. When nothing answers it removes the stale socket file, runs `kitty --detach --listen-on <socket> -o ...` with `ks sidebar` as the first window, and polls until the socket answers (100 ms, up to 10 s). `Connect` for commands that must not start it; `Client` for commands that must work while it is down; `Shutdown` closes every window. |
 | `internal/launcher` | `Launcher.Open(Request)`: reject a taken name (`ErrExists`), save the record, build the claude command line (`claude --resume <id>`, `claude --continue`, or a bare `claude` when the directory has no transcript), lay out the tab, write the kitty IDs back. `Close(sess, keep)`, `Rename(old, new)`, `Move(name, where)` (focus the tab, step it with `move_tab_forward`/`move_tab_backward`, refocus, then rank every open session's `position` by the new tab order), `Attach()`, `Alive(sess)`. `SuggestName(dir)` (base name plus git branch) and `ScratchDir(base)`. `SidebarBackend` maps the sidebar's actions onto all of that and resolves each row's state (below). Layout and teardown sit behind a small backend interface so tests run without kitty. |
-| `internal/sidebar` | The agent list: model, view, key and mouse handling, menu, picker, demo backend. `Run(Options{Session, Width, Backend})`. Polls `Backend.List` every 3 s. |
+| `internal/sidebar` | The agent list: model, view, key and mouse handling, menu, picker, demo backend. `Run(Options{Session, Width, Backend, Changes})`. Runs `Backend.List` every 3 s, after each action, and on every value from `Options.Changes`. |
+| `internal/watch` | `Changes(ctx, interval, fingerprints...)`: polls the fingerprint functions and delivers a value when their result moves, at once for a lone change and twice at most for a burst. The sidebar command feeds it `Store.Fingerprint` (record names and mtimes) and `state.Fingerprint` (state file names and states) at 200 ms, so a hook event or a reap reaches every sidebar within about a quarter second instead of at the next poll. Stdlib only. |
 | `internal/hooks` | `Settings(binary, quiet)` builds the inline JSON ks passes to claude as `--settings`: the ks matcher groups for twelve events, each running `<binary> _hook` with a 5 s timeout, plus `preferredNotifChannel` when `quiet` is set. `Uninstall`, `Leftovers` and `Status` deal with entries an older version wrote to `~/.claude/settings.json`; other tools' entries are kept. |
 | `internal/herdr` | `Load(path)` parses herdr's `session.json` (format version 3 only), `Agents()` flattens workspaces, tabs and panes into the claude panes ks can import plus the skipped ones with a reason, `Running(dir)` dials `herdr.sock` to tell whether herdr still owns them. Stdlib only; `ks import` does the wiring. |
 | `internal/procinfo` | `ParentOf(pid)` and `CommOf(pid)` via the darwin `kern.proc.pid` sysctl; `ErrUnsupported` elsewhere. Used by the hook to tell the Claude kitty launched from one nested inside the session. |
@@ -147,7 +148,7 @@ cli.runAttach
 
 ## Flow: detecting a session's state
 
-The sidebar polls `SidebarBackend.List` every 3 seconds. One `store.List()` and one `kitty @ ls` snapshot serve every row; windows are matched to records by the `KS_SESSION_ID` tag, never by stored id alone.
+The sidebar runs `SidebarBackend.List` every 3 seconds, and at once when `internal/watch` reports a record or a state change. One `store.List()` and one `kitty @ ls` snapshot serve every row; windows are matched to records by the `KS_SESSION_ID` tag, never by stored id alone.
 
 ```
 SidebarBackend.List():
